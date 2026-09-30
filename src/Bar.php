@@ -64,10 +64,14 @@ class Bar implements Arrayable
         return $this;
     }
 
-    /** A URL the bar links to when there is no click action (Ctrl/⌘-click always opens it). */
+    /**
+     * A URL the bar links to when there is no click action (Ctrl/⌘-click always opens
+     * it). Only http(s), mailto, tel and relative URLs are kept: a `javascript:` or
+     * `data:` value (a user-editable link column, say) is dropped, never followed.
+     */
     public function url(?string $url): static
     {
-        $this->url = $url;
+        $this->url = static::safeUrl($url);
 
         return $this;
     }
@@ -107,6 +111,21 @@ class Bar implements Arrayable
         }
 
         return $bar;
+    }
+
+    /** The URL if it is safe to follow (no scheme, or http, https, mailto, tel), otherwise null. */
+    public static function safeUrl(?string $url): ?string
+    {
+        $url = trim((string) $url);
+
+        if ($url === '') {
+            return null;
+        }
+
+        // The scheme as a browser would read it: control characters and spaces removed.
+        $scheme = preg_match('/^([a-z][a-z0-9+.\-]*):/i', preg_replace('/[\x00-\x20]+/', '', $url) ?? '', $m) ? strtolower($m[1]) : null;
+
+        return $scheme === null || in_array($scheme, ['http', 'https', 'mailto', 'tel'], true) ? $url : null;
     }
 
     /** Filament colours are palettes (shade => value); the chart draws one tone, the 500 shade. */

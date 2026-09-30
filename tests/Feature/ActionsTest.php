@@ -1,8 +1,12 @@
 <?php
 
 use Carbon\CarbonImmutable;
+use Filament\Actions\CreateAction;
+use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TextInput;
 use Livewire\Livewire;
 use Packstub\Gantt\Gantt;
+use Packstub\Gantt\Tests\Fixtures\Project;
 use Packstub\Gantt\Tests\Fixtures\Task;
 use Packstub\Gantt\Tests\Fixtures\TaskGantt;
 
@@ -90,6 +94,44 @@ it('keeps the dates the user typed over the clicked spot', function () {
         ->assertHasNoErrors();
 
     expect(Task::firstWhere('title', 'Typed')->starts_on->toDateString())->toBe('2026-11-01');
+});
+
+it('never writes a group the chart does not know into the foreign key', function () {
+    Livewire::test(TaskGantt::class)
+        ->assertActionHidden('create', ['ganttStart' => '2026-10-06 00:00', 'ganttGroup' => '424242'])
+        ->call('mountAction', 'create', ['ganttStart' => '2026-10-06 00:00', 'ganttGroup' => '424242']) // what a crafted request would send
+        ->set('mountedActions.0.data.title', 'Crafted')
+        ->call('callMountedAction');
+
+    expect(Task::where('title', 'Crafted')->exists())->toBeFalse();
+});
+
+it('leaves a group field the user cleared alone', function () {
+    $acme = project('Acme');
+
+    $component = new class extends TaskGantt
+    {
+        public function gantt(Gantt $gantt): Gantt
+        {
+            return parent::gantt($gantt)->createAction(CreateAction::make()->schema([
+                TextInput::make('title')->required(),
+                Select::make('project_id')->options(fn () => Project::query()->pluck('name', 'id')->all()),
+            ]));
+        }
+    };
+
+    Livewire::test($component::class)
+        ->mountAction('create', ['ganttStart' => '2026-10-06 00:00', 'ganttGroup' => (string) $acme->id])
+        ->assertSet('mountedActions.0.data.project_id', (string) $acme->id)
+        ->set('mountedActions.0.data.title', 'Loose')
+        ->set('mountedActions.0.data.project_id', null)
+        ->callMountedAction()
+        ->assertHasNoErrors();
+
+    $task = Task::firstWhere('title', 'Loose');
+
+    expect($task->project_id)->toBeNull()
+        ->and($task->starts_on->toDateString())->toBe('2026-10-06'); // the dates the form has no field for
 });
 
 it('refuses to create on a read-only chart', function () {

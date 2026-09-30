@@ -35,6 +35,8 @@ it('hands the browser everything it needs in the config', function () {
     expect($config)->toMatchArray([
         'scale' => 'week',
         'unit' => 'day',
+        'minMinutes' => 1440,
+        'maxMinutes' => 30 * 1440,
         'firstDayOfWeek' => 1,
         'weekendDays' => [6, 7],
         'rowHeight' => 36,

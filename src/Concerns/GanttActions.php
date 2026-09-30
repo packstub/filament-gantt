@@ -35,7 +35,8 @@ trait GanttActions
                 $action->model($gantt->getModel());
             }
 
-            static::ganttChainHidden($action, fn () => ! $gantt->canCreate());
+            // Hidden (so refused) unless the chart may create now, in that group.
+            static::ganttChainHidden($action, fn () => ! $gantt->canCreateIn($action->getArguments()['ganttGroup'] ?? null));
 
             $prefill = fn () => $gantt->prefill(
                 $action->getArguments()['ganttStart'] ?? null,
@@ -59,13 +60,17 @@ trait GanttActions
             });
 
             // …and a form without those fields still creates the record on that spot.
+            // Only the attributes the form does not have at all: a field the user
+            // left empty (a project Select, say) is their answer, not a gap to fill.
             $mutate = static::ganttProperty($action, 'mutateDataUsing');
 
             $action->mutateDataUsing(function (array $data) use ($action, $mutate, $prefill) {
                 $data = $mutate ? $action->evaluate($mutate, ['data' => $data]) : $data;
 
                 foreach ($prefill() as $attribute => $value) {
-                    $data[$attribute] ??= $value;
+                    if (! array_key_exists($attribute, $data)) {
+                        $data[$attribute] = $value;
+                    }
                 }
 
                 return $data;

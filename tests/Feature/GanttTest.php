@@ -4,6 +4,7 @@ use Carbon\CarbonImmutable;
 use Filament\Actions\CreateAction;
 use Filament\Actions\EditAction;
 use Filament\Support\Colors\Color;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Packstub\Gantt\Bar;
 use Packstub\Gantt\Enums\Scale;
@@ -39,7 +40,17 @@ function shifts(): Gantt
 
 beforeEach(fn () => CarbonImmutable::setTestNow('2026-10-14 10:00:00'));
 
-afterEach(fn () => CarbonImmutable::setTestNow());
+afterEach(function () {
+    CarbonImmutable::setTestNow();
+    date_default_timezone_set('UTC');
+});
+
+/** Run the app in another timezone, the way config('app.timezone') does at boot. */
+function inTimezone(string $timezone): void
+{
+    config(['app.timezone' => $timezone]);
+    date_default_timezone_set($timezone);
+}
 
 /* ------------------------------------------------------------------ bars */
 
@@ -53,6 +64,7 @@ it('maps whole-day records to half-open bars, the end day included', function ()
         'group' => '',
         'start' => '2026-10-05 00:00',
         'end' => '2026-10-08 00:00',
+        'allDay' => true,
         'milestone' => false,
         'label' => 'Write docs',
         'progress' => 40,
@@ -61,10 +73,21 @@ it('maps whole-day records to half-open bars, the end day included', function ()
     ])->and($bar)->not->toHaveKey('color');
 });
 
-it('maps datetime records as they are', function () {
+it('maps datetime records as they are, and tells the browser they have times', function () {
     shift('Morning', '2026-10-05 08:00:00', '2026-10-05 12:30:00', ['room' => 'A']);
 
-    expect(shifts()->getBars()[0])->toMatchArray(['start' => '2026-10-05 08:00', 'end' => '2026-10-05 12:30', 'group' => 'A', 'milestone' => false]);
+    expect(shifts()->getBars()[0])->toMatchArray(['start' => '2026-10-05 08:00', 'end' => '2026-10-05 12:30', 'allDay' => false, 'group' => 'A', 'milestone' => false]);
+});
+
+it('reads the dates as wall-clock moments whatever the app\'s timezone', function () {
+    inTimezone('Europe/Bucharest');
+    task('Docs', '2026-10-25', '2026-10-26'); // the day the clocks go back
+    shift('Night', '2026-10-24 22:00:00', '2026-10-25 04:00:00');
+
+    expect(gantt()->getBars()[0])->toMatchArray(['start' => '2026-10-25 00:00', 'end' => '2026-10-27 00:00'])
+        ->and(shifts()->getBars()[0])->toMatchArray(['start' => '2026-10-24 22:00', 'end' => '2026-10-25 04:00'])
+        ->and(gantt()->getWindow()['start']->toDateString())->toBe('2026-10-18')
+        ->and(gantt()->startDate('2026-10-01')->getWindow()['start']->timezoneName)->toBe('UTC');
 });
 
 it('draws a milestone for a null end, or a datetime end equal to the start', function () {
@@ -112,6 +135,21 @@ it('lets bar() shape the bar over the shortcuts', function () {
 
     expect($bar)->toMatchArray(['label' => 'RAW', 'color' => 'rose', 'progress' => 100, 'tooltip' => 'Hi', 'url' => '/tasks/1', 'actions' => ['edit']]);
 });
+
+it('keeps only urls a bar may safely follow', function (string $url, ?string $kept) {
+    expect(Bar::make()->url($url)->toArray()['url'] ?? null)->toBe($kept);
+})->with([
+    'javascript' => ['javascript:alert(1)', null],
+    'javascript, disguised' => [" Java\nScript:alert(1)", null],
+    'data' => ['data:text/html,hi', null],
+    'vbscript' => ['vbscript:x', null],
+    'empty' => ['  ', null],
+    'absolute path' => ['/tasks/1', '/tasks/1'],
+    'relative path' => ['tasks/1?x=1#y', 'tasks/1?x=1#y'],
+    'https' => ['https://example.test/tasks/1', 'https://example.test/tasks/1'],
+    'mailto' => ['mailto:ana@example.test', 'mailto:ana@example.test'],
+    'tel' => ['tel:+40700000000', 'tel:+40700000000'],
+]);
 
 /* ------------------------------------------------------------------ groups */
 
@@ -207,6 +245,22 @@ it('loads only the bars overlapping the window, milestones by their start', func
     expect(array_column($bars, 'label'))->toBe(['Overlaps start', 'Inside', 'Milestone in']);
 });
 
+it('asks for the window with plain ranges on the columns, so their indexes stay in use', function () {
+    shift('Ends as the window opens', '2026-09-30 22:00:00', '2026-10-01 00:00:00');
+    shift('Starts as the window closes', '2026-10-31 23:30:00', '2026-11-01 02:00:00');
+    shift('Starts after', '2026-11-01 00:00:00', '2026-11-01 02:00:00');
+    shift('Ends before', '2026-09-30 08:00:00', '2026-09-30 23:59:00');
+
+    DB::enableQueryLog();
+    $bars = shifts()->getBars(from: CarbonImmutable::parse('2026-10-01'), until: CarbonImmutable::parse('2026-10-31'));
+    $sql = collect(DB::getQueryLog())->pluck('query')->implode(' ');
+    DB::disableQueryLog();
+
+    expect(array_column($bars, 'label'))->toBe(['Ends as the window opens', 'Starts as the window closes'])
+        ->and($sql)->not->toContain('strftime', 'date(')
+        ->and($sql)->toContain('"starts_at" < ?', '"ends_at" >= ?');
+});
+
 /* ------------------------------------------------------------------ filters */
 
 it('applies select and date-range filters and ignores values it did not offer', function () {
@@ -259,17 +313,30 @@ it('resizes either edge of a whole-day bar', function () {
     expect($task->fresh()->starts_on->toDateString())->toBe('2026-10-07');
 });
 
-it('snaps to the unit on the server whatever the browser sent', function () {
+it('snaps the delta to the unit on the server whatever the browser sent, relative to where the bar was', function () {
     $task = task('Build', '2026-10-05', '2026-10-07');
     $shift = shift('Morning', '2026-10-05 08:00:00', '2026-10-05 12:00:00');
 
-    gantt()->move((string) $task->id, '2026-10-06 13:45', '2026-10-09 02:10');
-    shifts()->move((string) $shift->id, '2026-10-05 09:20', '2026-10-05 13:59');
+    gantt()->move((string) $task->id, '2026-10-06 13:45', '2026-10-09 02:10'); // +1.57 days, +1.09 days
+    shifts()->move((string) $shift->id, '2026-10-05 09:20', '2026-10-05 13:59'); // +1.33 h, +1.98 h
 
-    expect($task->fresh()->starts_on->toDateString())->toBe('2026-10-06')
+    expect($task->fresh()->starts_on->toDateString())->toBe('2026-10-07')
         ->and($task->fresh()->ends_on->toDateString())->toBe('2026-10-08')
         ->and($shift->fresh()->starts_at->format('Y-m-d H:i'))->toBe('2026-10-05 09:00')
-        ->and($shift->fresh()->ends_at->format('Y-m-d H:i'))->toBe('2026-10-05 13:00');
+        ->and($shift->fresh()->ends_at->format('Y-m-d H:i'))->toBe('2026-10-05 14:00');
+});
+
+it('moves a datetime record by whole days with the default unit, keeping its time of day', function () {
+    $shift = shift('Morning', '2026-10-05 08:00:00', '2026-10-05 12:00:00');
+    $gantt = Gantt::make()->query(fn () => Shift::query())->start('starts_at')->end('ends_at'); // snapTo(Unit::Day)
+
+    $gantt->move((string) $shift->id, '2026-10-06 08:00', '2026-10-06 12:00'); // what a one-day drag sends
+    expect($shift->fresh()->starts_at->format('Y-m-d H:i'))->toBe('2026-10-06 08:00')
+        ->and($shift->fresh()->ends_at->format('Y-m-d H:i'))->toBe('2026-10-06 12:00');
+
+    $gantt->move((string) $shift->id, '2026-10-07 08:20'); // a stray 20 minutes round away, the duration is kept
+    expect($shift->fresh()->starts_at->format('Y-m-d H:i'))->toBe('2026-10-07 08:00')
+        ->and($shift->fresh()->ends_at->format('Y-m-d H:i'))->toBe('2026-10-07 12:00');
 });
 
 it('moves a milestone and leaves a null end null', function () {
@@ -282,6 +349,71 @@ it('moves a milestone and leaves a null end null', function () {
     expect($task->fresh()->starts_on->toDateString())->toBe('2026-10-22')
         ->and($task->fresh()->ends_on)->toBeNull()
         ->and($shift->fresh()->ends_at->format('Y-m-d H:i'))->toBe('2026-10-06 10:00');
+});
+
+it('shifts the real end of a milestone flagged by milestone() along with its start', function () {
+    $task = task('Deadline', '2026-10-06', '2026-10-09', ['status' => 'milestone']);
+    $gantt = gantt()->milestone(fn (Task $t) => $t->status === 'milestone');
+
+    $bar = $gantt->move((string) $task->id, '2026-10-08 00:00');
+
+    expect($task->fresh()->starts_on->toDateString())->toBe('2026-10-08')
+        ->and($task->fresh()->ends_on->toDateString())->toBe('2026-10-11')
+        ->and($bar)->toMatchArray(['milestone' => true, 'start' => '2026-10-08 00:00', 'end' => '2026-10-08 00:00']);
+
+    $gantt->move((string) $task->id, '2026-10-01 00:00');
+    expect($task->fresh()->ends_on->toDateString())->toBe('2026-10-04');
+});
+
+it('keeps whole days whole across a daylight-saving change', function (string $timezone, string $from, string $until, string $to, string $stored) {
+    inTimezone($timezone);
+    Event::fake([BarMoved::class]);
+    $task = task('Move me', $from, $until);
+    $gantt = gantt()->resizable(false);
+
+    // a plain move, with the end the browser computed and without it
+    $gantt->move((string) $task->id, "{$to} 00:00", CarbonImmutable::parse($to, 'UTC')->addDays(3)->format('Y-m-d H:i'));
+    expect($task->fresh()->starts_on->toDateString())->toBe($to)
+        ->and($task->fresh()->ends_on->toDateString())->toBe($stored);
+    Event::assertDispatched(BarMoved::class, fn (BarMoved $e) => ! $e->isResize() && $e->start->timezoneName === 'UTC');
+
+    $task->update(['starts_on' => $from, 'ends_on' => $until]);
+    $gantt->move((string) $task->id, "{$to} 00:00");
+    expect($task->fresh()->ends_on->toDateString())->toBe($stored);
+
+    // a datetime record keeps its wall-clock hours too
+    $shift = shift('Night', "{$from} 22:00:00", CarbonImmutable::parse($from, 'UTC')->addDay()->format('Y-m-d').' 04:00:00');
+    shifts()->snapTo(Unit::Day)->move((string) $shift->id, "{$to} 22:00");
+    expect($shift->fresh()->starts_at->format('Y-m-d H:i'))->toBe("{$to} 22:00")
+        ->and($shift->fresh()->ends_at->format('Y-m-d H:i'))->toBe(CarbonImmutable::parse($to, 'UTC')->addDay()->format('Y-m-d').' 04:00');
+})->with([
+    'Europe/Bucharest, clocks back on 2026-10-25' => ['Europe/Bucharest', '2026-10-21', '2026-10-23', '2026-10-24', '2026-10-26'],
+    'America/New_York, clocks back on 2026-11-01' => ['America/New_York', '2026-10-28', '2026-10-30', '2026-10-31', '2026-11-02'],
+    'Europe/Bucharest, clocks forward on 2026-03-29' => ['Europe/Bucharest', '2026-03-25', '2026-03-27', '2026-03-28', '2026-03-30'],
+]);
+
+it('refuses to relocate a bar that cannot move by dragging both its edges', function () {
+    $task = task('Fixed', '2026-10-05', '2026-10-07');
+    $gantt = gantt()->movable(false)->resizable(true);
+
+    expect(fn () => $gantt->move((string) $task->id, '2026-10-20 00:00', '2026-10-24 00:00'))->toThrow(MoveRejected::class, 'cannot be moved')
+        ->and($task->fresh()->starts_on->toDateString())->toBe('2026-10-05');
+
+    // one edge at a time is a resize, and allowed
+    $gantt->move((string) $task->id, '2026-10-05 00:00', '2026-10-10 00:00');
+    $gantt->move((string) $task->id, '2026-10-06 00:00', '2026-10-10 00:00');
+    expect($task->fresh()->starts_on->toDateString())->toBe('2026-10-06')
+        ->and($task->fresh()->ends_on->toDateString())->toBe('2026-10-09');
+
+    // both edges with the duration kept is a move: refused here, allowed when movable
+    expect(fn () => $gantt->move((string) $task->id, '2026-10-07 00:00', '2026-10-11 00:00'))->toThrow(MoveRejected::class, 'cannot be moved');
+    gantt()->resizable(false)->move((string) $task->id, '2026-10-07 00:00', '2026-10-11 00:00');
+    expect($task->fresh()->starts_on->toDateString())->toBe('2026-10-07');
+
+    // both edges and another length needs both rights
+    expect(fn () => gantt()->resizable(false)->move((string) $task->id, '2026-10-08 00:00', '2026-10-13 00:00'))->toThrow(MoveRejected::class, 'cannot be resized');
+    gantt()->move((string) $task->id, '2026-10-08 00:00', '2026-10-13 00:00');
+    expect($task->fresh()->ends_on->toDateString())->toBe('2026-10-12');
 });
 
 it('refuses what the rules do not allow, whatever the browser sent', function (Closure $define, string $start, ?string $end, string $message) {
@@ -394,9 +526,37 @@ it('registers a bar action from a name, an instance or a class', function () {
         ->and(gantt()->canCreate())->toBeFalse();
 });
 
-it('prefills a create form with the clicked spot', function () {
-    expect(gantt()->prefill('2026-10-06 00:00', '2026-10-09 00:00', '3'))->toBe(['starts_on' => '2026-10-06', 'ends_on' => '2026-10-08', 'project_id' => '3'])
-        ->and(gantt()->prefill('2026-10-06 00:00', null, null))->toBe(['starts_on' => '2026-10-06', 'ends_on' => '2026-10-06'])
-        ->and(shifts()->prefill('2026-10-06 09:00', '2026-10-06 11:00', 'A'))->toBe(['starts_at' => '2026-10-06 09:00:00', 'ends_at' => '2026-10-06 11:00:00', 'room' => 'A'])
-        ->and(gantt()->prefill('nope', null, null))->toBe([]);
+it('prefills a create form with the clicked spot, the group only when the chart knows it', function () {
+    $acme = project('Acme');
+    shift('Taken', '2026-10-05 08:00:00', '2026-10-05 12:00:00', ['room' => 'A']);
+    $gantt = gantt()->createAction(CreateAction::make());
+    $rooms = shifts()->createAction(CreateAction::make());
+
+    expect($gantt->prefill('2026-10-06 00:00', '2026-10-09 00:00', (string) $acme->id))->toBe(['starts_on' => '2026-10-06', 'ends_on' => '2026-10-08', 'project_id' => (string) $acme->id])
+        ->and($gantt->prefill('2026-10-06 00:00', '2026-10-09 00:00', '424242'))->toBe(['starts_on' => '2026-10-06', 'ends_on' => '2026-10-08'])
+        ->and($gantt->prefill('2026-10-06 00:00', null, null))->toBe(['starts_on' => '2026-10-06', 'ends_on' => '2026-10-06'])
+        ->and($rooms->prefill('2026-10-06 09:00', '2026-10-06 11:00', 'A'))->toBe(['starts_at' => '2026-10-06 09:00:00', 'ends_at' => '2026-10-06 11:00:00', 'room' => 'A'])
+        ->and($rooms->prefill('2026-10-06 09:00', '2026-10-06 11:00', 'Z'))->toBe(['starts_at' => '2026-10-06 09:00:00', 'ends_at' => '2026-10-06 11:00:00'])
+        ->and($gantt->prefill('nope', null, null))->toBe([]);
+});
+
+it('knows which groups a click may create in', function () {
+    $acme = project('Acme');
+    $beta = project('Beta');
+    task('Stray', '2026-10-05', '2026-10-06', ['project_id' => 99]);
+    $gantt = gantt()->createAction(CreateAction::make());
+
+    expect($gantt->canCreateIn(null))->toBeTrue()
+        ->and($gantt->canCreateIn(''))->toBeTrue()
+        ->and($gantt->canCreateIn((string) $acme->id))->toBeTrue() // a related record that exists
+        ->and($gantt->canCreateIn('99'))->toBeTrue() // a group a bar of the chart is in
+        ->and($gantt->canCreateIn('424242'))->toBeFalse()
+        ->and($gantt->canCreateIn(['x']))->toBeFalse()
+        ->and($gantt->groups([Group::make('planned')])->groupBy(null)->canCreateIn('planned'))->toBeTrue()
+        ->and($gantt->groupBy('project')->groups(null)->readOnly()->canCreateIn((string) $acme->id))->toBeFalse()
+        ->and(gantt()->canCreateIn((string) $acme->id))->toBeFalse() // no create action
+        ->and(gantt()->createAction(CreateAction::make())->creatableIn(fn (string $group) => $group === (string) $beta->id)->canCreateIn((string) $acme->id))->toBeFalse()
+        ->and(gantt()->createAction(CreateAction::make())->creatableIn(fn (string $group) => $group === (string) $beta->id)->canCreateIn((string) $beta->id))->toBeTrue()
+        ->and(gantt()->createAction(CreateAction::make())->groupBy('status')->canCreateIn('todo'))->toBeTrue() // the stray task's status
+        ->and(gantt()->createAction(CreateAction::make())->groupBy('status')->canCreateIn('done'))->toBeFalse();
 });

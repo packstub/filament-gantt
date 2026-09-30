@@ -29,6 +29,13 @@ use Packstub\Gantt\Exceptions\MoveRejected;
  * end is the 8th at 00:00; the record is written back the same way. A datetime
  * record's end is used as is. A milestone (null end, or a datetime end equal to
  * its start) has start == end.
+ *
+ * Time zones: the chart is naive. Every moment it handles (a record's dates, what
+ * the browser sends, lockedBefore(), the window) is read as a wall-clock time and
+ * tagged UTC, so a duration is the same number of minutes on both sides of a
+ * daylight-saving change and a whole day is always 1440 minutes. The closures
+ * (canMove(), moveUsing(), afterMove()) and BarMoved receive those UTC-tagged
+ * moments; format them, or compare them, do not convert them.
  */
 class Gantt
 {
@@ -101,6 +108,8 @@ class Gantt
     protected ?string $barAction = null;
 
     protected ?Action $createAction = null;
+
+    protected ?Closure $creatableIn = null;
 
     /** @var list<string> */
     protected array $refreshOn = [];
@@ -278,7 +287,7 @@ class Gantt
     /** The first day shown. Default: a week before the earliest bar. */
     public function startDate(CarbonInterface|string|null $date): static
     {
-        $this->windowStart = $date === null ? null : CarbonImmutable::parse($date)->startOfDay();
+        $this->windowStart = $this->toCarbon($date)?->startOfDay();
 
         return $this;
     }
@@ -286,7 +295,7 @@ class Gantt
     /** The last day shown. Default: two weeks after the latest bar. */
     public function endDate(CarbonInterface|string|null $date): static
     {
-        $this->windowEnd = $date === null ? null : CarbonImmutable::parse($date)->startOfDay();
+        $this->windowEnd = $this->toCarbon($date)?->startOfDay();
 
         return $this;
     }
@@ -429,6 +438,21 @@ class Gantt
     }
 
     /**
+     * Which groups a click may create in: `fn (string $group): bool`. By default a
+     * group the chart knows: one listed in groups(), one a bar of the chart is in,
+     * or (for a `BelongsTo` group) a related record that exists. The group is
+     * written to the new record only when this says yes; a form field for the
+     * foreign key (`Select::make('project_id')->relationship(...)`) stays the place
+     * to scope it to the tenant.
+     */
+    public function creatableIn(?Closure $callback): static
+    {
+        $this->creatableIn = $callback;
+
+        return $this;
+    }
+
+    /**
      * Livewire events after which the chart reloads its bars (`$this->dispatch('task-updated')`
      * anywhere on the page).
      *
@@ -556,7 +580,7 @@ class Gantt
     {
         $moment = $this->lockedBefore instanceof Closure ? app()->call($this->lockedBefore) : $this->lockedBefore;
 
-        return $moment === null ? null : CarbonImmutable::instance(Date::parse($moment));
+        return $moment === null ? null : CarbonImmutable::instance(Date::parse($moment))->shiftTimezone('UTC');
     }
 
     /** @return list<Filter> */
@@ -585,6 +609,34 @@ class Gantt
     public function canCreate(): bool
     {
         return $this->createAction !== null && ! $this->isReadOnly();
+    }
+
+    /**
+     * Whether a new bar may be created in a group now (null or '' is the ungrouped
+     * row). Checked on the server whatever the browser sent: an unknown key never
+     * reaches the record.
+     */
+    public function canCreateIn(mixed $group): bool
+    {
+        if (! $this->canCreate()) {
+            return false;
+        }
+
+        if ($group === null || $group === '') {
+            return true;
+        }
+
+        if (! is_string($group) && ! is_int($group)) {
+            return false;
+        }
+
+        $group = (string) $group;
+
+        if ($this->creatableIn) {
+            return (bool) ($this->creatableIn)($group);
+        }
+
+        return $this->knowsGroup($group);
     }
 
     /** @return list<string> */
@@ -631,8 +683,8 @@ class Gantt
      */
     public function getWindow(?string $from = null, ?string $until = null): array
     {
-        $start = Filter::date($from) ? CarbonImmutable::parse($from)->startOfDay() : $this->windowStart;
-        $end = Filter::date($until) ? CarbonImmutable::parse($until)->startOfDay() : $this->windowEnd;
+        $start = Filter::date($from) ? CarbonImmutable::parse($from, 'UTC')->startOfDay() : $this->windowStart;
+        $end = Filter::date($until) ? CarbonImmutable::parse($until, 'UTC')->startOfDay() : $this->windowEnd;
 
         if ($start === null || $end === null) {
             [$min, $max] = $this->span();
@@ -691,13 +743,17 @@ class Gantt
         $query->whereNotNull($start);
 
         if ($from !== null && $until !== null) {
-            // Overlapping the window: starts on or before its last day, and ends on or
-            // after its first day (a milestone has no end: its start decides).
+            // Overlapping the window: starts before the day after its last day, and
+            // ends on or after its first day (a milestone has no end: its start
+            // decides). Plain ranges, never DATE(column): the columns' indexes stay in use.
+            $first = $from->toDateString();
+            $after = $until->toImmutable()->addDay()->toDateString();
+
             $query
-                ->whereDate($start, '<=', $until->toDateString())
+                ->where($start, '<', $after)
                 ->where(fn (Builder $q) => $q
-                    ->whereDate($end, '>=', $from->toDateString())
-                    ->orWhere(fn (Builder $m) => $m->whereNull($end)->whereDate($start, '>=', $from->toDateString())));
+                    ->where($end, '>=', $first)
+                    ->orWhere(fn (Builder $m) => $m->whereNull($end)->where($start, '>=', $first)));
         }
 
         [$column, $direction] = $this->sort ?? [$this->startAttribute, 'asc'];
@@ -777,6 +833,7 @@ class Gantt
             'group' => $group ?? '',
             'start' => $start->format('Y-m-d H:i'),
             'end' => $end->format('Y-m-d H:i'),
+            'allDay' => $this->isDateOnly($record),
             'milestone' => $milestone,
             'movable' => $this->isMovable($record),
             'resizable' => ! $milestone && $this->isResizable($record),
@@ -808,23 +865,33 @@ class Gantt
         [$previousStart, $previousEnd, $milestone] = $this->span($record)
             ?? throw new MoveRejected(__('packstub-gantt::gantt.missing'));
 
-        $newStart = $this->unit->snap($this->parse($start));
+        // Snapped relative to where the bar was, the way the browser drags: the time
+        // of day is kept and the delta is rounded to whole units.
+        $previousMinutes = $this->minutes($previousStart, $previousEnd);
+        $newStart = $this->unit->snapFrom($this->parse($start), $previousStart);
         $newEnd = $milestone
             ? $newStart
-            : ($end === null ? $newStart->addMinutes($previousStart->diffInMinutes($previousEnd)) : $this->unit->snap($this->parse($end)));
+            : ($end === null ? $newStart->addMinutes($previousMinutes) : $this->unit->snapFrom($this->parse($end), $previousEnd));
 
         if ($newStart->equalTo($previousStart) && $newEnd->equalTo($previousEnd)) {
             return $this->presentBar($record);
         }
 
-        $previousMinutes = $previousStart->diffInMinutes($previousEnd);
-        $minutes = $newStart->diffInMinutes($newEnd);
+        $minutes = $this->minutes($newStart, $newEnd);
+        $startChanged = ! $newStart->equalTo($previousStart);
+        $endChanged = ! $newEnd->equalTo($previousEnd);
 
-        if ($milestone || $minutes === $previousMinutes) {
+        // Classified by the edges, not by the duration alone: a bar that changed its
+        // length and both its edges was moved as well as resized, and needs both rights.
+        if ($minutes === $previousMinutes) {
             if (! $this->isMovable($record)) {
                 throw new MoveRejected(__('packstub-gantt::gantt.not_movable'));
             }
         } else {
+            if ($startChanged && $endChanged && ! $this->isMovable($record)) {
+                throw new MoveRejected(__('packstub-gantt::gantt.not_movable'));
+            }
+
             if (! $this->isResizable($record)) {
                 throw new MoveRejected(__('packstub-gantt::gantt.not_resizable'));
             }
@@ -839,9 +906,6 @@ class Gantt
         }
 
         if ($lock = $this->getLockedBefore()) {
-            $startChanged = ! $newStart->equalTo($previousStart);
-            $endChanged = ! $newEnd->equalTo($previousEnd);
-
             if (($startChanged && ($newStart < $lock || $previousStart < $lock)) || ($endChanged && $newEnd < $lock)) {
                 throw new MoveRejected(__('packstub-gantt::gantt.locked', ['date' => $lock->translatedFormat(config('filament-gantt.date_format', 'M j, Y'))]));
             }
@@ -863,7 +927,7 @@ class Gantt
             if ($this->moveUsing) {
                 ($this->moveUsing)($record, $newStart, $newEnd, $previousStart, $previousEnd);
             } else {
-                $this->store($record, $newStart, $newEnd, $milestone);
+                $this->store($record, $newStart, $newEnd, $milestone, $previousStart);
             }
         } catch (MoveRejected $e) {
             throw $e;
@@ -907,7 +971,9 @@ class Gantt
             // A garbled date from the browser: the form simply opens empty.
         }
 
-        if ($group !== null && $group !== '' && ($attribute = $this->getGroupForeignKey())) {
+        // The group only when the chart knows it (see canCreateIn()): a crafted key
+        // never lands in a foreign key.
+        if ($group !== null && $group !== '' && ($attribute = $this->getGroupForeignKey()) && $this->canCreateIn($group)) {
             $data[$attribute] = $group;
         }
 
@@ -1004,22 +1070,63 @@ class Gantt
         return is_string($raw) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $raw) === 1;
     }
 
-    protected function store(Model $record, CarbonImmutable $start, CarbonImmutable $end, bool $milestone): void
+    protected function store(Model $record, CarbonImmutable $start, CarbonImmutable $end, bool $milestone, CarbonImmutable $previousStart): void
     {
         $dateOnly = $this->isDateOnly($record);
         $format = fn (CarbonImmutable $moment) => $dateOnly ? $moment->toDateString() : $moment->format('Y-m-d H:i:s');
 
         $record->setAttribute($this->startAttribute, $format($start));
 
-        if ($milestone) {
-            if ($record->getAttribute($this->endAttribute) !== null) {
-                $record->setAttribute($this->endAttribute, $format($start));
-            }
-        } else {
+        if (! $milestone) {
             $record->setAttribute($this->endAttribute, $format($dateOnly ? $end->subDay() : $end));
+        } elseif (($rawEnd = $this->toCarbon($record->getAttribute($this->endAttribute))) !== null) {
+            // A milestone by the default rule had an end equal to its start: keep it so.
+            // One flagged by milestone() keeps its real end, shifted along with the start.
+            $record->setAttribute($this->endAttribute, $this->milestone === null
+                ? $format($start)
+                : $format($rawEnd->addMinutes($this->minutes($previousStart, $start))));
         }
 
         $record->save();
+    }
+
+    /** Wall-clock minutes from one moment to another (negative when going back). */
+    protected function minutes(CarbonImmutable $from, CarbonImmutable $until): int
+    {
+        return (int) round($from->diffInMinutes($until, false));
+    }
+
+    /** Whether a group key is one the chart knows (see canCreateIn()). */
+    protected function knowsGroup(string $group): bool
+    {
+        if ($this->groupAttribute === null && $this->groups === null) {
+            return false;
+        }
+
+        foreach ($this->definedGroups() as $defined) {
+            if ($defined->getKey() === $group) {
+                return true;
+            }
+        }
+
+        if ($this->groupAttribute === null) {
+            return false;
+        }
+
+        $model = $this->newModel();
+
+        if (! $model->isRelation($this->groupAttribute)) {
+            return $this->baseQuery()->where($this->groupAttribute, $group)->exists();
+        }
+
+        $relation = $model->{$this->groupAttribute}();
+
+        if (! $relation instanceof BelongsTo) {
+            return false;
+        }
+
+        return $this->baseQuery()->where($relation->getQualifiedForeignKeyName(), $group)->exists()
+            || $relation->getRelated()->newQuery()->whereKey($group)->exists();
     }
 
     /**
@@ -1038,7 +1145,7 @@ class Gantt
         $min = $this->toCarbon($row->gantt_min ?? null)?->startOfDay();
         $max = collect([$this->toCarbon($row->gantt_max ?? null), $this->toCarbon($row->gantt_max_start ?? null)])->filter()->max()?->startOfDay();
 
-        $today = CarbonImmutable::today();
+        $today = CarbonImmutable::today()->shiftTimezone('UTC');
 
         return [$min ?? $today, $max ?? $min ?? $today];
     }
@@ -1114,6 +1221,7 @@ class Gantt
         return $value instanceof Closure ? $value($record) : $value;
     }
 
+    /** A record's value (or anything Carbon reads) as a wall-clock moment tagged UTC; null when unreadable. */
     protected function toCarbon(mixed $value): ?CarbonImmutable
     {
         if ($value === null || $value === '') {
@@ -1121,16 +1229,19 @@ class Gantt
         }
 
         try {
-            return $value instanceof CarbonInterface ? CarbonImmutable::instance($value) : CarbonImmutable::parse($value);
+            return $value instanceof CarbonInterface
+                ? CarbonImmutable::instance($value)->shiftTimezone('UTC')
+                : CarbonImmutable::parse($value, 'UTC');
         } catch (\Throwable) {
             return null;
         }
     }
 
+    /** What the browser sent ("Y-m-d H:i", or anything Carbon reads) as a wall-clock moment tagged UTC. */
     protected function parse(string $value): CarbonImmutable
     {
         try {
-            return CarbonImmutable::parse(trim($value));
+            return CarbonImmutable::parse(trim($value), 'UTC');
         } catch (\Throwable) {
             throw new MoveRejected(__('packstub-gantt::gantt.failed'));
         }

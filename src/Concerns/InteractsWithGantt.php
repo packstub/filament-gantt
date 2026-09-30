@@ -92,6 +92,8 @@ trait InteractsWithGantt
             'compact' => $gantt->isCompact(),
             'scale' => $gantt->getScale()->value,
             'unit' => $gantt->getUnit()->value,
+            'minMinutes' => $gantt->getMinMinutes(),
+            'maxMinutes' => $gantt->getMaxMinutes(),
             'firstDayOfWeek' => $gantt->getFirstDayOfWeek(),
             'weekendDays' => array_values(array_map('intval', (array) config('filament-gantt.weekend_days', [6, 7]))),
             'rowHeight' => max(24, (int) config('filament-gantt.row_height', 36)),
