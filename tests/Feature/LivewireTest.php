@@ -1,11 +1,17 @@
 <?php
 
 use Carbon\CarbonImmutable;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Exceptions;
 use Livewire\Livewire;
 use Packstub\Gantt\Events\BarMoved;
+use Packstub\Gantt\Exceptions\MoveRejected;
+use Packstub\Gantt\Gantt;
 use Packstub\Gantt\Tests\Fixtures\PlainGantt;
+use Packstub\Gantt\Tests\Fixtures\TabbedGantt;
+use Packstub\Gantt\Tests\Fixtures\Task;
 use Packstub\Gantt\Tests\Fixtures\TaskGantt;
 
 beforeEach(function () {
@@ -49,6 +55,32 @@ it('queries and serialises the bars on the first render only: a re-render carrie
         ->and($component->instance()->ganttRendered)->toBeTrue()
         ->and($component->instance()->getGanttConfig())->toMatchArray(['bars' => [], 'groups' => [], 'readOnly' => false])
         ->and($component->instance()->getGanttConfig(withState: true)['bars'][0]['label'])->toBe('Final docs');
+});
+
+it('renders the bars on the first render that includes the chart, not the first render of the component', function () {
+    task('Tab bar', '2026-10-05', '2026-10-07');
+
+    $component = Livewire::test(TabbedGantt::class)
+        ->assertSee('The list')
+        ->assertDontSeeHtml('x-data="packstubGantt(');
+
+    expect($component->instance()->ganttRendered)->toBeFalse();
+
+    // @js() writes every quote of the JSON as a unicode escape.
+    $json = fn (string $fragment) => str_replace('"', chr(92).'u0022', $fragment);
+
+    $component->set('tab', 'timeline')
+        ->assertSeeHtml('x-data="packstubGantt(')
+        ->assertSeeHtml($json('"window":{"start":"2026-09-28"'))
+        ->assertSee('Tab bar');
+
+    expect($component->instance()->ganttRendered)->toBeTrue();
+
+    // From then on a re-render carries no state, as on any chart.
+    $component->call('$refresh')
+        ->assertSeeHtml('x-data="packstubGantt(')
+        ->assertSeeHtml($json('"window":{"start":null'))
+        ->assertDontSee('Tab bar');
 });
 
 it('hands the browser everything it needs in the config', function () {
@@ -106,6 +138,36 @@ it('answers a refused move with the reason instead of an error', function () {
     Livewire::test(TaskGantt::class)
         ->call('ganttMove', (string) $task->id, '2026-10-12 00:00')
         ->assertReturned(fn ($result) => $result['ok'] === false && str_contains($result['message'], 'cannot be moved'));
+
+    expect($task->fresh()->starts_on->toDateString())->toBe('2026-10-05')
+        ->and(TaskGantt::$moved)->toBe([]);
+});
+
+it('keeps an exception thrown while saving out of the notification: reported, answered with a generic message', function () {
+    Exceptions::fake();
+    $task = task('Build', '2026-10-05', '2026-10-07');
+
+    $component = new class extends TaskGantt
+    {
+        public function gantt(Gantt $gantt): Gantt
+        {
+            return parent::gantt($gantt)->moveUsing(function (Task $task, CarbonImmutable $start) {
+                throw_if($start->isWeekend(), new MoveRejected('Not on a weekend.'));
+
+                // What a database refusal (an exclusion constraint, a strict-mode date) looks like.
+                throw new QueryException('sqlite', 'update "tasks" set "starts_on" = ? where "id" = ?', [$start->toDateString(), $task->id], new RuntimeException('constraint failed'));
+            });
+        }
+    };
+
+    Livewire::test($component::class)
+        ->call('ganttMove', (string) $task->id, '2026-10-12 00:00')
+        ->assertReturned(['ok' => false, 'message' => 'The change did not go through.'])
+        ->call('ganttMove', (string) $task->id, '2026-10-10 00:00')
+        ->assertReturned(['ok' => false, 'message' => 'Not on a weekend.']);
+
+    Exceptions::assertReported(fn (QueryException $e) => str_contains($e->getMessage(), 'update "tasks"'));
+    Exceptions::assertReportedCount(1);
 
     expect($task->fresh()->starts_on->toDateString())->toBe('2026-10-05')
         ->and(TaskGantt::$moved)->toBe([]);

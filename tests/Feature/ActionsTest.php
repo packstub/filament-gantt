@@ -4,8 +4,10 @@ use Carbon\CarbonImmutable;
 use Filament\Actions\CreateAction;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
+use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
 use Packstub\Gantt\Gantt;
+use Packstub\Gantt\Group;
 use Packstub\Gantt\Tests\Fixtures\Project;
 use Packstub\Gantt\Tests\Fixtures\Task;
 use Packstub\Gantt\Tests\Fixtures\TaskGantt;
@@ -63,6 +65,51 @@ it('never runs a bar action on a record outside the chart', function () {
         ->assertNotDispatched('packstub-gantt-refresh');
 
     expect($task->fresh()->progress)->toBe(0);
+});
+
+it('treats an argument that is not a string, from a crafted request, as absent', function () {
+    $task = task('A', '2026-10-05', '2026-10-07');
+
+    Livewire::test(TaskGantt::class)
+        ->mountAction('create', ['ganttStart' => ['x'], 'ganttEnd' => ['y'], 'ganttGroup' => ['1']])
+        ->assertSet('mountedActions.0.data.starts_on', null)
+        ->assertSet('mountedActions.0.data.ends_on', null);
+
+    Livewire::test(TaskGantt::class)
+        ->assertActionHidden('bump', ['ganttRecord' => [(string) $task->id]])
+        ->assertActionHidden('bump', ['ganttRecord' => (int) $task->id])
+        ->assertActionVisible('bump', ['ganttRecord' => (string) $task->id]);
+});
+
+it('runs a listed groups() closure once per request, whatever a create from a click asks', function () {
+    $acme = project('Acme');
+    task('A', '2026-10-01', '2026-10-02', ['project_id' => $acme->id]);
+
+    $component = new class extends TaskGantt
+    {
+        public function gantt(Gantt $gantt): Gantt
+        {
+            return parent::gantt($gantt)->groups(fn () => Group::fromModels(Project::query()->get()));
+        }
+    };
+
+    // The closure's own query, not the eager load of the bars' projects.
+    $projects = fn () => collect(DB::getQueryLog())->pluck('query')->filter(fn (string $sql) => $sql === 'select * from "projects"')->count();
+
+    DB::enableQueryLog();
+    $test = Livewire::test($component::class);
+    expect($projects())->toBe(1);
+
+    DB::flushQueryLog();
+    $test->mountAction('create', ['ganttStart' => '2026-10-06 00:00', 'ganttEnd' => '2026-10-09 00:00', 'ganttGroup' => (string) $acme->id]);
+    expect($projects())->toBe(1);
+
+    DB::flushQueryLog();
+    $test->set('mountedActions.0.data.title', 'Once')->callMountedAction()->assertHasNoErrors();
+    expect($projects())->toBe(1);
+    DB::disableQueryLog();
+
+    expect(Task::firstWhere('title', 'Once')->project_id)->toBe($acme->id);
 });
 
 it('opens the create form with the clicked spot filled in', function () {

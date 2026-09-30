@@ -424,6 +424,24 @@ it('keeps whole days whole across a daylight-saving change', function (string $t
     'Europe/Bucharest, clocks forward on 2026-03-29' => ['Europe/Bucharest', '2026-03-25', '2026-03-27', '2026-03-28', '2026-03-30'],
 ]);
 
+it('saves a move into the hour a spring-forward change skips an hour later, whichever path writes it', function () {
+    inTimezone('Europe/Bucharest'); // 2026-03-29 03:00 becomes 04:00
+    $default = shift('Default', '2026-03-28 03:30:00', '2026-03-28 11:30:00');
+    $custom = shift('Custom', '2026-03-28 03:30:00', '2026-03-28 11:30:00');
+    $seen = null;
+
+    shifts()->snapTo(Unit::Day)->move((string) $default->id, '2026-03-29 03:30');
+    shifts()->snapTo(Unit::Day)->moveUsing(function (Shift $shift, CarbonImmutable $start, CarbonImmutable $end) use (&$seen) {
+        $seen = $start->format('Y-m-d H:i');
+        $shift->update(['starts_at' => $start, 'ends_at' => $end]);
+    })->move((string) $custom->id, '2026-03-29 03:30');
+
+    // The closure's copy has no valid 03:30 in that zone, and neither has the column: Eloquent resolves both forward.
+    expect($seen)->toBe('2026-03-29 04:30')
+        ->and(DB::table('shifts')->where('id', $default->id)->value('starts_at'))->toBe('2026-03-29 04:30:00')
+        ->and(DB::table('shifts')->where('id', $custom->id)->value('starts_at'))->toBe('2026-03-29 04:30:00');
+});
+
 it('hands the closures and the event the moments in the app\'s timezone, so a comparison with now() holds', function () {
     inTimezone('Europe/Bucharest');
     CarbonImmutable::setTestNow('2026-10-14 10:00:00'); // 10:00 on the wall clock
@@ -503,6 +521,42 @@ it('refuses what the rules do not allow, whatever the browser sent', function (C
     'garbled date' => [fn (Gantt $g) => $g, 'not a date', null, 'did not go through'],
 ]);
 
+it('reads only the dates the chart sends: a real calendar date in a four-digit year, with a time or without', function (string $start, ?string $end) {
+    $task = task('Build', '2026-10-05', '2026-10-07');
+
+    expect(fn () => gantt()->move((string) $task->id, $start, $end))->toThrow(MoveRejected::class, 'did not go through')
+        ->and($task->fresh()->starts_on->toDateString())->toBe('2026-10-05')
+        ->and(gantt()->createAction(CreateAction::make())->prefill($start, $end))->toBe([]);
+})->with([
+    'the zero date' => ['0000-00-00 00:00', null],
+    'a year below 1000' => ['0999-10-06 00:00', null],
+    'a day that does not exist' => ['2026-02-30 00:00', null],
+    'an hour that does not exist' => ['2026-10-06 24:00', null],
+    'a minute that does not exist' => ['2026-10-06 10:60', null],
+    'a two-digit year' => ['26-10-06 00:00', null],
+    'a timestamp' => ['1790000000', null],
+    'a phrase Carbon would guess at' => ['next monday', null],
+    'a garbled end' => ['2026-10-06 00:00', 'garbage'],
+]);
+
+it('accepts the date shapes the chart sends', function () {
+    $task = task('Build', '2026-10-05', '2026-10-07');
+    $shift = shift('Shift', '2026-10-05 08:00:00', '2026-10-05 12:00:00');
+
+    expect(gantt()->move((string) $task->id, '2026-10-06')['start'])->toBe('2026-10-06 00:00')
+        ->and(gantt()->move((string) $task->id, ' 2026-10-07 00:00 ')['start'])->toBe('2026-10-07 00:00')
+        ->and(gantt()->move((string) $task->id, '2026-10-08 00:00:00')['start'])->toBe('2026-10-08 00:00')
+        ->and(shifts()->move((string) $shift->id, '2026-10-05T09:00', '2026-10-05T13:00')['start'])->toBe('2026-10-05 09:00');
+});
+
+it('names the lock with its time when it is not a midnight', function () {
+    $shift = shift('Shift', '2026-10-14 11:00:00', '2026-10-14 12:00:00');
+
+    expect(fn () => shifts()->lockedBefore(fn () => now())->move((string) $shift->id, '2026-10-14 09:00'))->toThrow(MoveRejected::class, 'before Oct 14, 2026 10:00.')
+        ->and(fn () => shifts()->lockedBefore(today())->move((string) $shift->id, '2026-10-13 09:00'))->toThrow(MoveRejected::class, 'before Oct 14, 2026.')
+        ->and($shift->fresh()->starts_at->format('Y-m-d H:i'))->toBe('2026-10-14 11:00');
+});
+
 it('lets a bar that started before the lock change its end, after the lock', function () {
     $task = task('Ongoing', '2026-10-05', '2026-10-20');
 
@@ -519,14 +573,18 @@ it('refuses a bar outside the query', function () {
     expect(fn () => $gantt->move((string) $task->id, '2026-10-06 00:00'))->toThrow(MoveRejected::class, 'no longer on the chart');
 });
 
-it('runs the app\'s move and turns its exception into a refusal with the same message', function () {
+it('runs the app\'s move: a MoveRejected refuses with its message, any other exception propagates as it is', function () {
     $task = task('Build', '2026-10-05', '2026-10-07');
 
     $gantt = gantt()->moveUsing(function (Task $record, CarbonImmutable $start) {
-        throw_if($start->isWeekend(), new RuntimeException('Not on a weekend.'));
+        throw_if($start->isWeekend(), new MoveRejected('Not on a weekend.'));
+
+        throw new RuntimeException('Something else broke.');
     });
 
-    expect(fn () => $gantt->move((string) $task->id, '2026-10-10 00:00'))->toThrow(MoveRejected::class, 'Not on a weekend.');
+    expect(fn () => $gantt->move((string) $task->id, '2026-10-10 00:00'))->toThrow(MoveRejected::class, 'Not on a weekend.')
+        ->and(fn () => $gantt->move((string) $task->id, '2026-10-12 00:00'))->toThrow(RuntimeException::class, 'Something else broke.')
+        ->and($task->fresh()->starts_on->toDateString())->toBe('2026-10-05');
 
     $seen = [];
     gantt()->moveUsing(function (Task $record, CarbonImmutable $start, CarbonImmutable $end, CarbonImmutable $from, CarbonImmutable $until) use (&$seen) {
@@ -606,6 +664,27 @@ it('prefills a create form with the clicked spot, the group only when the chart 
         ->and($rooms->prefill('2026-10-06 09:00', '2026-10-06 11:00', 'A'))->toBe(['starts_at' => '2026-10-06 09:00:00', 'ends_at' => '2026-10-06 11:00:00', 'room' => 'A'])
         ->and($rooms->prefill('2026-10-06 09:00', '2026-10-06 11:00', 'Z'))->toBe(['starts_at' => '2026-10-06 09:00:00', 'ends_at' => '2026-10-06 11:00:00'])
         ->and($gantt->prefill('nope', null, null))->toBe([]);
+});
+
+it('evaluates groups() once per chart, however often the groups are asked for', function () {
+    $acme = project('Acme');
+    task('A', '2026-10-05', '2026-10-06', ['project_id' => $acme->id]);
+    $calls = 0;
+
+    $gantt = gantt()->createAction(CreateAction::make())->groups(function () use (&$calls) {
+        $calls++;
+
+        return Group::fromModels(Project::query()->get());
+    });
+
+    $gantt->getState();
+    $gantt->getState();
+    $gantt->canCreateIn((string) $acme->id);
+    $gantt->prefill('2026-10-06 00:00', null, (string) $acme->id);
+
+    expect($calls)->toBe(1)
+        ->and($gantt->getGroups([])[0]['label'])->toBe('Acme')
+        ->and($gantt->groups([Group::make('planned')])->getGroups([])[0]['key'])->toBe('planned'); // a new list is read afresh
 });
 
 it('knows which groups a click may create in: the rows on the chart, never a related record that is not', function () {

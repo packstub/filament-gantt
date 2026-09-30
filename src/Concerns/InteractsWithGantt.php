@@ -19,7 +19,12 @@ trait InteractsWithGantt
 
     protected ?Gantt $ganttDefinition = null;
 
-    /** Set once the chart has been rendered: later renders carry no state (see getGanttConfig()). */
+    /**
+     * Set once the chart's state has been rendered: later renders carry no state
+     * (see getGanttConfig()). Set by the render that includes the chart, not by
+     * every render: a chart behind a tab or a condition gets its bars when it
+     * first appears.
+     */
     #[Locked]
     public bool $ganttRendered = false;
 
@@ -28,12 +33,6 @@ trait InteractsWithGantt
     public function getGantt(): Gantt
     {
         return $this->ganttDefinition ??= $this->gantt(Gantt::make()->key(static::class));
-    }
-
-    /** Livewire's `rendered` hook for this trait, after the first render's HTML is built. */
-    public function renderedInteractsWithGantt(mixed $view = null, mixed $html = null): void
-    {
-        $this->ganttRendered = true;
     }
 
     /**
@@ -62,6 +61,11 @@ trait InteractsWithGantt
     }
 
     /**
+     * A refused move answers with its reason. Anything else that goes wrong while
+     * saving (a database error, a bug in moveUsing()) is reported and answered with
+     * a generic message: an exception's text (a query with its bindings, say) is
+     * for the log, never for a notification.
+     *
      * @return array{ok: bool, bar?: array<string, mixed>, message?: string}
      */
     #[Renderless]
@@ -71,6 +75,10 @@ trait InteractsWithGantt
             $bar = $this->getGantt()->move($id, $start, $end);
         } catch (MoveRejected $e) {
             return ['ok' => false, 'message' => $e->getMessage()];
+        } catch (\Throwable $e) {
+            report($e);
+
+            return ['ok' => false, 'message' => __('packstub-gantt::gantt.failed')];
         }
 
         $this->ganttMoved($id, $bar);
@@ -87,18 +95,25 @@ trait InteractsWithGantt
 
     /**
      * Everything the browser needs to draw the chart. The state (window, groups,
-     * bars) is queried and serialised on the first render only: the chart element
-     * is wire:ignore, so a later render (an action's modal, a `$refresh`) never
-     * reaches it; the browser keeps its own state and reloads it renderless.
+     * bars) is queried and serialised the first time the chart is rendered only:
+     * the chart element is wire:ignore, so a later render (an action's modal, a
+     * `$refresh`) never reaches it; the browser keeps its own state and reloads it
+     * renderless. Should a state-less config ever reach a fresh chart (a lazy
+     * widget, a component restored without its flag), the browser asks for the
+     * state itself.
      *
      * @return array<string, mixed>
      */
     public function getGanttConfig(?bool $withState = null): array
     {
         $gantt = $this->getGantt();
-        $state = ($withState ?? ! $this->ganttRendered)
-            ? $gantt->getState()
-            : ['window' => ['start' => null, 'end' => null], 'groups' => [], 'bars' => []];
+
+        if ($withState ?? ! $this->ganttRendered) {
+            $state = $gantt->getState();
+            $this->ganttRendered = true;
+        } else {
+            $state = ['window' => ['start' => null, 'end' => null], 'groups' => [], 'bars' => []];
+        }
 
         // Bar and create actions need Filament's action system on the component.
         $actions = $this instanceof HasActions;

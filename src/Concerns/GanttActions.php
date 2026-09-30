@@ -22,9 +22,9 @@ trait GanttActions
         $gantt = $this->getGantt();
 
         foreach ($gantt->getBarActions() as $action) {
-            $action->record(fn () => $gantt->findRecord($action->getArguments()['ganttRecord'] ?? null));
+            $action->record(fn () => $gantt->findRecord(static::ganttArgument($action, 'ganttRecord')));
 
-            static::ganttChainHidden($action, fn () => $gantt->findRecord($action->getArguments()['ganttRecord'] ?? null) === null);
+            static::ganttChainHidden($action, fn () => $gantt->findRecord(static::ganttArgument($action, 'ganttRecord')) === null);
             $this->ganttRefreshAfter($action);
 
             $this->cacheAction($action);
@@ -36,12 +36,12 @@ trait GanttActions
             }
 
             // Hidden (so refused) unless the chart may create now, in that group.
-            static::ganttChainHidden($action, fn () => ! $gantt->canCreateIn($action->getArguments()['ganttGroup'] ?? null));
+            static::ganttChainHidden($action, fn () => ! $gantt->canCreateIn(static::ganttArgument($action, 'ganttGroup')));
 
             $prefill = fn () => $gantt->prefill(
-                $action->getArguments()['ganttStart'] ?? null,
-                $action->getArguments()['ganttEnd'] ?? null,
-                $action->getArguments()['ganttGroup'] ?? null,
+                static::ganttArgument($action, 'ganttStart'),
+                static::ganttArgument($action, 'ganttEnd'),
+                static::ganttArgument($action, 'ganttGroup'),
             );
 
             // The form opens with the clicked spot's dates and group…
@@ -107,5 +107,17 @@ trait GanttActions
     protected static function ganttProperty(Action $action, string $property): mixed
     {
         return (fn () => $this->{$property})->call($action);
+    }
+
+    /**
+     * An argument the browser mounted the action with. The chart sends strings;
+     * anything else (an array in a crafted request) counts as absent, so it never
+     * reaches a typed parameter.
+     */
+    protected static function ganttArgument(Action $action, string $key): ?string
+    {
+        $value = $action->getArguments()[$key] ?? null;
+
+        return is_string($value) ? $value : null;
     }
 }

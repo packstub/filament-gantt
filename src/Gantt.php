@@ -68,6 +68,9 @@ class Gantt
     /** @var list<Group>|Closure|null */
     protected array|Closure|null $groups = null;
 
+    /** @var list<Group>|null groups() evaluated, once per instance */
+    protected ?array $definedGroupsCache = null;
+
     protected bool $compact = false;
 
     /** @var array{0: string, 1: string}|null */
@@ -238,6 +241,7 @@ class Gantt
     public function groups(array|Closure|null $groups): static
     {
         $this->groups = $groups;
+        $this->definedGroupsCache = null;
 
         return $this;
     }
@@ -368,9 +372,11 @@ class Gantt
 
     /**
      * What a move does: `fn (Model $record, CarbonImmutable $start, CarbonImmutable $end,
-     * CarbonImmutable $previousStart, CarbonImmutable $previousEnd): void`. Throw to refuse
-     * it. Default: write the start and end attributes and save. The dates are the
-     * chart's half-open range; a date-only record's end day is `$end->subDay()`.
+     * CarbonImmutable $previousStart, CarbonImmutable $previousEnd): void`. Throw
+     * MoveRejected to refuse it with a message the user sees; any other exception
+     * is reported and the user sees "The change did not go through." Default: write
+     * the start and end attributes and save. The dates are the chart's half-open
+     * range; a date-only record's end day is `$end->subDay()`.
      */
     public function moveUsing(?Closure $callback): static
     {
@@ -848,9 +854,10 @@ class Gantt
 
     /**
      * Move or resize a bar, enforcing every rule on the server whatever the browser
-     * claimed. Dates are the chart's half-open range (`Y-m-d H:i`, or anything
-     * Carbon parses); without an end the duration is kept. Returns the bar as it
-     * looks afterwards.
+     * claimed. Dates are the chart's half-open range as `Y-m-d H:i` (seconds allowed,
+     * a date alone too); without an end the duration is kept. Returns the bar as it
+     * looks afterwards. A refused move throws MoveRejected; an exception thrown
+     * while saving (the database's, moveUsing()'s) propagates as it is.
      *
      * @return array<string, mixed>
      *
@@ -910,7 +917,10 @@ class Gantt
 
         if ($lock = $this->getLockedBefore()) {
             if (($startChanged && ($newStart < $lock || $previousStart < $lock)) || ($endChanged && $newEnd < $lock)) {
-                throw new MoveRejected(__('packstub-gantt::gantt.locked', ['date' => $lock->translatedFormat(config('filament-gantt.date_format', 'M j, Y'))]));
+                // A lock at midnight reads as a date; one during the day (now()) says the time too.
+                $format = $lock->isStartOfDay() ? config('filament-gantt.date_format', 'M j, Y') : config('filament-gantt.datetime_format', 'M j, Y H:i');
+
+                throw new MoveRejected(__('packstub-gantt::gantt.locked', ['date' => $lock->translatedFormat($format)]));
             }
         }
 
@@ -931,16 +941,13 @@ class Gantt
             }
         }
 
-        try {
-            if ($this->moveUsing) {
-                ($this->moveUsing)($record, $start, $end, $from, $until);
-            } else {
-                $this->store($record, $newStart, $newEnd, $milestone, $previousStart);
-            }
-        } catch (MoveRejected $e) {
-            throw $e;
-        } catch (\Throwable $e) {
-            throw new MoveRejected($e->getMessage() ?: __('packstub-gantt::gantt.failed'), previous: $e);
+        // A MoveRejected thrown here refuses with its message; anything else (a
+        // database error, a bug in the closure) propagates for the caller to report:
+        // its message is not for the user (see InteractsWithGantt::ganttMove()).
+        if ($this->moveUsing) {
+            ($this->moveUsing)($record, $start, $end, $from, $until);
+        } else {
+            $this->store($record, $newStart, $newEnd, $milestone, $previousStart);
         }
 
         BarMoved::dispatch($record, $from, $until, $start, $end, $this->key);
@@ -969,14 +976,14 @@ class Gantt
         try {
             if ($start !== null) {
                 $from = $this->unit->snap($this->parse($start));
-                $data[$this->startAttribute] = $dateOnly ? $from->toDateString() : $from->format('Y-m-d H:i:s');
-
                 $to = $end === null ? $from->addMinutes($this->unit->minutes()) : $this->unit->snap($this->parse($end));
                 $to = $to > $from ? $to : $from->addMinutes($this->unit->minutes());
+
+                $data[$this->startAttribute] = $dateOnly ? $from->toDateString() : $from->format('Y-m-d H:i:s');
                 $data[$this->endAttribute] = $dateOnly ? $to->subDay()->toDateString() : $to->format('Y-m-d H:i:s');
             }
         } catch (MoveRejected) {
-            // A garbled date from the browser: the form simply opens empty.
+            // A garbled date from the browser: the form simply opens empty, both dates.
         }
 
         // The group only when the chart knows it (see canCreateIn()): a crafted key
@@ -1159,12 +1166,22 @@ class Gantt
         return [$min ?? $today, $max ?? $min ?? $today];
     }
 
-    /** @return list<Group> */
+    /**
+     * The groups() list, evaluated once per instance: a create from a click asks
+     * for it several times in one request (hidden, prefill…), the closure's query
+     * runs once.
+     *
+     * @return list<Group>
+     */
     protected function definedGroups(): array
     {
+        if ($this->definedGroupsCache !== null) {
+            return $this->definedGroupsCache;
+        }
+
         $groups = $this->groups instanceof Closure ? app()->call($this->groups) : $this->groups;
 
-        return array_values(array_filter($groups ?? [], fn ($g) => $g instanceof Group));
+        return $this->definedGroupsCache = array_values(array_filter($groups ?? [], fn ($g) => $g instanceof Group));
     }
 
     protected function groupKey(Model $record): ?string
@@ -1252,14 +1269,27 @@ class Gantt
         return $moment->shiftTimezone(config('app.timezone') ?: 'UTC');
     }
 
-    /** What the browser sent ("Y-m-d H:i", or anything Carbon reads) as a wall-clock moment tagged UTC. */
+    /**
+     * What the browser sent as a wall-clock moment tagged UTC: "Y-m-d", "Y-m-d H:i"
+     * or "Y-m-d H:i:s" (a T between date and time is fine), a real calendar date
+     * in the years 1000–9999, the only shape the chart ever sends. Anything else
+     * ("0000-00-00", "2026-02-30", a phrase Carbon would guess at) is refused
+     * before it can reach a record.
+     */
     protected function parse(string $value): CarbonImmutable
     {
-        try {
-            return CarbonImmutable::parse(trim($value), 'UTC');
-        } catch (\Throwable) {
+        $value = trim($value);
+
+        if (preg_match('/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?)?$/', $value, $m) !== 1
+            || (int) $m[1] < 1000
+            || ! checkdate((int) $m[2], (int) $m[3], (int) $m[1])
+            || (int) ($m[4] ?? 0) > 23
+            || (int) ($m[5] ?? 0) > 59
+            || (int) ($m[6] ?? 0) > 59) {
             throw new MoveRejected(__('packstub-gantt::gantt.failed'));
         }
+
+        return CarbonImmutable::create((int) $m[1], (int) $m[2], (int) $m[3], (int) ($m[4] ?? 0), (int) ($m[5] ?? 0), (int) ($m[6] ?? 0), 'UTC');
     }
 
     protected function humanMinutes(int $minutes): string
