@@ -292,7 +292,12 @@ export default function packstubGantt(config) {
             }
 
             const fromUrl = this.restore()
-            this.rebuild()
+
+            // A config without a window has nothing to draw yet: the server's answer
+            // (apply()) draws it, instead of a one-column, no-row chart for the round trip.
+            if (this.period.start) {
+                this.rebuild()
+            }
 
             this.fit = () => {
                 if (this.height) return

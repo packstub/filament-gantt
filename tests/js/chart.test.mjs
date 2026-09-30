@@ -7,9 +7,14 @@ import { chart, bar, rowBar, press, element, safeUrl, layout, DAY } from './harn
 
 test('a config without a window (a chart that appeared after the component\'s first render) asks the server for its state', () => {
     const c = chart({ window: { start: null, end: null }, bars: [], groups: [] })
+    // the harness lays out on construction; the component itself starts with an empty view
+    Object.assign(c.view, { days: 0, width: 0, columns: [], top: [], shades: [], rows: [] })
     c.init()
     assert.deepEqual(c.wire.refreshes, [[{}, null, null]])
     assert.deepEqual(c.wire.windows, [])
+    // nothing is drawn for the round trip: no one-column, no-row chart before the answer
+    assert.equal(c.view.columns.length, 0)
+    assert.equal(c.view.rows.length, 0)
 
     // a config with its state starts from it
     const d = chart({ bars: [bar()] })
