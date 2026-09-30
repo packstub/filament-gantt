@@ -1,6 +1,7 @@
 <?php
 
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Livewire\Livewire;
 use Packstub\Gantt\Events\BarMoved;
@@ -26,11 +27,35 @@ it('renders the chart with its state as JSON for the browser', function () {
         ->assertSeeHtml('wire:ignore');
 });
 
+it('queries and serialises the bars on the first render only: a re-render carries no state', function () {
+    $task = task('Write docs', '2026-10-05', '2026-10-07');
+
+    $component = Livewire::test(TaskGantt::class)->assertSee('Write docs');
+
+    DB::enableQueryLog();
+    $component
+        ->mountAction('edit', ['ganttRecord' => (string) $task->id])
+        ->set('mountedActions.0.data.title', 'Final docs')
+        ->callMountedAction()
+        ->assertHasNoErrors()
+        ->assertDispatched('packstub-gantt-refresh')
+        ->call('$refresh')
+        ->assertSeeHtml('x-data="packstubGantt(')
+        ->assertDontSee('Final docs');
+    $queries = collect(DB::getQueryLog())->pluck('query');
+    DB::disableQueryLog();
+
+    expect($queries->filter(fn (string $sql) => str_contains($sql, 'from "tasks"') && str_contains($sql, 'order by')))->toBeEmpty()
+        ->and($component->instance()->ganttRendered)->toBeTrue()
+        ->and($component->instance()->getGanttConfig())->toMatchArray(['bars' => [], 'groups' => [], 'readOnly' => false])
+        ->and($component->instance()->getGanttConfig(withState: true)['bars'][0]['label'])->toBe('Final docs');
+});
+
 it('hands the browser everything it needs in the config', function () {
     $acme = project('Acme');
     task('A', '2026-10-05', '2026-10-07', ['project_id' => $acme->id]);
 
-    $config = Livewire::test(TaskGantt::class)->instance()->getGanttConfig();
+    $config = Livewire::test(TaskGantt::class)->instance()->getGanttConfig(withState: true);
 
     expect($config)->toMatchArray([
         'scale' => 'week',
@@ -96,7 +121,7 @@ it('ignores moves on a read-only chart', function () {
 
     expect($task->fresh()->starts_on->toDateString())->toBe('2026-10-05')
         ->and($component->instance()->getGanttConfig())->toMatchArray(['readOnly' => true, 'createAction' => null])
-        ->and($component->instance()->getGanttConfig()['bars'][0])->toMatchArray(['movable' => false, 'resizable' => false]);
+        ->and($component->instance()->getGanttConfig(withState: true)['bars'][0])->toMatchArray(['movable' => false, 'resizable' => false]);
 });
 
 it('refreshes with filters and loads another window', function () {
@@ -114,7 +139,7 @@ it('refreshes with filters and loads another window', function () {
 });
 
 it('offers no actions on a component without Filament\'s action system', function () {
-    $config = Livewire::test(PlainGantt::class)->instance()->getGanttConfig();
+    $config = Livewire::test(PlainGantt::class)->instance()->getGanttConfig(withState: true);
 
     expect($config['barActions'])->toBe([])
         ->and($config['createAction'])->toBeNull()

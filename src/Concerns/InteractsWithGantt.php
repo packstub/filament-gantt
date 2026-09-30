@@ -3,6 +3,7 @@
 namespace Packstub\Gantt\Concerns;
 
 use Filament\Actions\Contracts\HasActions;
+use Livewire\Attributes\Locked;
 use Livewire\Attributes\Renderless;
 use Packstub\Gantt\Exceptions\MoveRejected;
 use Packstub\Gantt\Gantt;
@@ -18,11 +19,21 @@ trait InteractsWithGantt
 
     protected ?Gantt $ganttDefinition = null;
 
+    /** Set once the chart has been rendered: later renders carry no state (see getGanttConfig()). */
+    #[Locked]
+    public bool $ganttRendered = false;
+
     abstract public function gantt(Gantt $gantt): Gantt;
 
     public function getGantt(): Gantt
     {
         return $this->ganttDefinition ??= $this->gantt(Gantt::make()->key(static::class));
+    }
+
+    /** Livewire's `rendered` hook for this trait, after the first render's HTML is built. */
+    public function renderedInteractsWithGantt(mixed $view = null, mixed $html = null): void
+    {
+        $this->ganttRendered = true;
     }
 
     /**
@@ -74,11 +85,20 @@ trait InteractsWithGantt
      */
     protected function ganttMoved(string $id, array $bar): void {}
 
-    /** @return array<string, mixed> */
-    public function getGanttConfig(): array
+    /**
+     * Everything the browser needs to draw the chart. The state (window, groups,
+     * bars) is queried and serialised on the first render only: the chart element
+     * is wire:ignore, so a later render (an action's modal, a `$refresh`) never
+     * reaches it; the browser keeps its own state and reloads it renderless.
+     *
+     * @return array<string, mixed>
+     */
+    public function getGanttConfig(?bool $withState = null): array
     {
         $gantt = $this->getGantt();
-        $state = $gantt->getState();
+        $state = ($withState ?? ! $this->ganttRendered)
+            ? $gantt->getState()
+            : ['window' => ['start' => null, 'end' => null], 'groups' => [], 'bars' => []];
 
         // Bar and create actions need Filament's action system on the component.
         $actions = $this instanceof HasActions;
