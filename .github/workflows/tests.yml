@@ -62,6 +62,12 @@ jobs:
       - name: Run tests
         run: vendor/bin/pest
 
-      # The browser side (layout(), drag, menu) runs on the runner's own Node, no packages.
+      # The browser side (layout(), drag, menu) runs on plain Node, no packages: a
+      # pinned LTS, so a change of the runner image cannot break the matrix.
+      - name: Setup Node 22
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
       - name: Run browser-side tests
         run: composer test:js
