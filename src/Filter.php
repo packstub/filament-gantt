@@ -147,10 +147,18 @@ class Filter
         }
     }
 
-    /** A `Y-m-d` string, or null for anything else: the browser cannot inject a raw value. */
+    /**
+     * A `Y-m-d` string naming a real calendar date, or null for anything else: the
+     * browser cannot inject a raw value, and a rolled-over date from a hand-edited
+     * URL (`2026-02-30`, which some databases refuse) never reaches the query.
+     */
     public static function date(mixed $value): ?string
     {
-        return is_string($value) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) && strtotime($value) !== false ? $value : null;
+        return is_string($value)
+            && preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $value, $m) === 1
+            && checkdate((int) $m[2], (int) $m[3], (int) $m[1])
+                ? $value
+                : null;
     }
 
     /** @return array<string, mixed> */

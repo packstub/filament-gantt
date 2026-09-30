@@ -200,6 +200,17 @@ it('refreshes with filters and loads another window', function () {
         ->assertReturned(fn ($result) => $result['window']['start'] === '2026-09-28');
 });
 
+it('ignores a date-range filter value that is no calendar date (a hand-edited URL)', function () {
+    task('A', '2026-10-05', '2026-10-07');
+    task('B', '2026-10-20', '2026-10-22');
+
+    Livewire::test(TaskGantt::class)
+        ->call('ganttRefresh', ['starts_on' => ['from' => '2026-02-30']])
+        ->assertReturned(fn ($result) => array_column($result['bars'], 'label') === ['A', 'B'])
+        ->call('ganttRefresh', ['starts_on' => ['from' => '2026-10-10']])
+        ->assertReturned(fn ($result) => array_column($result['bars'], 'label') === ['B']);
+});
+
 it('offers no actions on a component without Filament\'s action system', function () {
     $config = Livewire::test(PlainGantt::class)->instance()->getGanttConfig(withState: true);
 

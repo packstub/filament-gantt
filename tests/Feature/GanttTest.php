@@ -282,6 +282,7 @@ it('applies select and date-range filters and ignores values it did not offer', 
         ->and(array_column($gantt->getBars(['starts_on' => ['from' => '2026-10-10']]), 'label'))->toBe(['B'])
         ->and(array_column($gantt->getBars(['starts_on' => ['until' => '2026-10-10']]), 'label'))->toBe(['A'])
         ->and(array_column($gantt->getBars(['starts_on' => ['from' => "2026-10-10' or 1=1"]]), 'label'))->toBe(['A', 'B'])
+        ->and(array_column($gantt->getBars(['starts_on' => ['from' => '2026-02-30']]), 'label'))->toBe(['A', 'B'])
         ->and(array_column($gantt->getBars(['starts_on' => 'garbage']), 'label'))->toBe(['A', 'B'])
         ->and(array_column($gantt->getBars(['project_id' => ['x']]), 'label'))->toBe(['A', 'B'])
         ->and($gantt->getFilters()[0]->getLabel())->toBe('Project')
@@ -305,6 +306,18 @@ it('narrows a date range with plain ranges on the column, the last day included 
         ->and($sql)->not->toContain('strftime', 'date(')
         ->and($sql)->toContain('"starts_at" >= ?', '"starts_at" < ?')
         ->and(array_column($gantt->getBars(['starts_at' => ['until' => '2026-10-09']]), 'label'))->toBe(['The day before']);
+});
+
+it('reads a date-range value as a real calendar date or nothing', function () {
+    expect(Filter::date('2026-10-10'))->toBe('2026-10-10')
+        ->and(Filter::date('2024-02-29'))->toBe('2024-02-29')
+        ->and(Filter::date('2026-02-30'))->toBeNull() // strtotime() would roll it over to March 2
+        ->and(Filter::date('2026-13-01'))->toBeNull()
+        ->and(Filter::date('0000-00-00'))->toBeNull()
+        ->and(Filter::date('2026-10-10 00:00'))->toBeNull()
+        ->and(Filter::date('10/10/2026'))->toBeNull()
+        ->and(Filter::date(['2026-10-10']))->toBeNull()
+        ->and(Filter::date(null))->toBeNull();
 });
 
 it('lets a filter narrow the query its own way', function () {
