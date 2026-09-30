@@ -88,6 +88,7 @@
 .ps-gantt-field input[type="date"] { min-width: 8.5rem; color-scheme: light; }
 .dark .ps-gantt-field input[type="date"] { color-scheme: dark; }
 .ps-gantt-field select { appearance: none; padding-inline-end: 1rem; background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%2371717a' stroke-width='1.5'%3E%3Cpath d='m6 8 4 4 4-4'/%3E%3C/svg%3E") no-repeat right center / 0.875rem; cursor: pointer; }
+[dir="rtl"] .ps-gantt-field select { background-position: left center; } /* the arrow follows the end edge */
 .dark .ps-gantt-field select option { background: var(--gray-900); }
 .ps-gantt-range { padding: 0 0.6rem; }
 .ps-gantt-range .ps-gantt-field { height: auto; padding: 0; border: 0; background: transparent; }
@@ -318,8 +319,8 @@
 
 .ps-gantt-hint {
     position: fixed;
-    inset-block-end: 1.25rem;
-    inset-inline-start: 50%;
+    bottom: 1.25rem;
+    left: 50%; /* physical on purpose: centred with translateX(-50%) in either direction */
     z-index: 50;
     transform: translateX(-50%);
     padding: 0.4rem 0.7rem;
@@ -355,8 +356,8 @@
     cursor: pointer;
 }
 
-.ps-gantt-menu-item:hover { background: var(--gray-100); }
-.dark .ps-gantt-menu-item:hover { background: rgb(255 255 255 / 0.06); }
+.ps-gantt-menu-item:hover, .ps-gantt-menu-item:focus-visible { background: var(--gray-100); outline: none; }
+.dark .ps-gantt-menu-item:hover, .dark .ps-gantt-menu-item:focus-visible { background: rgb(255 255 255 / 0.06); }
 .ps-gantt-menu-icon { display: grid; width: 1rem; height: 1rem; color: var(--ps-gantt-muted); }
 .ps-gantt-menu-icon svg { width: 1rem; height: 1rem; }
 .ps-gantt-menu-item-danger, .ps-gantt-menu-item-danger .ps-gantt-menu-icon { color: var(--danger-600); }

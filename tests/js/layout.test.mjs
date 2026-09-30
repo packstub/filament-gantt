@@ -1,0 +1,110 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { layout, parse, format, phpDate, pack, isoWeekday, DAY } from './harness.mjs'
+
+const window = {
+    start: '2026-10-05', end: '2026-11-01', today: '2026-10-14',
+    pxPerDay: 18, rowHeight: 36, firstDayOfWeek: 1, weekendDays: [6, 7], locale: 'en',
+    groups: [{ key: '1', label: 'Acme', color: 'sky', collapsed: false, count: 0 }], grouped: true, compact: false, collapsed: {},
+}
+const bars = [
+    { id: 'a', group: '1', start: '2026-10-05 00:00', end: '2026-10-08 00:00', milestone: false, label: 'A', movable: true, resizable: true },
+    { id: 'b', group: '1', start: '2026-10-06 00:00', end: '2026-10-10 00:00', milestone: false, label: 'B', movable: true, resizable: true },
+    { id: 'm', group: '2', start: '2026-10-20 00:00', end: '2026-10-20 00:00', milestone: true, label: 'M', movable: true, resizable: false },
+    { id: 'z', group: '2', start: 'garbage', end: null, milestone: false, label: 'Z', movable: true, resizable: true },
+]
+
+test('dates parse and format as UTC, whatever the machine\'s zone', () => {
+    assert.equal(parse('2026-10-05'), Date.UTC(2026, 9, 5))
+    assert.equal(parse('2026-10-05 09:30'), Date.UTC(2026, 9, 5, 9, 30))
+    assert.equal(parse('2026-10-05T09:30:15'), Date.UTC(2026, 9, 5, 9, 30, 15))
+    assert.equal(parse('garbage'), null)
+    assert.equal(format(Date.UTC(2026, 9, 5, 9, 30)), '2026-10-05 09:30')
+    assert.equal(format(Date.UTC(2026, 9, 5), false), '2026-10-05')
+    assert.equal(isoWeekday(parse('2026-10-05')), 1)
+    assert.equal(isoWeekday(parse('2026-10-11')), 7)
+    assert.equal(phpDate(parse('2026-10-05 14:05'), 'M j, Y H:i', 'en'), 'Oct 5, 2026 14:05')
+    assert.equal(phpDate(parse('2026-10-05 14:05'), 'D d/m/y g:i a \\a\\t', 'en'), 'Mon 05/10/26 2:05 pm at')
+    assert.equal(DAY, 86400000)
+})
+
+test('week scale: week columns, month header, shades, today, group rows and bar pixels', () => {
+    const v = layout(bars, window, 'week')
+    assert.equal(v.days, 28)
+    assert.equal(v.width, 28 * 18)
+    assert.deepEqual(v.columns.map((c) => c.w), [126, 126, 126, 126])
+    assert.equal(v.columns[0].label, '5 Oct')
+    assert.equal(v.top.length, 2)
+    assert.equal(v.top[0].label, 'October 2026')
+    assert.equal(v.top[1].x, 27 * 18)
+    assert.equal(v.shades.length, 8)
+    assert.equal(v.todayX, 9 * 18)
+    assert.deepEqual(v.rows.map((r) => r.type), ['group', 'bar', 'bar', 'group', 'bar'])
+    assert.equal(v.rows[0].group.label, 'Acme')
+    assert.equal(v.rows[0].group.count, 2)
+    assert.equal(v.rows[3].group.key, '2')
+    assert.equal(v.rows[3].group.count, 1) // Z was skipped (no start)
+    const a = v.rows[1].bars[0]
+    assert.equal(a.x, 0)
+    assert.equal(a.w, 3 * 18)
+    assert.equal(a.src, bars[0])
+    const m = v.rows[4].bars[0]
+    assert.equal(m.x, 15 * 18)
+    assert.equal(m.w, 0)
+})
+
+test('day scale: one column per day with weekend and today flags', () => {
+    const v = layout(bars, window, 'day')
+    assert.equal(v.columns.length, 28)
+    assert.equal(v.columns[0].label, 'Mon 5')
+    assert.equal(v.columns[5].weekend, true)
+    assert.equal(v.columns[9].today, true)
+})
+
+test('month scale: month columns, years on top, no shades', () => {
+    const v = layout(bars, window, 'month')
+    assert.equal(v.columns.length, 2)
+    assert.equal(v.columns[0].label, 'Oct')
+    assert.equal(v.columns[0].w, 27 * 18)
+    assert.equal(v.top[0].label, '2026')
+    assert.equal(v.shades.length, 0)
+})
+
+test('week columns follow firstDayOfWeek and a mid-week window start', () => {
+    assert.deepEqual(layout(bars, { ...window, firstDayOfWeek: 7 }, 'week').columns.slice(0, 2).map((c) => c.w), [6 * 18, 7 * 18])
+    const v = layout([], { ...window, start: '2026-10-07', end: '2026-11-03' }, 'week')
+    assert.deepEqual(v.columns.slice(0, 2).map((c) => c.w), [5 * 18, 7 * 18])
+})
+
+test('a collapsed group hides its bars', () => {
+    const v = layout(bars, { ...window, collapsed: { 1: true } }, 'week')
+    assert.deepEqual(v.rows.map((r) => r.type), ['group', 'group', 'bar'])
+    assert.equal(v.rows[0].collapsed, true)
+})
+
+test('compact: one row per group, overlapping bars in lanes', () => {
+    const v = layout(bars, { ...window, compact: true }, 'week')
+    assert.deepEqual(v.rows.map((r) => r.type), ['lanes', 'lanes'])
+    assert.equal(v.rows[0].height, 2 * 36)
+    assert.deepEqual(v.rows[0].bars.map((b) => b.lane), [0, 1])
+    assert.equal(v.rows[1].height, 36)
+})
+
+test('ungrouped: bar rows only', () => {
+    const v = layout(bars.slice(0, 2).map((b) => ({ ...b, group: '' })), { ...window, groups: [], grouped: false }, 'week')
+    assert.deepEqual(v.rows.map((r) => r.type), ['bar', 'bar'])
+})
+
+test('pack(): touching bars share a lane, overlapping ones do not', () => {
+    const packed = [{ x: 0, w: 10 }, { x: 12, w: 10 }, { x: 5, w: 10 }, { x: 40, w: 0, milestone: true }]
+    assert.equal(pack(packed), 2)
+    assert.deepEqual(packed.map((b) => b.lane), [0, 0, 1, 0])
+})
+
+test('edge windows: today outside, a single day, a leap February', () => {
+    assert.equal(layout([], { ...window, today: '2027-01-01' }, 'week').todayX, null)
+    const one = layout([], { ...window, end: '2026-10-05' }, 'day')
+    assert.equal(one.days, 1)
+    assert.equal(one.columns.length, 1)
+    assert.equal(layout([], { ...window, start: '2028-02-01', end: '2028-03-01' }, 'day').columns.length, 30)
+})

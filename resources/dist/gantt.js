@@ -8,8 +8,8 @@
  * no library. Hand-written ES module, no build step.
  *
  * Dates are naive "YYYY-MM-DD HH:MM" strings, read and written as UTC timestamps
- * so daylight-saving changes never shift a bar. A bar is a half-open range
- * [start, end); a milestone has start == end.
+ * so daylight-saving changes never shift a bar (the server reads them the same way).
+ * A bar is a half-open range [start, end); a milestone has start == end.
  */
 
 export const DAY = 86400000
@@ -25,6 +25,16 @@ const TONES = {
 }
 
 const MILESTONE_PX = 14
+const LONG_PRESS_MS = 500
+
+/** A URL safe to navigate to: anything without a scheme, or http(s), mailto, tel. Never javascript:, data:, vbscript:. */
+export function safeUrl(url) {
+    const value = String(url ?? '').trim()
+    if (! value) return null
+    const m = /^([a-z][a-z0-9+.-]*):/i.exec(value.replace(/[\u0000- ]+/g, ''))
+
+    return ! m || ['http', 'https', 'mailto', 'tel'].includes(m[1].toLowerCase()) ? value : null
+}
 
 /* ------------------------------------------------------------------ dates */
 
@@ -320,8 +330,13 @@ export default function packstubGantt(config) {
             return config.unit === 'hour' ? 1 / 24 : 1
         },
 
-        get withTime() {
-            return config.unit === 'hour'
+        /** The shortest and the longest a resize may make a bar, in ms (the server's minDuration()/maxDuration()). */
+        get limits() {
+            const unit = this.unitDays * DAY
+            const min = Math.max(unit, (config.minMinutes || 0) * 60000)
+            const max = config.maxMinutes ? Math.max(min, config.maxMinutes * 60000) : Infinity
+
+            return { min, max }
         },
 
         get visibleRows() {
@@ -347,6 +362,19 @@ export default function packstubGantt(config) {
 
         rebuild() {
             this.view = layout(this.bars, this.axis(), this.scale)
+
+            // A bar in the air (another bar's answer arrived mid-drag) keeps following
+            // the pointer: the drag now works on the fresh row bar, at the dragged dates.
+            const p = this.pointer
+            if (p) {
+                const fresh = this.rowBar(p.bar.id)
+                if (fresh && fresh !== p.bar) {
+                    fresh.s = p.bar.s
+                    fresh.e = p.bar.e
+                    this.place(fresh)
+                    p.bar = fresh
+                }
+            }
 
             // Row windowing above a few hundred rows: only the rows in view are in the DOM.
             this.windowed = this.view.rows.length > 200
@@ -386,22 +414,43 @@ export default function packstubGantt(config) {
             this.slice = { from, to, top: this.offsets[from] || 0, bottom: total - (to < this.offsets.length ? this.offsets[to] : total) }
         },
 
+        /** The row bar (the laid-out copy) with this id, if it is on the chart. */
+        rowBar(id) {
+            for (const row of this.view.rows) {
+                for (const bar of row.bars) {
+                    if (bar.id === id) return bar
+                }
+            }
+            return null
+        },
+
+        /** Pixels from a row bar's dates. */
+        place(bar) {
+            bar.x = ((bar.s - this.view.start) / DAY) * this.view.pxPerDay
+            bar.w = bar.milestone ? 0 : Math.max(((bar.e - bar.s) / DAY) * this.view.pxPerDay, 4)
+        },
+
         cell(c) {
             return `inset-inline-start:${c.x}px;width:${c.w}px`
         },
 
         barStyle(bar) {
             const top = 4 + bar.lane * config.rowHeight
-            const style = `inset-inline-start:${bar.x}px;top:${top}px;height:${config.rowHeight - 8}px;--ps-bar:${this.tone(bar.color)}`
+            const inner = config.rowHeight - 8
+            const style = `inset-inline-start:${bar.x}px;top:${top}px;height:${inner}px;--ps-bar:${this.tone(bar.color)}`
 
-            return bar.milestone ? style : style + `;width:${bar.w}px`
+            // The diamond centres itself on the row's inner height, whatever row_height is.
+            return bar.milestone ? style + `;--ps-gantt-row-inner:${inner}px` : style + `;width:${bar.w}px`
         },
 
+        // A whole-day bar reads as dates (its end day is the day before the chart's
+        // end); a bar with times reads as moments. The record decides, not the snap unit.
         tooltip(bar) {
-            const pattern = this.withTime ? config.dateTimeFormat : config.dateFormat
+            const allDay = !! bar.allDay
+            const pattern = allDay ? config.dateFormat : config.dateTimeFormat
             const dates = bar.milestone
                 ? phpDate(bar.s, pattern, config.locale)
-                : `${phpDate(bar.s, pattern, config.locale)} – ${phpDate(this.withTime ? bar.e : bar.e - DAY, pattern, config.locale)}`
+                : `${phpDate(bar.s, pattern, config.locale)} – ${phpDate(allDay ? bar.e - DAY : bar.e, pattern, config.locale)}`
             const lines = [bar.label, dates]
 
             if (bar.milestone) lines.push(this.t.milestone)
@@ -414,21 +463,26 @@ export default function packstubGantt(config) {
         setScale(scale) {
             if (! config.pxPerDay[scale]) return
             const el = this.$refs.scroll
-            const centre = el ? (el.scrollLeft + el.clientWidth / 2) / (this.view.pxPerDay || 1) : null
+            // scrollLeft counts from the start edge and is negative in RTL: work on its size, keep its sign.
+            const dir = this.rtl() ? -1 : 1
+            const centre = el ? (Math.abs(el.scrollLeft) + el.clientWidth / 2) / (this.view.pxPerDay || 1) : null
             this.scale = scale
             this.rebuild()
             this.persist()
             if (el && centre !== null) {
-                this.$nextTick(() => { el.scrollLeft = centre * this.view.pxPerDay - el.clientWidth / 2 })
+                this.$nextTick(() => { el.scrollLeft = dir * Math.max(0, centre * this.view.pxPerDay - el.clientWidth / 2) })
             }
+        },
+
+        rtl() {
+            return getComputedStyle(this.$root).direction === 'rtl'
         },
 
         scrollToToday(smooth = true) {
             const el = this.$refs.scroll
             if (! el || this.view.todayX === null) return
-            const rtl = getComputedStyle(this.$root).direction === 'rtl'
             const left = Math.max(0, this.view.todayX - el.clientWidth / 3)
-            el.scrollTo({ left: rtl ? -left : left, behavior: smooth ? 'smooth' : 'auto' })
+            el.scrollTo({ left: this.rtl() ? -left : left, behavior: smooth ? 'smooth' : 'auto' })
         },
 
         toggle(key) {
@@ -443,11 +497,20 @@ export default function packstubGantt(config) {
             if (event.button !== 0 || bar.src._pending) return
             const edge = event.target.dataset?.edge || null
             const allowed = edge ? bar.resizable : bar.movable
-            const rtl = getComputedStyle(this.$root).direction === 'rtl'
 
             this.menu = null
-            this.pointer = { id: event.pointerId, bar, edge, allowed, x0: event.clientX, s: bar.s, e: bar.e, moved: false, dir: rtl ? -1 : 1, el: event.currentTarget }
-            event.currentTarget.setPointerCapture(event.pointerId)
+            const p = { id: event.pointerId, bar, edge, allowed, x0: event.clientX, y0: event.clientY, s: bar.s, e: bar.e, moved: false, dir: this.rtl() ? -1 : 1, el: event.currentTarget, press: null }
+            this.pointer = p
+            event.currentTarget.setPointerCapture?.(event.pointerId)
+
+            // A finger (or a pen) held still opens the menu: touch has no right-click.
+            if (event.pointerType && event.pointerType !== 'mouse' && this.actionsFor(bar).length) {
+                p.press = setTimeout(() => {
+                    if (this.pointer !== p || p.moved) return
+                    this.cancel()
+                    this.openMenu({ clientX: p.x0, clientY: p.y0, currentTarget: p.el }, bar)
+                }, LONG_PRESS_MS)
+            }
         },
 
         drag(event) {
@@ -456,58 +519,65 @@ export default function packstubGantt(config) {
 
             const dx = (event.clientX - p.x0) * p.dir
             if (! p.moved && Math.abs(dx) < 3) return
+
+            // Past the threshold it is a drag, allowed or not: the release is never a click.
+            p.moved = true
+            clearTimeout(p.press)
             if (! p.allowed) return
 
-            p.moved = true
             this.dragging = true
             const unit = this.unitDays * DAY
+            const { min, max } = this.limits
             const delta = Math.round(dx / this.view.pxPerDay / this.unitDays) * unit
             const bar = p.bar
 
             if (p.edge === 'start') {
-                bar.s = Math.min(p.s + delta, p.e - unit)
+                bar.s = Math.max(Math.min(p.s + delta, p.e - min), p.e - max)
                 bar.e = p.e
             } else if (p.edge === 'end') {
                 bar.s = p.s
-                bar.e = Math.max(p.e + delta, p.s + unit)
+                bar.e = Math.min(Math.max(p.e + delta, p.s + min), p.s + max)
             } else {
                 bar.s = p.s + delta
                 bar.e = p.e + delta
             }
 
-            bar.x = ((bar.s - this.view.start) / DAY) * this.view.pxPerDay
-            bar.w = bar.milestone ? 0 : Math.max(((bar.e - bar.s) / DAY) * this.view.pxPerDay, 4)
+            this.place(bar)
             this.hint = this.tooltip(bar).split('\n')[1]
         },
 
         up(event) {
             const p = this.pointer
             if (! p || event.pointerId !== p.id) return
-            this.pointer = null
-            this.dragging = false
-            this.hint = null
-
-            try { p.el.releasePointerCapture(p.id) } catch (e) {}
+            this.release(p)
 
             if (! p.moved) {
                 return this.open(p.bar, event)
             }
 
-            if (p.bar.s === p.s && p.bar.e === p.e) return
+            if (! p.allowed || (p.bar.s === p.s && p.bar.e === p.e)) return
 
             this.commit(p.bar, p.s, p.e)
         },
 
+        /** Abandon the drag in progress (Escape, a lost pointer): the bar goes back, nothing is sent. */
         cancel() {
             const p = this.pointer
-            this.pointer = null
-            this.dragging = false
-            this.hint = null
-            if (p && p.moved) {
+            if (! p) return
+            this.release(p)
+            if (p.moved && p.allowed) {
                 p.bar.s = p.s
                 p.bar.e = p.e
                 this.rebuild()
             }
+        },
+
+        release(p) {
+            this.pointer = null
+            this.dragging = false
+            this.hint = null
+            clearTimeout(p.press)
+            try { p.el.releasePointerCapture?.(p.id) } catch (e) {}
         },
 
         commit(bar, s0, e0) {
@@ -559,34 +629,78 @@ export default function packstubGantt(config) {
         },
 
         runAction(name, bar) {
-            this.menu = null
+            this.closeMenu()
             this.$wire.mountAction(name, { ganttRecord: bar.id })
         },
 
         open(bar, event) {
+            const url = safeUrl(bar.url)
+            const aside = !! (event && (event.metaKey || event.ctrlKey || event.shiftKey))
+
             if (this.barAction && this.actionsFor(bar).some((a) => a.name === this.barAction)) {
-                if (bar.url && event && (event.metaKey || event.ctrlKey || event.shiftKey)) {
-                    return window.open(bar.url, '_blank')
+                if (url && aside) {
+                    return window.open(url, '_blank')
                 }
                 return this.runAction(this.barAction, bar)
             }
 
-            if (bar.url) {
-                event && (event.metaKey || event.ctrlKey || event.shiftKey) ? window.open(bar.url, '_blank') : (window.location.href = bar.url)
+            if (url) {
+                aside ? window.open(url, '_blank') : (window.location.href = url)
             }
         },
 
+        /* ------------------------------------------------------------ the bar menu */
+
+        // Opened at the pointer (or at the bar, for a keyboard Shift+F10), kept inside
+        // the viewport; the first item takes focus, arrows move it, Escape returns it to the bar.
         openMenu(event, bar) {
             if (! this.actionsFor(bar).length) return
-            this.menu = { bar, x: event.clientX, y: event.clientY }
+            const from = event.currentTarget?.getBoundingClientRect?.()
+            const x = event.clientX || from?.left || 0
+            const y = event.clientY || from?.bottom || 0
+            this.menu = { bar, x, y, from: event.currentTarget ?? null }
+
+            this.$nextTick(() => {
+                const el = this.$refs.menu
+                if (! el || ! this.menu) return
+                const w = el.offsetWidth || 0
+                const h = el.offsetHeight || 0
+                this.menu.x = Math.max(0, Math.min(x, (window.innerWidth || Infinity) - w - 8))
+                this.menu.y = Math.max(0, Math.min(y, (window.innerHeight || Infinity) - h - 8))
+                this.menuItems()[0]?.focus?.()
+            })
+        },
+
+        closeMenu(restoreFocus = false) {
+            const from = this.menu?.from
+            this.menu = null
+            if (restoreFocus) from?.focus?.()
+        },
+
+        menuItems() {
+            return Array.from(this.$refs.menu?.querySelectorAll?.('[role="menuitem"]') ?? [])
+        },
+
+        /** Move the focus by `step` items, wrapping around. */
+        menuMove(step) {
+            const items = this.menuItems()
+            if (! items.length) return
+            const at = items.indexOf(document.activeElement)
+            const next = at < 0 ? (step > 0 ? 0 : items.length - 1) : (at + step + items.length) % items.length
+            items[next].focus?.()
+        },
+
+        /** Escape: the drag in the air first, then the menu. */
+        onEscape() {
+            if (this.pointer) return this.cancel()
+            if (this.menu) this.closeMenu(true)
         },
 
         createAt(event, row) {
             if (! this.createAction || row.type === 'group' || event.target.closest('.ps-gantt-bar')) return
 
             const rect = event.currentTarget.getBoundingClientRect()
-            const rtl = getComputedStyle(this.$root).direction === 'rtl'
-            const px = rtl ? rect.right - event.clientX : event.clientX - rect.left
+            const px = this.rtl() ? rect.right - event.clientX : event.clientX - rect.left
             const days = Math.floor(px / this.view.pxPerDay / this.unitDays) * this.unitDays
             const start = this.view.start + days * DAY
             const end = start + this.unitDays * DAY

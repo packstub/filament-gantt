@@ -15,7 +15,7 @@
     x-load-src="{{ FilamentAsset::getAlpineComponentSrc('gantt', 'packstub/filament-gantt') }}"
     x-load-css="[@js(FilamentAsset::getStyleHref('gantt', 'packstub/filament-gantt'))]"
     x-data="packstubGantt(@js($config))"
-    x-on:keydown.escape.window="menu = null"
+    x-on:keydown.escape.window="onEscape()"
     x-on:packstub-gantt-refresh.window="refresh(true)"
     @foreach ($config['refreshOn'] as $event)
         x-on:{{ $event }}.window="refresh(true)"
@@ -135,12 +135,15 @@
                                 }"
                                 :style="barStyle(bar)"
                                 :title="tooltip(bar)"
+                                :aria-label="tooltip(bar)"
                                 :data-id="bar.id"
+                                role="button"
                                 tabindex="0"
                                 x-on:pointerdown="down($event, bar)"
                                 x-on:pointermove="drag($event)"
                                 x-on:pointerup="up($event)"
                                 x-on:pointercancel="cancel()"
+                                x-on:lostpointercapture="cancel()"
                                 x-on:click.stop
                                 x-on:keydown.enter.prevent="open(bar, $event)"
                                 x-on:contextmenu.prevent.stop="openMenu($event, bar)"
@@ -164,7 +167,21 @@
     <div class="ps-gantt-hint" x-show="hint" x-cloak x-text="hint"></div>
 
     {{-- x-show and :style share the style attribute: object syntax keeps the display x-show sets --}}
-    <div class="ps-gantt-menu" x-show="menu" x-cloak :style="menu ? { left: menu.x + 'px', top: menu.y + 'px' } : {}" x-on:click.outside="menu = null" role="menu">
+    <div
+        class="ps-gantt-menu"
+        x-ref="menu"
+        x-show="menu"
+        x-cloak
+        :style="menu ? { left: menu.x + 'px', top: menu.y + 'px' } : {}"
+        x-on:click.outside="closeMenu()"
+        x-on:keydown.down.prevent="menuMove(1)"
+        x-on:keydown.up.prevent="menuMove(-1)"
+        x-on:keydown.home.prevent="menuMove(-Infinity)"
+        x-on:keydown.end.prevent="menuMove(Infinity)"
+        x-on:keydown.tab="closeMenu()"
+        role="menu"
+        :aria-label="t.bar_menu"
+    >
         <template x-for="action in (menu ? actionsFor(menu.bar) : [])" :key="action.name">
             <button type="button" class="ps-gantt-menu-item" :class="action.color && 'ps-gantt-menu-item-' + action.color" role="menuitem" x-on:click="runAction(action.name, menu.bar)">
                 <span class="ps-gantt-menu-icon" x-show="action.icon" x-html="action.icon"></span>
