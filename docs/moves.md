@@ -25,7 +25,7 @@ Snapping is relative to where the bar was: the distance dragged is rounded to wh
 
 The chart is naive: it works in wall-clock time and never converts. Every moment on the server side (a record's dates, what the browser sends, `lockedBefore()`, the window) is read as a wall-clock time and tagged UTC, whatever `app.timezone` is. A whole day is always 1440 minutes, so a three-day bar dragged across a daylight-saving change is still three days long, and a move is never mistaken for a resize because an hour went missing overnight.
 
-The `CarbonImmutable` instances handed to `canMove()`, `moveUsing()`, `afterMove()` and the `BarMoved` event carry that same wall-clock time, tagged with the app's timezone (`app.timezone`), the way Eloquent tags a record's dates. So they read naturally: `$start->isPast()`, `$start < now()`, `$end->lte($task->deadline)`, and writing one back with `$task->update(['starts_on' => $start])` stores the wall clock unchanged. Only the chart's own maths (snapping, durations, the lock) stays on UTC-tagged copies. One edge case: a datetime record sitting exactly inside the hour a spring-forward change skips has no valid wall-clock time in the app's zone, so its copy lands an hour later; the record itself is written from the chart's copy and is not affected.
+The `CarbonImmutable` instances handed to `canMove()`, `moveUsing()`, `afterMove()` and the `BarMoved` event carry that same wall-clock time, tagged with the app's timezone (`app.timezone`), the way Eloquent tags a record's dates. So they read naturally: `$start->isPast()`, `$start < now()`, `$end->lte($task->deadline)`, and writing one back with `$task->update(['starts_on' => $start])` stores the wall clock unchanged. Only the chart's own maths (snapping, durations, the lock) stays on UTC-tagged copies. One edge case: a datetime record sitting exactly inside the hour a spring-forward change skips has no valid wall-clock time in the app's zone, so its copy lands an hour later; Eloquent saves that hour forward as well, whichever path writes it (the default save or your `moveUsing()`), since a `datetime` cast resolves the missing wall-clock time the same way.
 
 ## Rules
 
@@ -48,14 +48,14 @@ Every rule takes a boolean or a closure that receives the record, and is checked
 | `movable()` | A change of position (same duration), any move of a milestone, and a change of both edges together with the duration (that is a move as well as a resize, so it needs both). |
 | `resizable()` | A change of duration, from either edge. Milestones are never resizable. |
 | `minDuration()` / `maxDuration()` | A resize that makes the bar shorter or longer than that. The browser knows the bounds too and stops the handle there. |
-| `lockedBefore($moment)` | A start moved to before the moment, a start that was already before it (the past stays as it happened), or an end moved to before it. A bar that started in the past may still change its end. |
+| `lockedBefore($moment)` | A start moved to before the moment, a start that was already before it (the past stays as it happened), or an end moved to before it. A bar that started in the past may still change its end. The message names the moment: a date for a midnight lock (`today()`), date and time otherwise (`now()`). |
 | `canMove()` | Whatever the closure says: `false` refuses with a generic message, a string refuses with that message. |
 
 The dates a closure receives are the chart's half-open range: a whole-day record's end is the day after its last day ([Bars](bars.md#whole-days-and-moments)), as wall-clock moments in the app's timezone ([Time zones](#time-zones)), so `$start->isPast()` means what it says.
 
 ## Your own move logic
 
-`moveUsing()` replaces the default save. Throw to refuse the move: the bar goes back and the exception's message is shown.
+`moveUsing()` replaces the default save. Throw `MoveRejected` to refuse the move: the bar goes back and the message is shown.
 
 ```php
 ->moveUsing(function (Task $task, CarbonImmutable $start, CarbonImmutable $end) {
@@ -64,7 +64,17 @@ The dates a closure receives are the chart's half-open range: a whole-day record
 })
 ```
 
-Throw `Packstub\Gantt\Exceptions\MoveRejected` to refuse with a message you want shown as-is; any other exception's message is shown too, or "The change did not go through." when it has none.
+Throw `Packstub\Gantt\Exceptions\MoveRejected` to refuse with a message you want shown as-is. Any other exception (the database's, a bug in the closure) is reported to your exception handler and the user sees "The change did not go through.": an exception's text, a query with its bindings say, belongs in the log, not in a notification. `Gantt::move()` itself lets such an exception propagate, so a call of your own sees it.
+
+```php
+use Packstub\Gantt\Exceptions\MoveRejected;
+
+->moveUsing(function (Booking $booking, CarbonImmutable $start, CarbonImmutable $end) {
+    throw_if($booking->isLocked(), new MoveRejected('This booking is locked.'));
+
+    $booking->update(['check_in' => $start, 'check_out' => $end]);
+})
+```
 
 ## After a move
 

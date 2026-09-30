@@ -18,7 +18,7 @@ There are no migrations: the chart reads and writes your own columns. The script
 The config file is optional; publish it to change the defaults (scale, weekend days, pixels per day, window bounds, date formats):
 
 ```bash
-php artisan vendor:publish --tag=filament-gantt-config
+php artisan vendor:publish --tag=packstub-gantt-config
 ```
 
 Registering the plugin on a panel is optional too (the pages and the widget work without it): `->plugin(GanttPlugin::make())`.

@@ -44,9 +44,15 @@ CI runs all three on Laravel 12/13 × Filament 4.*/5.* (floor `^4.13`), the JS s
   The browser rounds `minMinutes`/`maxMinutes` to whole units (`limits`) so what it allows the server accepts.
   `canCreateIn()` validates the clicked group before the create action mounts, like Kanban's: only `groups()`, groups of
   bars in `baseQuery()` and ungrouped (plus `creatableIn()`), never "a related record that exists".
-- Render once: `$ganttRendered` (`#[Locked]`, set by the trait's `rendered` hook) makes `getGanttConfig()` skip
-  `getState()` on every render after the first; the chart element is `wire:ignore`, so a re-render (an action's modal,
-  `$refresh`) never reaches the browser's chart. Tests that want the bars call `getGanttConfig(withState: true)`.
+- Render once: `$ganttRendered` (`#[Locked]`, set by `getGanttConfig()` when it produced the state, so by the render that
+  included the chart, not by a render that did not) makes `getGanttConfig()` skip `getState()` on every render after that;
+  the chart element is `wire:ignore`, so a re-render (an action's modal, `$refresh`) never reaches the browser's chart.
+  A config without a window makes `init()` call `refresh()` (the browser fetches the state itself). Tests that want the
+  bars call `getGanttConfig(withState: true)`.
+- Errors: `ganttMove` answers with a `MoveRejected`'s message only; any other exception is `report()`ed and answered with
+  the generic `failed` string (a `QueryException` carries the SQL and bindings). `Gantt::move()` lets it propagate.
+- `parse()` (what the browser sends) is strict: `Y-m-d`, `Y-m-d H:i[:s]`, years 1000–9999, a real calendar date; the
+  action arguments (`ganttRecord`, `ganttStart`, `ganttEnd`, `ganttGroup`) are read as strings or nothing.
 - `safeUrl()` (PHP and JS, same rules): strip C0/space, refuse `^[\/\\]{2}` (protocol-relative hosts), allow-list schemes.
 - In the Blade view, an element with `x-show` binds `:style` with the object syntax (a string `:style` overwrites the
   `display` that `x-show` sets).

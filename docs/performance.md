@@ -4,7 +4,7 @@
 
 The page renders the chart once as JSON: the window, the groups and the bars overlapping it. From then on the browser owns the chart. A drag moves a bar with no round trip; the server is asked afterwards with a renderless Livewire call that answers with one bar, never with HTML. Switching the scale, folding a group or scrolling touches the server not at all; changing the window or a filter loads the bars of the new window only.
 
-When something else on the page re-renders the component (an action's modal closing, a header action, `$refresh`), the chart element is `wire:ignore` and that render carries no bars at all: the component remembers it has rendered the chart once (`$ganttRendered`), so the bars are neither queried nor serialised again, and the browser reloads them renderless when an action asks it to (`packstub-gantt-refresh`).
+When something else on the page re-renders the component (an action's modal closing, a header action, `$refresh`), the chart element is `wire:ignore` and that render carries no bars at all: the component remembers that the chart's state has been rendered (`$ganttRendered`, set by the render that included the chart), so the bars are neither queried nor serialised again, and the browser reloads them renderless when an action asks it to (`packstub-gantt-refresh`). A chart that appears only on a later render (behind a tab, say) gets its bars on that render; should a chart ever start without a window, it asks the server for its state itself.
 
 All the maths lives in one pure function, `layout(bars, window, scale)` in `gantt.js`: bars in, pixel columns and rows out.
 

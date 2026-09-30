@@ -39,7 +39,7 @@ composer require packstub/filament-gantt
 php artisan filament:assets
 ```
 
-No migrations: the chart reads and writes your own start and end columns (`date` or `datetime` casts, or plain strings). The config file is optional (`php artisan vendor:publish --tag=filament-gantt-config`).
+No migrations: the chart reads and writes your own start and end columns (`date` or `datetime` casts, or plain strings). The config file is optional (`php artisan vendor:publish --tag=packstub-gantt-config`).
 
 A chart in thirty seconds, next to a resource:
 
@@ -119,7 +119,7 @@ A drag changes the bar in the browser and sends `ganttMove(id, start, end)`, a r
 ->afterMove(fn (Task $task, CarbonImmutable $start, CarbonImmutable $end) => $task->touch())
 ```
 
-Give your own persistence to `moveUsing()` and throw to refuse. `Packstub\Gantt\Events\BarMoved` fires after every saved move. The chart's own maths is on wall-clock moments tagged UTC, so a daylight-saving change never lengthens a bar; your closures and the event get the same moments in the app's timezone, so `$start->isPast()` reads naturally. Escape abandons a drag.
+Give your own persistence to `moveUsing()` and throw `MoveRejected` to refuse with a message (any other exception is reported and the user sees a generic one). `Packstub\Gantt\Events\BarMoved` fires after every saved move. The chart's own maths is on wall-clock moments tagged UTC, so a daylight-saving change never lengthens a bar; your closures and the event get the same moments in the app's timezone, so `$start->isPast()` reads naturally. Escape abandons a drag.
 
 Read more: [Moving and resizing](https://packstub.dev/docs/filament-gantt/moves).
 
