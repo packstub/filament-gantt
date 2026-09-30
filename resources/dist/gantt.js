@@ -27,11 +27,15 @@ const TONES = {
 const MILESTONE_PX = 14
 const LONG_PRESS_MS = 500
 
-/** A URL safe to navigate to: anything without a scheme, or http(s), mailto, tel. Never javascript:, data:, vbscript:. */
+/** A URL safe to navigate to: a path, or http(s), mailto, tel. Never javascript:, data:, vbscript:, nor a protocol-relative //host. */
 export function safeUrl(url) {
     const value = String(url ?? '').trim()
     if (! value) return null
-    const m = /^([a-z][a-z0-9+.-]*):/i.exec(value.replace(/[\u0000- ]+/g, ''))
+    // As a browser reads it: control characters and spaces removed.
+    const bare = value.replace(/[\u0000- ]+/g, '')
+    // Two leading slashes of either kind name a host: an open redirect, not a path.
+    if (/^[\/\\]{2}/.test(bare)) return null
+    const m = /^([a-z][a-z0-9+.-]*):/i.exec(bare)
 
     return ! m || ['http', 'https', 'mailto', 'tel'].includes(m[1].toLowerCase()) ? value : null
 }
@@ -330,11 +334,16 @@ export default function packstubGantt(config) {
             return config.unit === 'hour' ? 1 / 24 : 1
         },
 
-        /** The shortest and the longest a resize may make a bar, in ms (the server's minDuration()/maxDuration()). */
+        /**
+         * The shortest and the longest a resize may make a bar, in ms (the server's
+         * minDuration()/maxDuration()), rounded to whole units: a bound of 36 hours at
+         * the day unit stops the handle at 2 days, never at 1.5, which the server would
+         * snap to 1 and refuse.
+         */
         get limits() {
             const unit = this.unitDays * DAY
-            const min = Math.max(unit, (config.minMinutes || 0) * 60000)
-            const max = config.maxMinutes ? Math.max(min, config.maxMinutes * 60000) : Infinity
+            const min = Math.ceil(Math.max(unit, (config.minMinutes || 0) * 60000) / unit) * unit
+            const max = config.maxMinutes ? Math.max(min, Math.floor(config.maxMinutes * 60000 / unit) * unit) : Infinity
 
             return { min, max }
         },
@@ -444,11 +453,12 @@ export default function packstubGantt(config) {
         },
 
         // A whole-day bar reads as dates (its end day is the day before the chart's
-        // end); a bar with times reads as moments. The record decides, not the snap unit.
+        // end, so a one-day bar is one date); a bar with times reads as moments. The
+        // record decides, not the snap unit.
         tooltip(bar) {
             const allDay = !! bar.allDay
             const pattern = allDay ? config.dateFormat : config.dateTimeFormat
-            const dates = bar.milestone
+            const dates = bar.milestone || (allDay && bar.e - bar.s === DAY)
                 ? phpDate(bar.s, pattern, config.locale)
                 : `${phpDate(bar.s, pattern, config.locale)} – ${phpDate(allDay ? bar.e - DAY : bar.e, pattern, config.locale)}`
             const lines = [bar.label, dates]
@@ -494,7 +504,8 @@ export default function packstubGantt(config) {
         /* ------------------------------------------------------------ moving and resizing */
 
         down(event, bar) {
-            if (event.button !== 0 || bar.src._pending) return
+            // One pointer at a time: a second finger neither starts a drag nor ends the first.
+            if (event.button !== 0 || bar.src._pending || this.pointer) return
             const edge = event.target.dataset?.edge || null
             const allowed = edge ? bar.resizable : bar.movable
 
@@ -560,10 +571,14 @@ export default function packstubGantt(config) {
             this.commit(p.bar, p.s, p.e)
         },
 
-        /** Abandon the drag in progress (Escape, a lost pointer): the bar goes back, nothing is sent. */
-        cancel() {
+        /**
+         * Abandon the drag in progress (Escape, a lost pointer): the bar goes back,
+         * nothing is sent. A pointer event from another pointer (a second finger
+         * lifting) is not ours to act on.
+         */
+        cancel(event = null) {
             const p = this.pointer
-            if (! p) return
+            if (! p || (event?.pointerId !== undefined && event.pointerId !== p.id)) return
             this.release(p)
             if (p.moved && p.allowed) {
                 p.bar.s = p.s

@@ -18,6 +18,13 @@ test('a milestone reads as one date, a bar with progress says so', () => {
     assert.equal(c.tooltip(rowBar(c, '2')), 'Bar\nOct 5, 2026 – Oct 7, 2026\n40% done')
 })
 
+test('a whole-day bar of a single day reads as one date; a one-day bar with times still reads as two moments', () => {
+    const c = chart({ bars: [bar({ start: '2026-10-05', end: '2026-10-06' }), bar({ id: '2', start: '2026-10-05 00:00', end: '2026-10-06 00:00', allDay: false })] })
+
+    assert.equal(c.tooltip(rowBar(c, '1')), 'Bar\nOct 5, 2026')
+    assert.equal(c.tooltip(rowBar(c, '2')), 'Bar\nOct 5, 2026 00:00 – Oct 6, 2026 00:00')
+})
+
 /* ------------------------------------------------------------------ rows in the DOM */
 
 test('above 200 rows only the rows in view are drawn, and the pads keep the height', () => {
@@ -93,6 +100,51 @@ test('a resize is clamped to minDuration and maxDuration before the server sees 
     assert.equal(rowBar(d).s, Date.UTC(2026, 9, 8)) // 2 days at least
 })
 
+test('a min or max that is not a whole unit is rounded to one, so the server accepts what the browser allowed', () => {
+    const c = chart({ minMinutes: 36 * 60, maxMinutes: 4 * 1440 + 720, bars: [bar({ start: '2026-10-05', end: '2026-10-08' })] })
+    assert.deepEqual(c.limits, { min: 2 * DAY, max: 4 * DAY })
+
+    const p = press(c, rowBar(c), { edge: 'end' })
+    p.move(-96) // 1 day asked; 36 hours means 2 whole days at least, never 1.5
+    assert.equal(rowBar(c).e, Date.UTC(2026, 9, 7))
+    p.move(480) // 13 days asked; 4.5 days means 4 whole days at most
+    assert.equal(rowBar(c).e, Date.UTC(2026, 9, 9))
+    p.up(480)
+    assert.deepEqual(c.wire.moves, [['1', '2026-10-05 00:00', '2026-10-09 00:00']])
+
+    // at the hour unit the same bounds are whole hours
+    const h = chart({ unit: 'hour', minMinutes: 90, maxMinutes: 200, bars: [bar()] })
+    assert.deepEqual(h.limits, { min: 2 * 3600000, max: 3 * 3600000 })
+})
+
+test('one pointer at a time: a second finger neither starts a drag nor ends the first', () => {
+    const c = chart({ bars: [bar(), bar({ id: '2', start: '2026-10-10', end: '2026-10-12' })] })
+    const p = press(c, rowBar(c, '1'))
+    p.move(96)
+
+    // a second finger lands on another bar, then lifts (its lostpointercapture)
+    c.down({ button: 0, pointerId: 8, clientX: 300, clientY: 90, pointerType: 'touch', target: { dataset: {} }, currentTarget: element() }, rowBar(c, '2'))
+    assert.equal(c.pointer.id, 7)
+    c.cancel({ pointerId: 8 })
+    assert.equal(c.pointer.id, 7)
+    assert.equal(c.dragging, true)
+    assert.equal(rowBar(c, '1').s, Date.UTC(2026, 9, 7))
+
+    // the first finger's release commits its drag; its own lostpointercapture afterwards is nothing
+    p.up(96)
+    c.cancel({ pointerId: 7 })
+    assert.deepEqual(c.wire.moves, [['1', '2026-10-07 00:00', '2026-10-10 00:00']])
+    assert.equal(rowBar(c, '1').s, Date.UTC(2026, 9, 7))
+
+    // the dragging pointer's own pointercancel still puts the bar back
+    const d = chart({ bars: [bar()] })
+    const q = press(d, rowBar(d))
+    q.move(96)
+    d.cancel({ pointerId: 7 })
+    assert.equal(d.pointer, null)
+    assert.equal(rowBar(d).s, Date.UTC(2026, 9, 5))
+})
+
 test('Escape (or a lost pointer) cancels the drag: the bar goes back, nothing is sent', () => {
     const c = chart({ bars: [bar()] })
     const p = press(c, rowBar(c))
@@ -138,6 +190,13 @@ test('only http(s), mailto, tel and relative URLs are followed', () => {
     assert.equal(safeUrl('java\nscript:alert(1)'), null)
     assert.equal(safeUrl('data:text/html,hi'), null)
     assert.equal(safeUrl('vbscript:x'), null)
+    assert.equal(safeUrl('DATA:text/html,x'), null)
+    assert.equal(safeUrl('blob:https://x'), null)
+    assert.equal(safeUrl('file:///etc/passwd'), null)
+    assert.equal(safeUrl('//evil.test/x'), null)
+    assert.equal(safeUrl('/\t/evil.test'), null)
+    assert.equal(safeUrl('\\\\evil.test'), null)
+    assert.equal(safeUrl('/\\evil.test'), null)
     assert.equal(safeUrl(''), null)
     assert.equal(safeUrl('/tasks/1'), '/tasks/1')
     assert.equal(safeUrl('tasks/1?x=1#y'), 'tasks/1?x=1#y')

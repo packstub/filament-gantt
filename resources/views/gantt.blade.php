@@ -7,7 +7,8 @@
 {{--
     The browser owns the chart: bars are drawn from JSON by Alpine and moved
     optimistically; Livewire only answers renderless calls. wire:ignore keeps a
-    page re-render (an action's modal, say) from resetting it.
+    page re-render (an action's modal, say) from resetting it, and such a render
+    carries no bars at all (see getGanttConfig()): the browser has its own.
 --}}
 <div
     wire:ignore
@@ -142,8 +143,8 @@
                                 x-on:pointerdown="down($event, bar)"
                                 x-on:pointermove="drag($event)"
                                 x-on:pointerup="up($event)"
-                                x-on:pointercancel="cancel()"
-                                x-on:lostpointercapture="cancel()"
+                                x-on:pointercancel="cancel($event)"
+                                x-on:lostpointercapture="cancel($event)"
                                 x-on:click.stop
                                 x-on:keydown.enter.prevent="open(bar, $event)"
                                 x-on:contextmenu.prevent.stop="openMenu($event, bar)"
