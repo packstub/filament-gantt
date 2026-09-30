@@ -1,0 +1,175 @@
+@php
+    use Filament\Support\Facades\FilamentAsset;
+
+    $config = $this->getGanttConfig();
+@endphp
+
+{{--
+    The browser owns the chart: bars are drawn from JSON by Alpine and moved
+    optimistically; Livewire only answers renderless calls. wire:ignore keeps a
+    page re-render (an action's modal, say) from resetting it.
+--}}
+<div
+    wire:ignore
+    x-load
+    x-load-src="{{ FilamentAsset::getAlpineComponentSrc('gantt', 'packstub/filament-gantt') }}"
+    x-load-css="[@js(FilamentAsset::getStyleHref('gantt', 'packstub/filament-gantt'))]"
+    x-data="packstubGantt(@js($config))"
+    x-on:keydown.escape.window="menu = null"
+    x-on:packstub-gantt-refresh.window="refresh(true)"
+    @foreach ($config['refreshOn'] as $event)
+        x-on:{{ $event }}.window="refresh(true)"
+    @endforeach
+    class="ps-gantt"
+    :class="{ 'ps-gantt-is-dragging': dragging, 'ps-gantt-is-readonly': readOnly, 'ps-gantt-is-compact': compact }"
+    :style="height ? '--ps-gantt-height:' + height : null"
+>
+    <div class="ps-gantt-toolbar">
+        <div class="ps-gantt-seg" role="group" :aria-label="t.zoom">
+            <template x-for="s in ['day', 'week', 'month']" :key="s">
+                <button type="button" class="ps-gantt-seg-btn" :class="{ 'ps-gantt-seg-on': scale === s }" :aria-pressed="scale === s" x-on:click="setScale(s)" x-text="t[s]"></button>
+            </template>
+        </div>
+
+        <button type="button" class="ps-gantt-btn" x-on:click="scrollToToday()" x-text="t.today"></button>
+
+        <div class="ps-gantt-range" :aria-label="t.range">
+            <label class="ps-gantt-field">
+                <span x-text="t.from"></span>
+                <input type="date" x-model="range.start" x-on:change="applyWindow()">
+            </label>
+            <label class="ps-gantt-field">
+                <span x-text="t.until"></span>
+                <input type="date" x-model="range.end" x-on:change="applyWindow()">
+            </label>
+        </div>
+
+        <template x-for="filter in filters" :key="filter.name">
+            <div class="ps-gantt-filter-wrap">
+                <template x-if="filter.type === 'dateRange'">
+                    <div class="ps-gantt-range ps-gantt-filter" :class="{ 'ps-gantt-filter-on': active[filter.name].from || active[filter.name].until }">
+                        <span class="ps-gantt-filter-label" x-text="filter.label"></span>
+                        <label class="ps-gantt-field"><input type="date" x-model="active[filter.name].from" x-on:change="refresh()" :aria-label="filter.label + ' ' + t.from"></label>
+                        <span class="ps-gantt-dash">–</span>
+                        <label class="ps-gantt-field"><input type="date" x-model="active[filter.name].until" x-on:change="refresh()" :aria-label="filter.label + ' ' + t.until"></label>
+                    </div>
+                </template>
+                <template x-if="filter.type !== 'dateRange'">
+                    <label class="ps-gantt-field ps-gantt-filter" :class="{ 'ps-gantt-filter-on': active[filter.name] }">
+                        <span x-text="filter.label"></span>
+                        <select x-model="active[filter.name]" x-on:change="refresh()">
+                            <option value="" x-text="t.all"></option>
+                            <template x-for="option in filter.options" :key="option.value">
+                                <option :value="option.value" x-text="option.label"></option>
+                            </template>
+                        </select>
+                    </label>
+                </template>
+            </div>
+        </template>
+
+        <div class="ps-gantt-spacer"></div>
+
+        <span class="ps-gantt-count" x-text="t.bars.replace(':count', bars.length)"></span>
+    </div>
+
+    <div class="ps-gantt-scroll" x-ref="scroll" x-on:scroll.passive="onScroll()">
+        <div class="ps-gantt-head">
+            <div class="ps-gantt-corner"></div>
+            <div class="ps-gantt-axis" :style="'width:' + view.width + 'px'">
+                <div class="ps-gantt-axis-row ps-gantt-axis-top">
+                    <template x-for="c in view.top" :key="c.key">
+                        <div class="ps-gantt-cell" :style="cell(c)"><span x-text="c.label"></span></div>
+                    </template>
+                </div>
+                <div class="ps-gantt-axis-row ps-gantt-axis-bottom">
+                    <template x-for="c in view.columns" :key="c.key">
+                        <div class="ps-gantt-cell" :class="{ 'ps-gantt-cell-weekend': c.weekend, 'ps-gantt-cell-today': c.today }" :style="cell(c)"><span x-text="c.label"></span></div>
+                    </template>
+                </div>
+            </div>
+        </div>
+
+        <div class="ps-gantt-body" x-ref="body">
+            <div class="ps-gantt-grid" :style="'width:' + view.width + 'px'">
+                <template x-for="s in view.shades" :key="s.key">
+                    <div class="ps-gantt-shade" :style="cell(s)"></div>
+                </template>
+                <template x-for="c in view.columns" :key="c.key">
+                    <div class="ps-gantt-line" :style="'inset-inline-start:' + c.x + 'px'"></div>
+                </template>
+                <div class="ps-gantt-today-line" x-show="view.todayX !== null" :style="{ 'inset-inline-start': view.todayX + 'px' }"></div>
+            </div>
+
+            <div class="ps-gantt-pad" :style="'height:' + slice.top + 'px'"></div>
+
+            <template x-for="row in visibleRows" :key="row.key">
+                <div class="ps-gantt-row" :class="'ps-gantt-row-' + row.type" :style="'height:' + row.height + 'px'">
+                    <div class="ps-gantt-label">
+                        <template x-if="row.type === 'group'">
+                            <button type="button" class="ps-gantt-fold" x-on:click="toggle(row.group.key)" :title="row.collapsed ? t.expand : t.collapse" :aria-expanded="! row.collapsed">
+                                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" :class="{ 'ps-gantt-fold-closed': row.collapsed }"><path d="m6 8 4 4 4-4"/></svg>
+                            </button>
+                        </template>
+                        <span class="ps-gantt-dot" x-show="row.type !== 'bar' && row.group.color" :style="{ background: tone(row.group.color) }"></span>
+                        <span class="ps-gantt-label-text" :class="{ 'ps-gantt-label-group': row.type !== 'bar' }" x-text="row.label" :title="row.label"></span>
+                        <span class="ps-gantt-label-count" x-show="row.type !== 'bar'" x-text="row.group.count"></span>
+                    </div>
+
+                    <div
+                        class="ps-gantt-canvas"
+                        :style="'width:' + view.width + 'px'"
+                        :class="{ 'ps-gantt-canvas-creatable': createAction && row.type !== 'group' }"
+                        :title="createAction && row.type !== 'group' ? t.create_here : null"
+                        x-on:click="createAt($event, row)"
+                    >
+                        <template x-for="bar in row.bars" :key="bar.id">
+                            <div
+                                class="ps-gantt-bar"
+                                :class="{
+                                    'ps-gantt-bar-milestone': bar.milestone,
+                                    'ps-gantt-bar-pending': bar.src._pending,
+                                    'ps-gantt-bar-flash': flash === bar.id,
+                                    'ps-gantt-bar-locked': ! bar.movable,
+                                    'ps-gantt-bar-clickable': !! (barAction || bar.url),
+                                }"
+                                :style="barStyle(bar)"
+                                :title="tooltip(bar)"
+                                :data-id="bar.id"
+                                tabindex="0"
+                                x-on:pointerdown="down($event, bar)"
+                                x-on:pointermove="drag($event)"
+                                x-on:pointerup="up($event)"
+                                x-on:pointercancel="cancel()"
+                                x-on:click.stop
+                                x-on:keydown.enter.prevent="open(bar, $event)"
+                                x-on:contextmenu.prevent.stop="openMenu($event, bar)"
+                            >
+                                <span class="ps-gantt-progress" x-show="bar.progress !== null && bar.progress !== undefined && ! bar.milestone" :style="{ width: (bar.progress || 0) + '%' }"></span>
+                                <span class="ps-gantt-bar-label" x-text="bar.label"></span>
+                                <span class="ps-gantt-handle ps-gantt-handle-start" data-edge="start" x-show="bar.resizable"></span>
+                                <span class="ps-gantt-handle ps-gantt-handle-end" data-edge="end" x-show="bar.resizable"></span>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </template>
+
+            <div class="ps-gantt-pad" :style="'height:' + slice.bottom + 'px'"></div>
+        </div>
+
+        <div class="ps-gantt-empty" x-show="! bars.length" x-text="t.empty"></div>
+    </div>
+
+    <div class="ps-gantt-hint" x-show="hint" x-cloak x-text="hint"></div>
+
+    {{-- x-show and :style share the style attribute: object syntax keeps the display x-show sets --}}
+    <div class="ps-gantt-menu" x-show="menu" x-cloak :style="menu ? { left: menu.x + 'px', top: menu.y + 'px' } : {}" x-on:click.outside="menu = null" role="menu">
+        <template x-for="action in (menu ? actionsFor(menu.bar) : [])" :key="action.name">
+            <button type="button" class="ps-gantt-menu-item" :class="action.color && 'ps-gantt-menu-item-' + action.color" role="menuitem" x-on:click="runAction(action.name, menu.bar)">
+                <span class="ps-gantt-menu-icon" x-show="action.icon" x-html="action.icon"></span>
+                <span x-text="action.label"></span>
+            </button>
+        </template>
+    </div>
+</div>
