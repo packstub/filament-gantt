@@ -2,6 +2,7 @@
 
 namespace Packstub\Gantt;
 
+use Carbon\CarbonImmutable;
 use Closure;
 use Illuminate\Database\Eloquent\Builder;
 
@@ -58,8 +59,8 @@ class Filter
 
     /**
      * How a chosen value narrows the query. Default: `where(<name>, <value>)` for a
-     * select; `whereDate(<name>, >=, from)` and `whereDate(<name>, <=, until)` for a
-     * date range (the closure receives `['from' => ?string, 'until' => ?string]`).
+     * select; `where(<name>, >=, from)` and `where(<name>, <, the day after until)`
+     * for a date range (the closure receives `['from' => ?string, 'until' => ?string]`).
      */
     public function query(Closure $callback): static
     {
@@ -134,12 +135,15 @@ class Filter
 
         $column = $query->qualifyColumn($this->name);
 
+        // Plain ranges, never DATE(column): the column's index stays in use. The last
+        // day is included by asking for less than the day after it, which reads a
+        // date and a datetime column the same way.
         if ($from !== null) {
-            $query->whereDate($column, '>=', $from);
+            $query->where($column, '>=', $from);
         }
 
         if ($until !== null) {
-            $query->whereDate($column, '<=', $until);
+            $query->where($column, '<', CarbonImmutable::parse($until, 'UTC')->addDay()->toDateString());
         }
     }
 

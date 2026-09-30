@@ -67,6 +67,7 @@ it('never runs a bar action on a record outside the chart', function () {
 
 it('opens the create form with the clicked spot filled in', function () {
     $acme = project('Acme');
+    task('A', '2026-10-01', '2026-10-02', ['project_id' => $acme->id]); // the row that was clicked
 
     Livewire::test(TaskGantt::class)
         ->mountAction('create', ['ganttStart' => '2026-10-06 00:00', 'ganttEnd' => '2026-10-09 00:00', 'ganttGroup' => (string) $acme->id])
@@ -106,8 +107,25 @@ it('never writes a group the chart does not know into the foreign key', function
     expect(Task::where('title', 'Crafted')->exists())->toBeFalse();
 });
 
+it('never creates under a related record that exists but has no row on the chart', function () {
+    $acme = project('Acme');
+    $other = project('Other'); // another tenant's, say: no bar of the chart is in it
+    task('A', '2026-10-01', '2026-10-02', ['project_id' => $acme->id]);
+
+    Livewire::test(TaskGantt::class)
+        ->assertActionVisible('create', ['ganttStart' => '2026-10-06 00:00', 'ganttGroup' => (string) $acme->id])
+        ->assertActionHidden('create', ['ganttStart' => '2026-10-06 00:00', 'ganttGroup' => (string) $other->id])
+        ->call('mountAction', 'create', ['ganttStart' => '2026-10-06 00:00', 'ganttGroup' => (string) $other->id]) // what a crafted request would send
+        ->set('mountedActions.0.data.title', 'Parked')
+        ->call('callMountedAction');
+
+    expect(Task::where('title', 'Parked')->exists())->toBeFalse()
+        ->and(Task::where('project_id', $other->id)->exists())->toBeFalse();
+});
+
 it('leaves a group field the user cleared alone', function () {
     $acme = project('Acme');
+    task('A', '2026-10-01', '2026-10-02', ['project_id' => $acme->id]);
 
     $component = new class extends TaskGantt
     {

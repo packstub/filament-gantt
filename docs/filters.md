@@ -46,7 +46,7 @@ use Packstub\Gantt\Filter;
 ```
 
 - `Filter::select()` (or `Filter::make()`): by default `where(<name>, <value>)`.
-- `Filter::dateRange()`: two date inputs; by default `whereDate(<name>, '>=', from)` and `whereDate(<name>, '<=', until)`, either side optional. A `query()` closure receives `['from' => ?string, 'until' => ?string]`.
+- `Filter::dateRange()`: two date inputs; by default `where(<name>, '>=', from)` and `where(<name>, '<', until + 1 day)`, either side optional: plain ranges that keep the column's index in use and include the whole last day of a datetime column too. A `query()` closure receives `['from' => ?string, 'until' => ?string]`.
 
 Filters live in the URL too (`?f.assignee_id=3&f.starts_on.from=2026-10-01`).
 

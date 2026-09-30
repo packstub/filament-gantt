@@ -35,7 +35,8 @@ enum Unit: string
     public function snapFrom(CarbonImmutable $moment, CarbonImmutable $reference): CarbonImmutable
     {
         $unit = $this->minutes();
-        $delta = (int) round($reference->diffInMinutes($moment, false) / $unit) * $unit;
+        // Half a unit rounds up (−0.5 → 0), the way the browser's Math.round does.
+        $delta = (int) floor($reference->diffInMinutes($moment, false) / $unit + 0.5) * $unit;
 
         return $reference->addMinutes($delta);
     }

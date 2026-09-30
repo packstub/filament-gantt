@@ -25,7 +25,7 @@ Snapping is relative to where the bar was: the distance dragged is rounded to wh
 
 The chart is naive: it works in wall-clock time and never converts. Every moment on the server side (a record's dates, what the browser sends, `lockedBefore()`, the window) is read as a wall-clock time and tagged UTC, whatever `app.timezone` is. A whole day is always 1440 minutes, so a three-day bar dragged across a daylight-saving change is still three days long, and a move is never mistaken for a resize because an hour went missing overnight.
 
-The `CarbonImmutable` instances handed to `canMove()`, `moveUsing()`, `afterMove()` and the `BarMoved` event follow that convention: they carry the wall-clock time the chart shows, with a UTC tag. Format them or compare them; if you need a real instant (to send a reminder, say), rebuild it in the app's zone: `$start->shiftTimezone(config('app.timezone'))`.
+The `CarbonImmutable` instances handed to `canMove()`, `moveUsing()`, `afterMove()` and the `BarMoved` event carry that same wall-clock time, tagged with the app's timezone (`app.timezone`), the way Eloquent tags a record's dates. So they read naturally: `$start->isPast()`, `$start < now()`, `$end->lte($task->deadline)`, and writing one back with `$task->update(['starts_on' => $start])` stores the wall clock unchanged. Only the chart's own maths (snapping, durations, the lock) stays on UTC-tagged copies. One edge case: a datetime record sitting exactly inside the hour a spring-forward change skips has no valid wall-clock time in the app's zone, so its copy lands an hour later; the record itself is written from the chart's copy and is not affected.
 
 ## Rules
 
@@ -51,7 +51,7 @@ Every rule takes a boolean or a closure that receives the record, and is checked
 | `lockedBefore($moment)` | A start moved to before the moment, a start that was already before it (the past stays as it happened), or an end moved to before it. A bar that started in the past may still change its end. |
 | `canMove()` | Whatever the closure says: `false` refuses with a generic message, a string refuses with that message. |
 
-The dates a closure receives are the chart's half-open range: a whole-day record's end is the day after its last day ([Bars](bars.md#whole-days-and-moments)), as wall-clock moments tagged UTC ([Time zones](#time-zones)).
+The dates a closure receives are the chart's half-open range: a whole-day record's end is the day after its last day ([Bars](bars.md#whole-days-and-moments)), as wall-clock moments in the app's timezone ([Time zones](#time-zones)), so `$start->isPast()` means what it says.
 
 ## Your own move logic
 

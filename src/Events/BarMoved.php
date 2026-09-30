@@ -10,7 +10,8 @@ use Illuminate\Foundation\Events\Dispatchable;
  * A bar was moved or resized on a Gantt. The dates are the bar's span as the chart
  * sees it: a half-open range, so a date-only record ending on the 7th has an end of
  * the 8th at 00:00 here. A milestone has start == end. They are wall-clock moments
- * tagged UTC (see Gantt): the same reading whatever the app's timezone.
+ * in the app's timezone, the way Eloquent tags a record's dates, so a comparison
+ * with now() reads naturally (see Gantt on time zones).
  */
 class BarMoved
 {

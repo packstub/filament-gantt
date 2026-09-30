@@ -143,6 +143,10 @@ it('keeps only urls a bar may safely follow', function (string $url, ?string $ke
     'javascript, disguised' => [" Java\nScript:alert(1)", null],
     'data' => ['data:text/html,hi', null],
     'vbscript' => ['vbscript:x', null],
+    'protocol-relative host' => ['//evil.test/x', null],
+    'protocol-relative host, disguised' => ["/\t/evil.test", null],
+    'backslash host' => ['\\\\evil.test', null],
+    'slash and backslash host' => ['/\\evil.test', null],
     'empty' => ['  ', null],
     'absolute path' => ['/tasks/1', '/tasks/1'],
     'relative path' => ['tasks/1?x=1#y', 'tasks/1?x=1#y'],
@@ -278,8 +282,29 @@ it('applies select and date-range filters and ignores values it did not offer', 
         ->and(array_column($gantt->getBars(['starts_on' => ['from' => '2026-10-10']]), 'label'))->toBe(['B'])
         ->and(array_column($gantt->getBars(['starts_on' => ['until' => '2026-10-10']]), 'label'))->toBe(['A'])
         ->and(array_column($gantt->getBars(['starts_on' => ['from' => "2026-10-10' or 1=1"]]), 'label'))->toBe(['A', 'B'])
+        ->and(array_column($gantt->getBars(['starts_on' => 'garbage']), 'label'))->toBe(['A', 'B'])
+        ->and(array_column($gantt->getBars(['project_id' => ['x']]), 'label'))->toBe(['A', 'B'])
         ->and($gantt->getFilters()[0]->getLabel())->toBe('Project')
         ->and($gantt->getFilters()[1]->toArray())->toMatchArray(['name' => 'starts_on', 'label' => 'Starts On', 'type' => 'dateRange', 'options' => []]);
+});
+
+it('narrows a date range with plain ranges on the column, the last day included whatever the cast', function () {
+    shift('First thing', '2026-10-10 00:00:00', '2026-10-10 02:00:00');
+    shift('Late on the last day', '2026-10-12 23:30:00', '2026-10-13 02:00:00');
+    shift('The day after', '2026-10-13 00:00:00', '2026-10-13 02:00:00');
+    shift('The day before', '2026-10-09 23:59:00', '2026-10-10 02:00:00');
+
+    $gantt = shifts()->filters([Filter::dateRange('starts_at')]);
+
+    DB::enableQueryLog();
+    $bars = $gantt->getBars(['starts_at' => ['from' => '2026-10-10', 'until' => '2026-10-12']]);
+    $sql = collect(DB::getQueryLog())->pluck('query')->implode(' ');
+    DB::disableQueryLog();
+
+    expect(array_column($bars, 'label'))->toBe(['First thing', 'Late on the last day'])
+        ->and($sql)->not->toContain('strftime', 'date(')
+        ->and($sql)->toContain('"starts_at" >= ?', '"starts_at" < ?')
+        ->and(array_column($gantt->getBars(['starts_at' => ['until' => '2026-10-09']]), 'label'))->toBe(['The day before']);
 });
 
 it('lets a filter narrow the query its own way', function () {
@@ -324,6 +349,13 @@ it('snaps the delta to the unit on the server whatever the browser sent, relativ
         ->and($task->fresh()->ends_on->toDateString())->toBe('2026-10-08')
         ->and($shift->fresh()->starts_at->format('Y-m-d H:i'))->toBe('2026-10-05 09:00')
         ->and($shift->fresh()->ends_at->format('Y-m-d H:i'))->toBe('2026-10-05 14:00');
+
+    // exactly half a unit rounds up either way, like the browser's Math.round
+    $task->update(['starts_on' => '2026-10-05', 'ends_on' => '2026-10-07']);
+    gantt()->move((string) $task->id, '2026-10-04 12:00');
+    expect($task->fresh()->starts_on->toDateString())->toBe('2026-10-05');
+    gantt()->move((string) $task->id, '2026-10-05 12:00');
+    expect($task->fresh()->starts_on->toDateString())->toBe('2026-10-06');
 });
 
 it('moves a datetime record by whole days with the default unit, keeping its time of day', function () {
@@ -375,7 +407,7 @@ it('keeps whole days whole across a daylight-saving change', function (string $t
     $gantt->move((string) $task->id, "{$to} 00:00", CarbonImmutable::parse($to, 'UTC')->addDays(3)->format('Y-m-d H:i'));
     expect($task->fresh()->starts_on->toDateString())->toBe($to)
         ->and($task->fresh()->ends_on->toDateString())->toBe($stored);
-    Event::assertDispatched(BarMoved::class, fn (BarMoved $e) => ! $e->isResize() && $e->start->timezoneName === 'UTC');
+    Event::assertDispatched(BarMoved::class, fn (BarMoved $e) => ! $e->isResize() && $e->start->timezoneName === $timezone && $e->start->format('Y-m-d H:i') === "{$to} 00:00");
 
     $task->update(['starts_on' => $from, 'ends_on' => $until]);
     $gantt->move((string) $task->id, "{$to} 00:00");
@@ -391,6 +423,39 @@ it('keeps whole days whole across a daylight-saving change', function (string $t
     'America/New_York, clocks back on 2026-11-01' => ['America/New_York', '2026-10-28', '2026-10-30', '2026-10-31', '2026-11-02'],
     'Europe/Bucharest, clocks forward on 2026-03-29' => ['Europe/Bucharest', '2026-03-25', '2026-03-27', '2026-03-28', '2026-03-30'],
 ]);
+
+it('hands the closures and the event the moments in the app\'s timezone, so a comparison with now() holds', function () {
+    inTimezone('Europe/Bucharest');
+    CarbonImmutable::setTestNow('2026-10-14 10:00:00'); // 10:00 on the wall clock
+    Event::fake([BarMoved::class]);
+    $shift = shift('Early', '2026-10-14 07:00:00', '2026-10-14 08:00:00');
+    $seen = [];
+
+    $gantt = shifts()
+        ->canMove(function (Shift $s, CarbonImmutable $start, CarbonImmutable $end, CarbonImmutable $previousStart) use (&$seen) {
+            $seen['canMove'] = [$start->timezoneName, $start->format('Y-m-d H:i'), $start->isPast(), $end->isPast(), $start < now(), $previousStart->isPast()];
+
+            return true;
+        })
+        ->afterMove(function (Shift $s, CarbonImmutable $start, CarbonImmutable $end) use (&$seen) {
+            $seen['afterMove'] = [$start->timezoneName, $end->format('Y-m-d H:i'), $end->isPast()];
+        });
+
+    $gantt->move((string) $shift->id, '2026-10-14 08:00');
+
+    expect($seen['canMove'])->toBe(['Europe/Bucharest', '2026-10-14 08:00', true, true, true, true])
+        ->and($seen['afterMove'])->toBe(['Europe/Bucharest', '2026-10-14 09:00', true])
+        ->and($shift->fresh()->starts_at->format('Y-m-d H:i'))->toBe('2026-10-14 08:00');
+    Event::assertDispatched(BarMoved::class, fn (BarMoved $e) => $e->start->timezoneName === 'Europe/Bucharest'
+        && $e->start->format('Y-m-d H:i') === '2026-10-14 08:00'
+        && $e->previousStart->format('Y-m-d H:i') === '2026-10-14 07:00'
+        && ! $e->isResize());
+
+    // a move into the future is the future, an hour ahead is not the past
+    $gantt->move((string) $shift->id, '2026-10-14 11:00');
+    expect($seen['canMove'][2])->toBeFalse()
+        ->and($seen['afterMove'][2])->toBeFalse();
+});
 
 it('refuses to relocate a bar that cannot move by dragging both its edges', function () {
     $task = task('Fixed', '2026-10-05', '2026-10-07');
@@ -528,11 +593,14 @@ it('registers a bar action from a name, an instance or a class', function () {
 
 it('prefills a create form with the clicked spot, the group only when the chart knows it', function () {
     $acme = project('Acme');
+    $other = project('Other'); // exists, but has no row on the chart
+    task('A', '2026-10-01', '2026-10-02', ['project_id' => $acme->id]);
     shift('Taken', '2026-10-05 08:00:00', '2026-10-05 12:00:00', ['room' => 'A']);
     $gantt = gantt()->createAction(CreateAction::make());
     $rooms = shifts()->createAction(CreateAction::make());
 
     expect($gantt->prefill('2026-10-06 00:00', '2026-10-09 00:00', (string) $acme->id))->toBe(['starts_on' => '2026-10-06', 'ends_on' => '2026-10-08', 'project_id' => (string) $acme->id])
+        ->and($gantt->prefill('2026-10-06 00:00', '2026-10-09 00:00', (string) $other->id))->toBe(['starts_on' => '2026-10-06', 'ends_on' => '2026-10-08'])
         ->and($gantt->prefill('2026-10-06 00:00', '2026-10-09 00:00', '424242'))->toBe(['starts_on' => '2026-10-06', 'ends_on' => '2026-10-08'])
         ->and($gantt->prefill('2026-10-06 00:00', null, null))->toBe(['starts_on' => '2026-10-06', 'ends_on' => '2026-10-06'])
         ->and($rooms->prefill('2026-10-06 09:00', '2026-10-06 11:00', 'A'))->toBe(['starts_at' => '2026-10-06 09:00:00', 'ends_at' => '2026-10-06 11:00:00', 'room' => 'A'])
@@ -540,18 +608,22 @@ it('prefills a create form with the clicked spot, the group only when the chart 
         ->and($gantt->prefill('nope', null, null))->toBe([]);
 });
 
-it('knows which groups a click may create in', function () {
+it('knows which groups a click may create in: the rows on the chart, never a related record that is not', function () {
     $acme = project('Acme');
     $beta = project('Beta');
     task('Stray', '2026-10-05', '2026-10-06', ['project_id' => 99]);
+    task('A', '2026-10-05', '2026-10-06', ['project_id' => $acme->id]);
     $gantt = gantt()->createAction(CreateAction::make());
 
     expect($gantt->canCreateIn(null))->toBeTrue()
         ->and($gantt->canCreateIn(''))->toBeTrue()
-        ->and($gantt->canCreateIn((string) $acme->id))->toBeTrue() // a related record that exists
-        ->and($gantt->canCreateIn('99'))->toBeTrue() // a group a bar of the chart is in
+        ->and($gantt->canCreateIn((string) $acme->id))->toBeTrue() // a group a bar of the chart is in
+        ->and($gantt->canCreateIn('99'))->toBeTrue() // even one with no related record
+        ->and($gantt->canCreateIn((string) $beta->id))->toBeFalse() // a related record that exists, but no row a user could click
         ->and($gantt->canCreateIn('424242'))->toBeFalse()
         ->and($gantt->canCreateIn(['x']))->toBeFalse()
+        ->and($gantt->groups([Group::make($acme->id)->label('Acme')])->canCreateIn((string) $beta->id))->toBeFalse() // an explicit list is the list
+        ->and($gantt->groups([Group::make($beta->id)->label('Beta')])->canCreateIn((string) $beta->id))->toBeTrue()
         ->and($gantt->groups([Group::make('planned')])->groupBy(null)->canCreateIn('planned'))->toBeTrue()
         ->and($gantt->groupBy('project')->groups(null)->readOnly()->canCreateIn((string) $acme->id))->toBeFalse()
         ->and(gantt()->canCreateIn((string) $acme->id))->toBeFalse() // no create action

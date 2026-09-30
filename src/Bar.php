@@ -67,7 +67,8 @@ class Bar implements Arrayable
     /**
      * A URL the bar links to when there is no click action (Ctrl/⌘-click always opens
      * it). Only http(s), mailto, tel and relative URLs are kept: a `javascript:` or
-     * `data:` value (a user-editable link column, say) is dropped, never followed.
+     * `data:` value (a user-editable link column, say) is dropped, never followed,
+     * and so is a protocol-relative `//host` that would leave the site.
      */
     public function url(?string $url): static
     {
@@ -113,7 +114,7 @@ class Bar implements Arrayable
         return $bar;
     }
 
-    /** The URL if it is safe to follow (no scheme, or http, https, mailto, tel), otherwise null. */
+    /** The URL if it is safe to follow (a path, or http, https, mailto, tel), otherwise null. */
     public static function safeUrl(?string $url): ?string
     {
         $url = trim((string) $url);
@@ -122,8 +123,16 @@ class Bar implements Arrayable
             return null;
         }
 
-        // The scheme as a browser would read it: control characters and spaces removed.
-        $scheme = preg_match('/^([a-z][a-z0-9+.\-]*):/i', preg_replace('/[\x00-\x20]+/', '', $url) ?? '', $m) ? strtolower($m[1]) : null;
+        // The URL as a browser would read it: control characters and spaces removed.
+        $bare = preg_replace('/[\x00-\x20]+/', '', $url) ?? '';
+
+        // Two leading slashes of either kind name a host (`//evil.test`, `\\evil.test`,
+        // `/\evil.test`): an open redirect, not a path.
+        if (preg_match('/^[\/\\\\]{2}/', $bare)) {
+            return null;
+        }
+
+        $scheme = preg_match('/^([a-z][a-z0-9+.\-]*):/i', $bare, $m) ? strtolower($m[1]) : null;
 
         return $scheme === null || in_array($scheme, ['http', 'https', 'mailto', 'tel'], true) ? $url : null;
     }

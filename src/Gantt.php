@@ -34,8 +34,10 @@ use Packstub\Gantt\Exceptions\MoveRejected;
  * the browser sends, lockedBefore(), the window) is read as a wall-clock time and
  * tagged UTC, so a duration is the same number of minutes on both sides of a
  * daylight-saving change and a whole day is always 1440 minutes. The closures
- * (canMove(), moveUsing(), afterMove()) and BarMoved receive those UTC-tagged
- * moments; format them, or compare them, do not convert them.
+ * (canMove(), moveUsing(), afterMove()) and BarMoved receive copies of those
+ * moments in the app's timezone (the same wall-clock time, tagged the way Eloquent
+ * tags a record's dates), so `$start->isPast()` or a comparison with now() reads
+ * naturally; only the chart's own maths stays on the UTC-tagged values.
  */
 class Gantt
 {
@@ -439,11 +441,12 @@ class Gantt
 
     /**
      * Which groups a click may create in: `fn (string $group): bool`. By default a
-     * group the chart knows: one listed in groups(), one a bar of the chart is in,
-     * or (for a `BelongsTo` group) a related record that exists. The group is
-     * written to the new record only when this says yes; a form field for the
-     * foreign key (`Select::make('project_id')->relationship(...)`) stays the place
-     * to scope it to the tenant.
+     * group the chart knows: one listed in groups() or one a bar of the chart is
+     * in, the only rows a user can click; a related record that exists but has no
+     * row on the chart is refused. The group is written to the new record only
+     * when this says yes; a form field for the foreign key
+     * (`Select::make('project_id')->relationship(...)`) stays the place to scope
+     * it to the tenant.
      */
     public function creatableIn(?Closure $callback): static
     {
@@ -911,8 +914,13 @@ class Gantt
             }
         }
 
+        // The closures and the event see the same wall-clock moments in the app's
+        // timezone, the tag Eloquent gives a record's dates, so now() and isPast()
+        // read naturally; the maths above and the save below keep the UTC-tagged ones.
+        [$start, $end, $from, $until] = array_map($this->inAppTimezone(...), [$newStart, $newEnd, $previousStart, $previousEnd]);
+
         if ($this->canMove) {
-            $verdict = ($this->canMove)($record, $newStart, $newEnd, $previousStart, $previousEnd);
+            $verdict = ($this->canMove)($record, $start, $end, $from, $until);
 
             if ($verdict === false) {
                 throw new MoveRejected(__('packstub-gantt::gantt.not_allowed'));
@@ -925,7 +933,7 @@ class Gantt
 
         try {
             if ($this->moveUsing) {
-                ($this->moveUsing)($record, $newStart, $newEnd, $previousStart, $previousEnd);
+                ($this->moveUsing)($record, $start, $end, $from, $until);
             } else {
                 $this->store($record, $newStart, $newEnd, $milestone, $previousStart);
             }
@@ -935,10 +943,10 @@ class Gantt
             throw new MoveRejected($e->getMessage() ?: __('packstub-gantt::gantt.failed'), previous: $e);
         }
 
-        BarMoved::dispatch($record, $previousStart, $previousEnd, $newStart, $newEnd, $this->key);
+        BarMoved::dispatch($record, $from, $until, $start, $end, $this->key);
 
         if ($this->afterMove) {
-            ($this->afterMove)($record, $newStart, $newEnd, $previousStart, $previousEnd);
+            ($this->afterMove)($record, $start, $end, $from, $until);
         }
 
         unset($this->records[(string) $id]);
@@ -1125,8 +1133,9 @@ class Gantt
             return false;
         }
 
-        return $this->baseQuery()->where($relation->getQualifiedForeignKeyName(), $group)->exists()
-            || $relation->getRelated()->newQuery()->whereKey($group)->exists();
+        // A related record that exists but has no bar on the chart is no row the user
+        // could click: accepting it would let a crafted request park a record under it.
+        return $this->baseQuery()->where($relation->getQualifiedForeignKeyName(), $group)->exists();
     }
 
     /**
@@ -1235,6 +1244,12 @@ class Gantt
         } catch (\Throwable) {
             return null;
         }
+    }
+
+    /** The same wall-clock moment tagged with the app's timezone: what the closures and the event receive. */
+    protected function inAppTimezone(CarbonImmutable $moment): CarbonImmutable
+    {
+        return $moment->shiftTimezone(config('app.timezone') ?: 'UTC');
     }
 
     /** What the browser sent ("Y-m-d H:i", or anything Carbon reads) as a wall-clock moment tagged UTC. */
