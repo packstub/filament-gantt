@@ -1,0 +1,33 @@
+<?php
+
+namespace Packstub\Gantt;
+
+use Filament\Contracts\Plugin;
+use Filament\Panel;
+
+/**
+ * Optional: `->plugin(GanttPlugin::make())` on a panel. The pages and the widget
+ * work without it (the assets are registered by the service provider); it is
+ * here so a panel can list the plugin like any other.
+ */
+class GanttPlugin implements Plugin
+{
+    public static function make(): static
+    {
+        return app(static::class);
+    }
+
+    public static function get(): static
+    {
+        return filament(app(static::class)->getId());
+    }
+
+    public function getId(): string
+    {
+        return 'packstub-gantt';
+    }
+
+    public function register(Panel $panel): void {}
+
+    public function boot(Panel $panel): void {}
+}
