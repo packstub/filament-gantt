@@ -1,6 +1,30 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import { chart, bar, rowBar, press, element, safeUrl, layout, DAY } from './harness.mjs'
+
+/* ------------------------------------------------------------------ start-up */
+
+test('a config without a window (a chart that appeared after the component\'s first render) asks the server for its state', () => {
+    const c = chart({ window: { start: null, end: null }, bars: [], groups: [] })
+    c.init()
+    assert.deepEqual(c.wire.refreshes, [[{}, null, null]])
+    assert.deepEqual(c.wire.windows, [])
+
+    // a config with its state starts from it
+    const d = chart({ bars: [bar()] })
+    d.init()
+    assert.deepEqual(d.wire.refreshes, [])
+    assert.equal(d.view.rows.length, 1)
+})
+
+test('a vertical pan may start on a bar: only the horizontal drag is claimed', async () => {
+    const css = await readFile(new URL('../../resources/dist/gantt.css', import.meta.url), 'utf8')
+    const block = /\.ps-gantt-bar \{[^}]*\}/.exec(css)[0]
+
+    assert.match(block, /touch-action: pan-y;/)
+    assert.doesNotMatch(css, /touch-action: none/)
+})
 
 /* ------------------------------------------------------------------ tooltips */
 
@@ -215,6 +239,26 @@ test('a click follows a safe url and ignores an unsafe one', () => {
 
     c.open({ id: '1', url: '/tasks/1', movable: true }, { metaKey: false, ctrlKey: false, shiftKey: false })
     assert.equal(href, '/tasks/1')
+})
+
+test('a link opened aside gets no opener: the new tab cannot steer this one', () => {
+    const opened = []
+    globalThis.window.open = (...args) => opened.push(args)
+    const aside = { metaKey: false, ctrlKey: true, shiftKey: false }
+
+    const c = chart()
+    c.open({ id: '1', url: 'https://example.test/a', movable: true }, aside)
+
+    // with a click action too: the modifier means "the link, in a new tab"
+    const d = chart({ barAction: 'edit', barActions: [{ name: 'edit' }] })
+    d.open({ id: '1', url: 'https://example.test/b', movable: true }, aside)
+    d.open({ id: '1', url: 'javascript:alert(1)', movable: true }, aside)
+
+    assert.deepEqual(opened, [
+        ['https://example.test/a', '_blank', 'noopener,noreferrer'],
+        ['https://example.test/b', '_blank', 'noopener,noreferrer'],
+    ])
+    assert.deepEqual(d.wire.mounted, [['edit', { ganttRecord: '1' }]])
 })
 
 /* ------------------------------------------------------------------ the bar menu */

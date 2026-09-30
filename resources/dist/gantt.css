@@ -247,7 +247,8 @@
     cursor: grab;
     user-select: none;
     -webkit-user-select: none;
-    touch-action: none;
+    /* A horizontal drag is ours; a vertical pan that starts on a bar still scrolls (the browser then cancels our pointer). */
+    touch-action: pan-y;
     transition: box-shadow 0.12s, opacity 0.15s;
 }
 

@@ -32,9 +32,11 @@ export function chart(over = {}) {
     c.$root = { style: { setProperty() {} } }
     c.$nextTick = (fn) => fn()
     c.$dispatch = () => {}
-    c.wire = { moves: [], mounted: [] }
+    c.wire = { moves: [], mounted: [], refreshes: [], windows: [] }
     c.$wire = {
         ganttMove: (...args) => { c.wire.moves.push(args); return { then: () => ({ catch: () => ({ finally() {} }) }) } },
+        ganttRefresh: (...args) => { c.wire.refreshes.push(args); return { then() {} } },
+        ganttWindow: (...args) => { c.wire.windows.push(args); return { then() {} } },
         mountAction: (name, args) => { c.wire.mounted.push([name, args]) },
     }
     c.view = layout(c.bars, c.axis(), c.scale)

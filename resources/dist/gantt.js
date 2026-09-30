@@ -307,10 +307,12 @@ export default function packstubGantt(config) {
                 this.scrollToToday(false)
             })
 
-            // The URL asked for another window or filters than the page rendered with.
+            // The URL asked for another window or filters than the page rendered
+            // with; or the page rendered no state at all (a chart that appeared after
+            // the component's first render): the server is asked for it.
             if (fromUrl.window) {
                 this.applyWindow()
-            } else if (fromUrl.filters) {
+            } else if (fromUrl.filters || ! this.period.start) {
                 this.refresh()
             }
 
@@ -651,16 +653,19 @@ export default function packstubGantt(config) {
         open(bar, event) {
             const url = safeUrl(bar.url)
             const aside = !! (event && (event.metaKey || event.ctrlKey || event.shiftKey))
+            // A new tab never gets window.opener: the page it lands on (a user-typed
+            // link, say) cannot steer this one.
+            const openAside = () => window.open(url, '_blank', 'noopener,noreferrer')
 
             if (this.barAction && this.actionsFor(bar).some((a) => a.name === this.barAction)) {
                 if (url && aside) {
-                    return window.open(url, '_blank')
+                    return openAside()
                 }
                 return this.runAction(this.barAction, bar)
             }
 
             if (url) {
-                aside ? window.open(url, '_blank') : (window.location.href = url)
+                aside ? openAside() : (window.location.href = url)
             }
         },
 
