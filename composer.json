@@ -6,6 +6,7 @@
         "laravel",
         "filament",
         "filament-plugin",
+        "filament-v4",
         "filament-v5",
         "filament-gantt",
         "gantt",
@@ -37,7 +38,7 @@
     ],
     "require": {
         "php": "^8.3",
-        "filament/filament": "^4.0 || ^5.0",
+        "filament/filament": "^4.13 || ^5.0",
         "illuminate/contracts": "^12.0 || ^13.0",
         "spatie/laravel-package-tools": "^1.92"
     },
@@ -60,6 +61,7 @@
     "scripts": {
         "test": "pest",
         "test:filter": "pest --filter",
+        "test:js": "node --test tests/js/*.test.mjs",
         "lint": "vendor/bin/pint",
         "lint:test": "vendor/bin/pint --test"
     },

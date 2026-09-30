@@ -30,7 +30,7 @@ A Gantt chart and resource timeline for Filament: any Eloquent query with a star
 
 | Plugin | Filament | Laravel | PHP |
 | --- | --- | --- | --- |
-| 1.x | 4.x, 5.x | 12.x, 13.x | 8.3+ |
+| 1.x | 4.13+, 5.x | 12.x, 13.x | 8.3+ |
 
 ## Installation
 
@@ -70,7 +70,7 @@ class TasksGantt extends GanttResourcePage
 }
 ```
 
-Register it in the resource's `getPages()`: `'gantt' => TasksGantt::route('/gantt')`. A standalone `GanttPage` and a `GanttWidget` ask for the same `gantt()` method.
+Register it in the resource's `getPages()`: `'gantt' => TasksGantt::route('/gantt')`. A standalone `GanttPage` and a `GanttWidget` ask for the same `gantt()` method. (`TaskResource::fields()` is your own helper returning the form components; `->schema(fn (Schema $schema) => TaskResource::form($schema))` reuses the resource's form.)
 
 Read more: [Installation](https://packstub.dev/docs/filament-gantt/installation).
 
@@ -119,7 +119,7 @@ A drag changes the bar in the browser and sends `ganttMove(id, start, end)`, a r
 ->afterMove(fn (Task $task, CarbonImmutable $start, CarbonImmutable $end) => $task->touch())
 ```
 
-Give your own persistence to `moveUsing()` and throw to refuse. `Packstub\Gantt\Events\BarMoved` fires after every saved move.
+Give your own persistence to `moveUsing()` and throw to refuse. `Packstub\Gantt\Events\BarMoved` fires after every saved move. Dates are wall-clock moments (tagged UTC), so a daylight-saving change never lengthens a bar; Escape abandons a drag.
 
 Read more: [Moving and resizing](https://packstub.dev/docs/filament-gantt/moves).
 

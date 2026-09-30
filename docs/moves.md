@@ -2,7 +2,7 @@
 
 ## What happens on a drag
 
-1. The bar follows the pointer, snapped to the unit (whole days by default), and a hint shows the dates it would get. Dragging the body keeps the duration; dragging an edge changes it.
+1. The bar follows the pointer, snapped to the unit (whole days by default), and a hint shows the dates it would get. Dragging the body keeps the duration; dragging an edge changes it, within `minDuration()` and `maxDuration()`. Escape puts the bar back and sends nothing.
 2. On release the bar stays where it was dropped, marked as pending, and the browser asks the server (`ganttMove`, a renderless Livewire call: nothing is re-rendered).
 3. The server loads the record through the chart's `query()`, snaps the dates again and checks the rules below.
 4. Your move logic runs (by default: write the start and end attributes and save).
@@ -19,7 +19,13 @@ use Packstub\Gantt\Enums\Unit;
 ->snapTo(Unit::Hour)   // datetime records
 ```
 
-The browser snaps while dragging and the server snaps what it receives, so a crafted request cannot store a time the chart would not draw.
+Snapping is relative to where the bar was: the distance dragged is rounded to whole units and the time of day is kept, so a shift at 08:00 dragged by a day is still at 08:00 with the default unit, and a bar that started at 09:30 keeps its half hour when dragged by the hour. The browser snaps while dragging and the server snaps what it receives the same way, so a crafted request cannot store a move the chart would not draw.
+
+## Time zones
+
+The chart is naive: it works in wall-clock time and never converts. Every moment on the server side (a record's dates, what the browser sends, `lockedBefore()`, the window) is read as a wall-clock time and tagged UTC, whatever `app.timezone` is. A whole day is always 1440 minutes, so a three-day bar dragged across a daylight-saving change is still three days long, and a move is never mistaken for a resize because an hour went missing overnight.
+
+The `CarbonImmutable` instances handed to `canMove()`, `moveUsing()`, `afterMove()` and the `BarMoved` event follow that convention: they carry the wall-clock time the chart shows, with a UTC tag. Format them or compare them; if you need a real instant (to send a reminder, say), rebuild it in the app's zone: `$start->shiftTimezone(config('app.timezone'))`.
 
 ## Rules
 
@@ -39,13 +45,13 @@ Every rule takes a boolean or a closure that receives the record, and is checked
 | Rule | Refuses |
 | --- | --- |
 | `readOnly()` | Everything. |
-| `movable()` | A change of position (same duration), and any move of a milestone. |
+| `movable()` | A change of position (same duration), any move of a milestone, and a change of both edges together with the duration (that is a move as well as a resize, so it needs both). |
 | `resizable()` | A change of duration, from either edge. Milestones are never resizable. |
-| `minDuration()` / `maxDuration()` | A resize that makes the bar shorter or longer than that. |
+| `minDuration()` / `maxDuration()` | A resize that makes the bar shorter or longer than that. The browser knows the bounds too and stops the handle there. |
 | `lockedBefore($moment)` | A start moved to before the moment, a start that was already before it (the past stays as it happened), or an end moved to before it. A bar that started in the past may still change its end. |
 | `canMove()` | Whatever the closure says: `false` refuses with a generic message, a string refuses with that message. |
 
-The dates a closure receives are the chart's half-open range: a whole-day record's end is the day after its last day ([Bars](bars.md#whole-days-and-moments)).
+The dates a closure receives are the chart's half-open range: a whole-day record's end is the day after its last day ([Bars](bars.md#whole-days-and-moments)), as wall-clock moments tagged UTC ([Time zones](#time-zones)).
 
 ## Your own move logic
 

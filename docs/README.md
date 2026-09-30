@@ -2,7 +2,7 @@
 
 ![Filament Gantt](https://raw.githubusercontent.com/packstub/art/main/filament-gantt/banner.jpg)
 
-A Gantt chart and resource timeline for Filament v4 and v5. Any Eloquent query with a start and an end becomes draggable bars on a day, week or month axis, grouped by whatever you like; the browser owns the chart, so a drag lands at once, and the server checks every rule again in the background. Free and open source (MIT). The sibling of [Filament Kanban](https://packstub.dev/docs/filament-kanban).
+A Gantt chart and resource timeline for Filament v4 (4.13+) and v5. Any Eloquent query with a start and an end becomes draggable bars on a day, week or month axis, grouped by whatever you like; the browser owns the chart, so a drag lands at once, and the server checks every rule again in the background. Free and open source (MIT). The sibling of [Filament Kanban](https://packstub.dev/docs/filament-kanban).
 
 - Repository: [github.com/packstub/filament-gantt](https://github.com/packstub/filament-gantt)
 - Packagist: [packstub/filament-gantt](https://packagist.org/packages/packstub/filament-gantt)
@@ -65,9 +65,11 @@ class TasksGantt extends GanttResourcePage
 }
 ```
 
+(`TaskResource::fields()` is your own helper returning the form components; `->schema(fn (Schema $schema) => TaskResource::form($schema))` reuses the resource's form.)
+
 ## Requirements
 
-PHP 8.3+, Laravel 12 or 13, Filament 4 or 5.
+PHP 8.3+, Laravel 12 or 13, Filament 4.13+ or 5.
 
 ---
 

@@ -20,7 +20,9 @@ The chart works in half-open ranges `[start, end)`:
 | `date` (whole days) | `starts_on = 2026-10-05`, `ends_on = 2026-10-07` | three days, the 7th included |
 | `datetime` (moments) | `starts_at = … 09:00`, `ends_at = … 12:30` | from 09:00 to 12:30 |
 
-Whatever the browser does, the record is written back in the same convention: a whole-day record resized to end on the 9th gets `ends_on = 2026-10-09`. `->dateOnly()` (or `->dateOnly(false)`) overrides the detection for plain string columns.
+Whatever the browser does, the record is written back in the same convention: a whole-day record resized to end on the 9th gets `ends_on = 2026-10-09`. `->dateOnly()` (or `->dateOnly(false)`) overrides the detection for plain string columns. The tooltip follows the record too: whole days read as dates, moments as date and time.
+
+Dates are handled as wall-clock times, never converted between zones, so a daylight-saving change never lengthens or shortens a bar ([Time zones](moves.md#time-zones)).
 
 ## Milestones
 
@@ -31,7 +33,7 @@ A record with a null end is a milestone: a diamond at its start, movable but not
 ->milestone(fn (Task $task) => $task->type === TaskType::Milestone)
 ```
 
-Whole-day records with `starts_on == ends_on` are one-day bars, not milestones, unless `milestone()` says otherwise.
+Whole-day records with `starts_on == ends_on` are one-day bars, not milestones, unless `milestone()` says otherwise. A record `milestone()` flags keeps whatever end it has: when the diamond is dragged, its end moves by the same number of days.
 
 ## The Bar shape
 
@@ -55,7 +57,7 @@ use Packstub\Gantt\Bar;
 | `color()` | A colour name, a Filament palette, an enum implementing `HasColor`, or any CSS colour. |
 | `progress()` | 0–100, a fill inside the bar; shown in the tooltip. |
 | `tooltip()` | An extra line under the dates in the tooltip. |
-| `url()` | Where a click goes when there is no [click action](actions.md); Ctrl/⌘-click always opens it in a new tab. |
+| `url()` | Where a click goes when there is no [click action](actions.md); Ctrl/⌘-click always opens it in a new tab. Only `http(s)`, `mailto`, `tel` and relative URLs are kept: a `javascript:` or `data:` value from a user-editable column is dropped, never followed. |
 | `actions()` | The chart's bar actions this bar offers, by name (default: all). |
 
 Bars are plain data drawn in the browser, so a chart of a few hundred bars is a few kilobytes of JSON rather than a few hundred Blade components. Eager-load what the closures touch (`->query(fn () => Task::query()->with('assignee'))`).

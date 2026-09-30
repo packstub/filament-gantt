@@ -14,7 +14,9 @@ use Filament\Actions\EditAction;
 ->barAction(EditAction::make()->schema(TaskResource::fields())->slideOver())
 ```
 
-The bar's record is the action's record: inject `$record` (or `Task $record`) anywhere, as on a table. It is loaded through the chart's `query()`, so an action can never reach a record the user cannot see on the chart; for such a bar the action is hidden and refused. A drag never counts as a click. Without a click action, a bar with a `url()` follows it; Ctrl/⌘-click opens it in a new tab either way.
+`TaskResource::fields()` here is your own helper returning the resource's form components; Filament has no such method. `->schema(fn (Schema $schema) => TaskResource::form($schema))` does the same with the resource's `form()`.
+
+The bar's record is the action's record: inject `$record` (or `Task $record`) anywhere, as on a table. It is loaded through the chart's `query()`, so an action can never reach a record the user cannot see on the chart; for such a bar the action is hidden and refused. A drag never counts as a click, even one on a bar that cannot move. Without a click action, a bar with a `url()` follows it; Ctrl/⌘-click opens it in a new tab either way.
 
 ## The right-click menu
 
@@ -29,7 +31,11 @@ The bar's record is the action's record: inject `$record` (or `Task $record`) an
 ->barAction('edit')
 ```
 
+The menu is a keyboard menu too: Shift+F10 on a focused bar opens it under the bar, the arrows move between items, Enter runs one, Escape closes it and returns to the bar.
+
 Your own `hidden()`, `visible()`, `authorize()` and `disabled()` rules keep working, with the record injected. The menu is built once for the whole chart (never per bar), so an action a bar should not offer at all is left out with `Bar::actions()` ([Bars](bars.md#the-bar-shape)).
+
+On a chart page the actions do **not** consult the model policy by themselves (Filament wires that on resource tables only): say what each one needs, `EditAction::make()->authorize('update')`, `DeleteAction::make()->authorize('delete')`, or a `->hidden(fn (Task $record) => ...)` of your own. The page's own access (`canAccess()`, the resource's `viewAny`) is checked as usual.
 
 Once an action has run, the chart reloads its bars (keeping the window and the filters), so an edited bar shows its new dates, a deleted one disappears.
 
@@ -54,6 +60,18 @@ use Filament\Actions\CreateAction;
 ```
 
 The model is taken from the chart's query unless you set one with `->model()`. The group goes to the group column, or to the foreign key of a `BelongsTo` group relation; nothing is set for other relations. `mountUsing()`/`fillForm()` and `mutateDataUsing()` you gave the action still run first.
+
+Only what the form has no field for is filled in on save. A field the form does have belongs to the user: a `project_id` Select they cleared stays empty, the clicked row does not put it back.
+
+### Which groups a click may create in
+
+The server checks the group of the clicked row before the form opens, whatever the browser sent (`Gantt::canCreateIn()`): a group listed in `groups()`, one a bar of the chart is in, or, for a `BelongsTo` group, a related record that exists. An unknown key never reaches the record; the create action is hidden and refused for it. To decide yourself (a tenant's own projects, rooms still open for booking):
+
+```php
+->creatableIn(fn (string $group) => Project::whereBelongsTo(Filament::getTenant())->whereKey($group)->exists())
+```
+
+In a tenant-scoped app, give the form a field for the foreign key with the scoped options (`Select::make('project_id')->relationship('project', 'name')` under the tenant's query) so the value is validated there as well.
 
 Read-only charts get no create click, and the server refuses a create on them.
 

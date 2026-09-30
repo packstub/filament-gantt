@@ -50,6 +50,8 @@ use Packstub\Gantt\Filter;
 
 Filters live in the URL too (`?f.assignee_id=3&f.starts_on.from=2026-10-01`).
 
+The toolbar's controls are native `<select>` and `<input type="date">` elements styled like Filament's inputs, not Filament form components: the chart is drawn by the browser and a filter change is a renderless call, so nothing on the page re-renders. A form-based filter (`Filter::form()`) is on the roadmap; until then, put a real Filament form in the page's header actions and dispatch `packstub-gantt-refresh` from it.
+
 ## Refreshing
 
 The chart reloads its bars, keeping the window and the filters:

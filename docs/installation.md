@@ -4,7 +4,7 @@
 
 - PHP 8.3 or newer
 - Laravel 12 or 13
-- Filament 4 or 5
+- Filament 4.13 or newer, or Filament 5
 
 ## 1. Require the package
 
@@ -53,6 +53,8 @@ class TasksGantt extends GanttResourcePage
     }
 }
 ```
+
+`TaskResource::fields()` is your own helper returning the resource's form components (`->schema(fn (Schema $schema) => TaskResource::form($schema))` reuses the resource's `form()` instead).
 
 Register it in the resource like any other page:
 
