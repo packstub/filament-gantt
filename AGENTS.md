@@ -13,7 +13,7 @@ composer test:js            # browser side: node --test tests/js (layout(), drag
 composer lint               # Pint
 ```
 
-CI runs all three on Laravel 12/13 × Filament 4.*/5.* (floor `^4.13`).
+CI runs all three on Laravel 12/13 × Filament 4.*/5.* (floor `^4.13`), the JS suite on a pinned Node 22 (`actions/setup-node`).
 
 ## Layout
 
@@ -35,11 +35,19 @@ CI runs all three on Laravel 12/13 × Filament 4.*/5.* (floor `^4.13`).
 - Dates: the chart works in half-open ranges `[start, end)`. A date-only record ending on the 7th has a chart end of the
   8th 00:00 and is written back as the 7th. A milestone (null end, or a datetime end equal to its start) has start == end.
 - Time zones: naive on purpose. `toCarbon()`/`parse()` return wall-clock moments tagged UTC (`shiftTimezone('UTC')`), so
-  minute maths never crosses a DST change; every Carbon handed to closures/events follows that. Never `setTimezone()` in
-  the chart's path. Snapping is relative (`Unit::snapFrom()`): the delta is rounded, the time of day kept, like the browser.
+  minute maths never crosses a DST change. The closures (`canMove`, `moveUsing`, `afterMove`) and `BarMoved` get
+  `inAppTimezone()` copies (`shiftTimezone(app.timezone)`: same wall clock, Eloquent's tag) so `isPast()`/`now()` work;
+  `store()` and the rules keep the UTC ones. Never `setTimezone()` in the chart's path. Snapping is relative
+  (`Unit::snapFrom()`): the delta is rounded (half up, like `Math.round`), the time of day kept, like the browser.
 - Rules live on the server: anything the browser checks (`movable`, `resizable`, snapping, min/max duration…)
   `Gantt::move()` checks again; a move is classified by its edges (both edges + new length needs movable AND resizable).
-  `canCreateIn()` validates the clicked group before the create action mounts, like Kanban's.
+  The browser rounds `minMinutes`/`maxMinutes` to whole units (`limits`) so what it allows the server accepts.
+  `canCreateIn()` validates the clicked group before the create action mounts, like Kanban's: only `groups()`, groups of
+  bars in `baseQuery()` and ungrouped (plus `creatableIn()`), never "a related record that exists".
+- Render once: `$ganttRendered` (`#[Locked]`, set by the trait's `rendered` hook) makes `getGanttConfig()` skip
+  `getState()` on every render after the first; the chart element is `wire:ignore`, so a re-render (an action's modal,
+  `$refresh`) never reaches the browser's chart. Tests that want the bars call `getGanttConfig(withState: true)`.
+- `safeUrl()` (PHP and JS, same rules): strip C0/space, refuse `^[\/\\]{2}` (protocol-relative hosts), allow-list schemes.
 - In the Blade view, an element with `x-show` binds `:style` with the object syntax (a string `:style` overwrites the
   `display` that `x-show` sets).
 - Every change needs a test; `CHANGELOG.md` stays current. Strings in `resources/lang/{en,ro,ru,de}`.

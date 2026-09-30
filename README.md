@@ -119,7 +119,7 @@ A drag changes the bar in the browser and sends `ganttMove(id, start, end)`, a r
 ->afterMove(fn (Task $task, CarbonImmutable $start, CarbonImmutable $end) => $task->touch())
 ```
 
-Give your own persistence to `moveUsing()` and throw to refuse. `Packstub\Gantt\Events\BarMoved` fires after every saved move. Dates are wall-clock moments (tagged UTC), so a daylight-saving change never lengthens a bar; Escape abandons a drag.
+Give your own persistence to `moveUsing()` and throw to refuse. `Packstub\Gantt\Events\BarMoved` fires after every saved move. The chart's own maths is on wall-clock moments tagged UTC, so a daylight-saving change never lengthens a bar; your closures and the event get the same moments in the app's timezone, so `$start->isPast()` reads naturally. Escape abandons a drag.
 
 Read more: [Moving and resizing](https://packstub.dev/docs/filament-gantt/moves).
 
@@ -197,7 +197,8 @@ The same pages live in the [`docs/`](https://github.com/packstub/filament-gantt/
 ## Testing
 
 ```bash
-composer test
+composer test      # the Pest suite
+composer test:js   # the browser side (layout, drag, menu) on plain Node, no packages
 ```
 
 ## Changelog

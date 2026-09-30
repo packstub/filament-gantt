@@ -31,7 +31,7 @@ The bar's record is the action's record: inject `$record` (or `Task $record`) an
 ->barAction('edit')
 ```
 
-The menu is a keyboard menu too: Shift+F10 on a focused bar opens it under the bar, the arrows move between items, Enter runs one, Escape closes it and returns to the bar.
+The menu is a keyboard menu too: the context-menu key on a focused bar (Shift+F10 or the Menu key where the browser has one, Windows and Linux; on macOS a right-click on the focused bar) opens it under the bar, the arrows move between items, Enter runs one, Escape closes it and returns to the bar.
 
 Your own `hidden()`, `visible()`, `authorize()` and `disabled()` rules keep working, with the record injected. The menu is built once for the whole chart (never per bar), so an action a bar should not offer at all is left out with `Bar::actions()` ([Bars](bars.md#the-bar-shape)).
 
@@ -65,7 +65,7 @@ Only what the form has no field for is filled in on save. A field the form does 
 
 ### Which groups a click may create in
 
-The server checks the group of the clicked row before the form opens, whatever the browser sent (`Gantt::canCreateIn()`): a group listed in `groups()`, one a bar of the chart is in, or, for a `BelongsTo` group, a related record that exists. An unknown key never reaches the record; the create action is hidden and refused for it. To decide yourself (a tenant's own projects, rooms still open for booking):
+The server checks the group of the clicked row before the form opens, whatever the browser sent (`Gantt::canCreateIn()`): a group listed in `groups()` or one a bar of the chart is in, the only rows there are to click, plus the ungrouped row. Anything else is refused, a related record that exists but has no row on the chart included (a project the chart's `query()` does not show, say): the key never reaches the record and the create action is hidden for it. To decide yourself (a tenant's own projects, rooms still open for booking):
 
 ```php
 ->creatableIn(fn (string $group) => Project::whereBelongsTo(Filament::getTenant())->whereKey($group)->exists())
