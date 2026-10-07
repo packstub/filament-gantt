@@ -4,12 +4,12 @@ A bar is a record with a start and an end. The definition names the attributes a
 
 ```php
 ->start('starts_on')->end('ends_on')   // defaults: starts_at, ends_at
-->label('title')                        // an attribute, or fn (Task $task): string
+->label('title')                        // an attribute (an enum reads as its label), or fn (Task $task): string
 ->color('priority')                     // an attribute (a colour name, or an enum implementing HasColor), or a closure
 ->progress('progress')                  // 0–100, an attribute or a closure
 ```
 
-Colours are names (`gray`, `sky`, `amber`, `emerald`, `rose`… or your panel's `primary`, `success`, `warning`, `danger`, `info`), a Filament palette such as `Color::Sky` (its 500 shade is drawn) or any CSS colour. Without one, the bars use the panel's primary colour.
+Colours are names (`gray`, `sky`, `amber`, `emerald`, `rose`… or your panel's `primary`, `success`, `warning`, `danger`, `info`, or a colour you registered on the panel, `brand`), a Filament palette such as `Color::Sky` (its 500 shade is drawn), an enum implementing `HasColor`, or a CSS colour: `#0ea5e9`, `rgb(…)`, `hsl(…)`, `oklch(…)` and the other colour functions with plain values, `var(--my-colour)`. Anything else is dropped and the bar uses the panel's primary colour: the value ends up in the bar's style, so a colour taken from user data (a project's colour field) cannot bring declarations of its own (`red; position: fixed…`), on the server or in the browser. Without one, the bars use the panel's primary colour.
 
 ## Whole days and moments
 
@@ -53,12 +53,12 @@ use Packstub\Gantt\Bar;
 
 | Method | What it does |
 | --- | --- |
-| `label()` | The text inside the bar (beside a milestone). |
-| `color()` | A colour name, a Filament palette, an enum implementing `HasColor`, or any CSS colour. |
+| `label()` | The text inside the bar, or just after it when it does not fit (beside a milestone). |
+| `color()` | A colour name, a Filament palette, an enum implementing `HasColor`, or a CSS colour (see above). |
 | `progress()` | 0–100, a fill inside the bar; shown in the tooltip. |
 | `tooltip()` | An extra line under the dates in the tooltip. |
 | `url()` | Where a click goes when there is no [click action](actions.md); Ctrl/⌘-click always opens it in a new tab. Only `http(s)`, `mailto`, `tel` and relative URLs are kept: a `javascript:` or `data:` value from a user-editable column is dropped, never followed. |
-| `actions()` | The chart's bar actions this bar offers, by name (default: all). |
+| `actions()` | The chart's bar actions this bar offers, by name (default: all); the server refuses the others for this bar too. Within these, a bar offers only the actions the user may run on its record ([Actions](actions.md#which-actions-a-bar-offers)). |
 
 Bars are plain data drawn in the browser, so a chart of a few hundred bars is a few kilobytes of JSON rather than a few hundred Blade components. Eager-load what the closures touch (`->query(fn () => Task::query()->with('assignee'))`).
 

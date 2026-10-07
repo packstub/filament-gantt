@@ -2,15 +2,25 @@
 
 ## Scales
 
-The toolbar switches between three zoom levels; `scale()` picks the one the chart opens with (default: the config's `default_scale`, week). The user's choice is kept in the URL and in local storage.
+The toolbar switches between the zoom levels; `scale()` picks the one the chart opens with (default: the config's `default_scale`, week), `scales()` the ones offered. The user's choice is kept in the URL and in local storage.
 
 | Scale | Pixels per day (config) | Axis |
 | --- | --- | --- |
+| `Scale::Hour` | 960 (40 an hour) | days over hours, weekends shaded, a line at now |
 | `Scale::Day` | 48 | months over weekdays, weekends shaded |
 | `Scale::Week` | 18 | months over weeks starting on `firstDayOfWeek()`, weekends shaded |
 | `Scale::Month` | 5 | years over months |
 
-A red line marks today. `firstDayOfWeek(7)` starts the week columns on Sunday; the config's `weekend_days` (ISO weekdays, `[6, 7]` by default) decides the shading.
+```php
+use Packstub\Gantt\Enums\Scale;
+
+->scales([Scale::Hour, Scale::Day, Scale::Week])   // default: day, week, month; hour first when the chart snaps to hours
+->scale(Scale::Hour)
+```
+
+The hour level is for shifts, bookings and anything measured in hours: with `snapTo(Unit::Hour)` it is offered first. Only the hour columns in view are drawn, so a window of months stays light.
+
+A line in the panel's primary colour marks today (now, at the hour level); the Today button scrolls to it, and loads a window around today when the current one does not hold it. `firstDayOfWeek(7)` starts the week columns on Sunday; the config's `weekend_days` (ISO weekdays, `[6, 7]` by default) decides the shading. An axis label that does not fit its cell (a month cut to one day at the window's edge) is left out rather than drawn over the next one.
 
 ## The window
 
@@ -18,9 +28,11 @@ The chart draws the days between two dates:
 
 1. what the user picked in the toolbar's "From / Until" (also in the URL, so a link shows the same span);
 2. otherwise `startDate()` and `endDate()` from the definition;
-3. otherwise a padded span around the bars: `window_padding_days.before` (7) before the earliest start to `window_padding_days.after` (14) after the latest end.
+3. otherwise a padded span around the bars: `window_padding_days.before` (7) before the earliest start to `window_padding_days.after` (14) after the latest end. When that span is longer than `max_window_days` (years of shifts or bookings), the chart opens around today instead: from `before` days before today to `after` days after it.
 
-A window is stretched to at least `min_window_days` (28) and cut to at most `max_window_days` (730); the server decides, whatever the browser asked for. Only the bars overlapping the window are loaded (a milestone by its start), so a long history stays cheap.
+A window is stretched to at least `min_window_days` (28) and cut to at most `max_window_days` (730); the server decides, whatever the browser asked for. A range the user typed that was cut says so in a notification, and an "Until" before the "From" is read the other way round. Only the bars overlapping the window are loaded (a milestone by its start), at most `max_bars` (2,000) of them: when the window holds more, the toolbar shows "2,000 of 5,312 bars" (narrow the dates or filter).
+
+A window narrower than the chart (zoomed out to months, or on a wide screen) grows at its end to fill the chart's width, so the grid never stops a third of the way.
 
 ```php
 ->startDate(now()->startOfQuarter())
@@ -59,6 +71,6 @@ The chart reloads its bars, keeping the window and the filters:
 - after any bar or create action run from the chart;
 - on the `packstub-gantt-refresh` event (`$this->dispatch('packstub-gantt-refresh')` from any Livewire component);
 - on the Livewire events you list: `->refreshOn(['task-updated', 'import-finished'])`;
-- every so often with `->poll('30s')` (or the config's `polling_interval`), skipping a beat while a bar is being dragged or saved and while the tab is in the background.
+- every so often with `->poll('30s')` (or the config's `polling_interval`), skipping a beat while a bar is being dragged, moved from the keyboard or saved, and while the tab is in the background.
 
 A background refresh never interrupts a drag: if one is in progress, the answer is dropped and the next refresh brings the latest.

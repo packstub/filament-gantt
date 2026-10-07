@@ -2,7 +2,7 @@
 
 Free (MIT) Filament v4/v5 plugin: a Gantt chart and resource timeline. The browser owns the chart (Alpine state drawn
 from JSON, pointer-event drag, no Gantt library); Livewire only answers renderless calls (`ganttMove`, `ganttRefresh`,
-`ganttWindow`). Sibling of `plugins/filament-kanban`: same scaffold, same actions pattern, same `Filter`.
+and the action mounts). Sibling of `plugins/filament-kanban`: same scaffold, same actions pattern, same `Filter`.
 
 ## Commands
 
@@ -13,7 +13,9 @@ composer test:js            # browser side: node --test tests/js (layout(), drag
 composer lint               # Pint
 ```
 
-CI runs all three on Laravel 12/13 × Filament 4.*/5.* (floor `^4.13`), the JS suite on a pinned Node 22 (`actions/setup-node`).
+CI runs all three on Laravel 12/13 × Filament 4.*/5.* (floor `^4.13`), the JS suite on a pinned Node 22 (`actions/setup-node`),
+and the Pest suite again on MySQL 8.4 and PostgreSQL 17 (the `databases` job): SQLite accepts SQL they refuse. Locally:
+`DB_CONNECTION=pgsql DB_DATABASE=… DB_USERNAME=… vendor/bin/pest` (the TestCase drops all tables first on a real server).
 
 ## Layout
 
@@ -47,6 +49,8 @@ CI runs all three on Laravel 12/13 × Filament 4.*/5.* (floor `^4.13`), the JS s
 - Render once: `$ganttRendered` (`#[Locked]`, set by `getGanttConfig()` when it produced the state, so by the render that
   included the chart, not by a render that did not) makes `getGanttConfig()` skip `getState()` on every render after that;
   the chart element is `wire:ignore`, so a re-render (an action's modal, `$refresh`) never reaches the browser's chart.
+  Such a render sends `filters: null` too (their options are often queries); the browser asks for them with
+  `ganttRefresh(…, withFilters: true)`.
   A config without a window makes `init()` call `refresh()` (the browser fetches the state itself). Tests that want the
   bars call `getGanttConfig(withState: true)`.
 - Errors: `ganttMove` answers with a `MoveRejected`'s message only; any other exception is `report()`ed and answered with
@@ -56,4 +60,15 @@ CI runs all three on Laravel 12/13 × Filament 4.*/5.* (floor `^4.13`), the JS s
 - `safeUrl()` (PHP and JS, same rules): strip C0/space, refuse `^[\/\\]{2}` (protocol-relative hosts), allow-list schemes.
 - In the Blade view, an element with `x-show` binds `:style` with the object syntax (a string `:style` overwrites the
   `display` that `x-show` sets).
-- Every change needs a test; `CHANGELOG.md` stays current. Strings in `resources/lang/{en,ro,ru,de}`.
+- Who may move: `authorizeMoves()` (default: the model policy's `update` when it has one; `GanttResourcePage::makeGantt()`
+  sets the resource's `canEdit()`), part of `isMovable()`/`isResizable()` and checked first in `move()`. Each bar's
+  `actions` is the list the user may run on its record (`GanttActions::ganttActionsFor()` evaluates every action's
+  visibility with `$ganttActionRecord` set), within `Bar::actions()`, which `offersAction()` enforces on mount.
+- `move()` runs the save, `BarMoved`, `afterMove()` and the returned bar (read back through `baseQuery()`) in one
+  transaction: the browser's rollback and the database agree. Date-only records snap by `Unit::Day` (`unitFor()`).
+- Colours end up in a style attribute: `Bar::safeColor()` (PHP) and `tone()` (JS) keep colour shapes only, and the
+  Blade binds `barStyle()`/`cell()` as objects, never concatenated strings.
+- Alpine hands back reactive proxies: after `this.pointer = p`, compare and mutate `this.pointer`, never `p` (the
+  harness proxies `pointer`/`keyboard`/`menu` the same way, so such a bug fails `composer test:js`).
+- Every change needs a test; `CHANGELOG.md` stays current. Strings in `resources/lang/{en,ro,ru,de}` (same keys in
+  all four; plural forms as Laravel's locale rules, `bars` as Intl.PluralRules categories for the browser).

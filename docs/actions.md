@@ -16,11 +16,11 @@ use Filament\Actions\EditAction;
 
 `TaskResource::fields()` here is your own helper returning the resource's form components; Filament has no such method. `->schema(fn (Schema $schema) => TaskResource::form($schema))` does the same with the resource's `form()`.
 
-The bar's record is the action's record: inject `$record` (or `Task $record`) anywhere, as on a table. It is loaded through the chart's `query()`, so an action can never reach a record the user cannot see on the chart; for such a bar the action is hidden and refused. A drag never counts as a click, even one on a bar that cannot move. Without a click action, a bar with a `url()` follows it; Ctrl/⌘-click opens it in a new tab either way.
+The bar's record is the action's record: inject `$record` (or `Task $record`) anywhere, as on a table. It is loaded through the chart's `query()`, so an action can never reach a record the user cannot see on the chart; for such a bar the action is hidden and refused. A drag never counts as a click, even one on a bar that cannot move, nor one that only went up or down. Enter or Space on a focused bar is a click. Without a click action, a bar with a `url()` follows it; Ctrl/⌘-click opens it in a new tab either way.
 
 ## The right-click menu
 
-`barActions()` lists the actions in the menu that opens on a right-click (long-press on touch):
+`barActions()` lists the actions in the menu that opens on a right-click (on touch: press and hold the bar, then lift):
 
 ```php
 ->barActions([
@@ -31,17 +31,21 @@ The bar's record is the action's record: inject `$record` (or `Task $record`) an
 ->barAction('edit')
 ```
 
-The menu is a keyboard menu too: the context-menu key on a focused bar (Shift+F10 or the Menu key where the browser has one, Windows and Linux; on macOS a right-click on the focused bar) opens it under the bar, the arrows move between items, Enter runs one, Escape closes it and returns to the bar.
+The menu is a keyboard menu too: the context-menu key on a focused bar (Shift+F10 or the Menu key where the browser has one, Windows and Linux; on macOS a right-click on the focused bar) opens it under the bar, the arrows move between items, Home and End go to the first and the last, Enter runs one, Escape closes it and returns to the bar.
 
-Your own `hidden()`, `visible()`, `authorize()` and `disabled()` rules keep working, with the record injected. The menu is built once for the whole chart (never per bar), so an action a bar should not offer at all is left out with `Bar::actions()` ([Bars](bars.md#the-bar-shape)).
+### Which actions a bar offers
 
-On a chart page the actions do **not** consult the model policy by themselves (Filament wires that on resource tables only): say what each one needs, `EditAction::make()->authorize('update')`, `DeleteAction::make()->authorize('delete')`, or a `->hidden(fn (Task $record) => ...)` of your own. The page's own access (`canAccess()`, the resource's `viewAny`) is checked as usual.
+Each bar offers the actions the user may run on **its** record. When the chart loads, every action is asked about every bar's record: your own `hidden()`, `visible()` and `authorize()` rules, with the record injected, and Filament's default authorization. An action a user may not run is not in that bar's menu, and a click on the bar does not open it. `Bar::actions()` narrows a bar's menu further ([Bars](bars.md#the-bar-shape)), and the server holds to it: a request for an action the bar does not offer is refused, whatever the browser sends.
+
+On a `GanttResourcePage`, Filament authorizes `EditAction`, `ViewAction`, `DeleteAction` and `CreateAction` with the resource's policy, as on the resource's own pages: a user without `update` sees no Edit on any bar. On a `GanttPage`, a widget or your own component there is no resource to ask: say what each action needs, `EditAction::make()->authorize('update')`, `DeleteAction::make()->authorize('delete')`, or a `->hidden(fn (Task $record) => ...)` of your own. The page's own access (`canAccess()`, the resource's `viewAny`) is checked as usual, and moves follow the policy on their own ([Moving and resizing](moves.md#who-may-move)).
+
+A label, icon or colour closure that needs the record (`fn (Task $record) => ...`) is read without one for the menu, and falls back to the action's name.
 
 Once an action has run, the chart reloads its bars (keeping the window and the filters), so an edited bar shows its new dates, a deleted one disappears.
 
 ## Create on an empty spot
 
-`createAction()` opens the create form when the user clicks an empty spot of a row. The form opens with the start, the end (one snap unit later) and the row's group already filled in; a form without those fields still gets them on save:
+`createAction()` opens the create form when the user clicks an empty spot of a row, a group's own row included (a group with no bars yet has nothing else to click). The form opens with the start, the end (one snap unit later) and the row's group already filled in; a form without those fields still gets them on save:
 
 ```php
 use Filament\Actions\CreateAction;
@@ -73,7 +77,7 @@ The server checks the group of the clicked row before the form opens, whatever t
 
 In a tenant-scoped app, give the form a field for the foreign key with the scoped options (`Select::make('project_id')->relationship('project', 'name')` under the tenant's query) so the value is validated there as well.
 
-Read-only charts get no create click, and the server refuses a create on them.
+The create click is offered only to who may run the action: its own `hidden()` and `authorize()`, and on a `GanttResourcePage` the resource's `canCreate()` (the policy's `create`). Read-only charts get no create click, and the server refuses a create on them.
 
 ## Header actions
 

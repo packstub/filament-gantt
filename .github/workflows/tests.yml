@@ -71,3 +71,67 @@ jobs:
 
       - name: Run browser-side tests
         run: composer test:js
+
+  databases:
+    # SQLite accepts SQL that MySQL's strict mode and PostgreSQL refuse (an aggregate
+    # next to plain columns, say): the suite runs on both servers as well.
+    name: Tests on ${{ matrix.database }} (PHP 8.4, Laravel 13, Filament 5)
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - database: mysql
+            port: 3306
+            username: root
+            password: ""
+          - database: pgsql
+            port: 5432
+            username: postgres
+            password: postgres
+
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+          MYSQL_DATABASE: filament_gantt
+        ports:
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping" --health-interval=5s --health-timeout=5s --health-retries=10
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: filament_gantt
+        ports:
+          - 5432:5432
+        options: --health-cmd="pg_isready" --health-interval=5s --health-timeout=5s --health-retries=10
+
+    env:
+      DB_CONNECTION: ${{ matrix.database }}
+      DB_HOST: 127.0.0.1
+      DB_PORT: ${{ matrix.port }}
+      DB_DATABASE: filament_gantt
+      DB_USERNAME: ${{ matrix.username }}
+      DB_PASSWORD: ${{ matrix.password }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup PHP 8.4
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: "8.4"
+          extensions: pdo_mysql, pdo_pgsql
+          coverage: none
+
+      - name: Install dependencies
+        run: |
+          composer require "illuminate/contracts:13.*" "orchestra/testbench:11.*" "filament/filament:5.*" --no-interaction --no-update
+          composer update --prefer-dist --no-interaction --no-progress
+
+      - name: Run tests
+        run: vendor/bin/pest

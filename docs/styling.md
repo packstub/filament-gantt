@@ -7,9 +7,9 @@ The stylesheet is plain CSS on Filament's colour variables (`--gray-*`, `--prima
     --ps-gantt-label-width: 18rem;   /* the sticky label column */
     --ps-gantt-radius: 0.75rem;
     --ps-gantt-bar-radius: 0.5rem;
-    --ps-gantt-today: var(--primary-500);
+    --ps-gantt-today: var(--danger-500);  /* the today line; the panel's primary colour by default */
     --ps-gantt-weekend: rgb(0 0 0 / 0.03);
-    --ps-gantt-height: 40rem;        /* pages fit the chart to the window by default */
+    --ps-gantt-height: 40rem;        /* the most the chart grows to; pages fit it to the window by default */
 }
 ```
 
@@ -22,7 +22,9 @@ The stylesheet is plain CSS on Filament's colour variables (`--gray-*`, `--prima
 
 Row height and pixels per day are numbers the script needs: set them in `config/filament-gantt.php` (`row_height`, `px_per_day`).
 
-Each bar carries its colour as `--ps-bar`; the stylesheet draws a tinted background, a solid start edge and the progress fill from it. Classes are prefixed `ps-gantt-` (`ps-gantt-bar`, `ps-gantt-bar-milestone`, `ps-gantt-row-group`…) for your own rules.
+The chart is as tall as its rows, up to `--ps-gantt-height`; it scrolls past that.
+
+Each bar carries its colour as `--ps-bar`; the stylesheet draws a tinted background, a solid start edge and the progress fill from it. A label too long for its bar is drawn just after it (`ps-gantt-bar-outside`), except in the compact layout, where the next bar of the lane may sit there. A bar narrower than its resize handles has none (`ps-gantt-bar-narrow`). Classes are prefixed `ps-gantt-` (`ps-gantt-bar`, `ps-gantt-bar-milestone`, `ps-gantt-row-group`…) for your own rules.
 
 ## Dark mode
 
@@ -40,4 +42,4 @@ Every string is in `resources/lang/{en,ro,ru,de}/gantt.php`. Publish them to cha
 php artisan vendor:publish --tag=packstub-gantt-translations
 ```
 
-Month and weekday names on the axis come from the browser's `Intl` in the panel's locale; the date formats of tooltips and messages are PHP formats in the config (`date_format`, `datetime_format`).
+Month and weekday names on the axis come from the browser's `Intl` in the panel's locale. The date formats of tooltips and messages are PHP formats from the language files (`M j, Y` in English, `j. M Y` in German, `j M Y` in Romanian and Russian), unless the config sets `date_format` and `datetime_format` for every locale. Counts use the language's plural forms.
