@@ -54,9 +54,11 @@ test('week scale: week columns, month header, shades, today, group rows and bar 
 })
 
 test('day scale: one column per day with weekend and today flags', () => {
-    const v = layout(bars, window, 'day')
+    const v = layout(bars, { ...window, pxPerDay: 48 }, 'day')
     assert.equal(v.columns.length, 28)
     assert.equal(v.columns[0].label, 'Mon 5')
+    // a label wider than its cell is left out
+    assert.equal(layout(bars, window, 'day').columns[0].label, '')
     assert.equal(v.columns[5].weekend, true)
     assert.equal(v.columns[9].today, true)
 })
