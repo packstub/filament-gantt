@@ -7,9 +7,9 @@ return [
     | Axis
     |--------------------------------------------------------------------------
     |
-    | The zoom level a chart opens with (day, week or month; a definition's
-    | scale() wins), the ISO weekday the week columns start on (1 = Monday …
-    | 7 = Sunday) and the weekdays shaded as weekend.
+    | The zoom level a chart opens with (hour, day, week or month; a
+    | definition's scale() wins), the ISO weekday the week columns start on
+    | (1 = Monday … 7 = Sunday) and the weekdays shaded as weekend.
     |
     */
 
@@ -25,13 +25,14 @@ return [
     |--------------------------------------------------------------------------
     |
     | The height of a row in pixels, and how many pixels a day takes at each
-    | zoom level.
+    | zoom level (960 at the hour level: 40 pixels an hour).
     |
     */
 
     'row_height' => 36,
 
     'px_per_day' => [
+        'hour' => 960,
         'day' => 48,
         'week' => 18,
         'month' => 5,
@@ -43,9 +44,11 @@ return [
     |--------------------------------------------------------------------------
     |
     | Without startDate()/endDate() a chart shows from `before` days ahead of
-    | its earliest bar to `after` days past its latest one. Whatever asks for
-    | it, a window is at least `min_window_days` and at most `max_window_days`
-    | long.
+    | its earliest bar to `after` days past its latest one; when that is
+    | longer than `max_window_days` (years of history), from `before` days
+    | ahead of today to `after` days past it. Whatever asks for it, a window
+    | is at least `min_window_days` and at most `max_window_days` long, and
+    | loads at most `max_bars` bars (the toolbar says when there are more).
     |
     */
 
@@ -57,6 +60,8 @@ return [
     'min_window_days' => 28,
 
     'max_window_days' => 730,
+
+    'max_bars' => 2000,
 
     /*
     |--------------------------------------------------------------------------
@@ -76,12 +81,13 @@ return [
     |--------------------------------------------------------------------------
     |
     | PHP date formats for the dates in tooltips and messages: whole days, and
-    | records with a time.
+    | records with a time. Null: the locale's (`M j, Y` in English, `j. M Y`
+    | in German…), from the plugin's language files.
     |
     */
 
-    'date_format' => 'M j, Y',
+    'date_format' => null,
 
-    'datetime_format' => 'M j, Y H:i',
+    'datetime_format' => null,
 
 ];

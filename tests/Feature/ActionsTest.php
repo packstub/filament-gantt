@@ -14,8 +14,10 @@ use Packstub\Gantt\Tests\Fixtures\TaskGantt;
 
 beforeEach(function () {
     CarbonImmutable::setTestNow('2026-10-14 10:00:00');
+    $this->actingAs(user());
     TaskGantt::$movable = null;
     TaskGantt::$readOnly = false;
+    TaskGantt::$bar = null;
 });
 
 afterEach(fn () => CarbonImmutable::setTestNow());

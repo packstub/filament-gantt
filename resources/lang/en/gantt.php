@@ -1,6 +1,7 @@
 <?php
 
 return [
+    'hour' => 'Hour',
     'day' => 'Day',
     'week' => 'Week',
     'month' => 'Month',
@@ -14,9 +15,16 @@ return [
     'collapse' => 'Fold group',
     'expand' => 'Unfold group',
     'empty' => 'Nothing in this window',
-    'bars' => ':count bars',
+    'bars' => [
+        'one' => ':count bar',
+        'other' => ':count bars',
+    ],
+    'truncated' => ':count of :total bars',
+    'truncated_hint' => 'Too many bars for one window: narrow the dates or filter to see them all.',
+    'window_limited' => 'A window shows at most :days days: :from – :until.',
     'milestone' => 'Milestone',
     'bar_menu' => 'Bar actions',
+    'keyboard' => 'Arrow keys move the bar, Shift with an arrow moves its end, Alt with an arrow its start. Enter opens it.',
     'create_here' => 'Create here',
     'progress' => ':percent% done',
     'missing' => 'This bar is no longer on the chart. Refresh to see the latest.',
@@ -32,4 +40,6 @@ return [
     'days' => '{1} :count day|[2,*] :count days',
     'hours' => '{1} :count hour|[2,*] :count hours',
     'minutes' => '{1} :count minute|[2,*] :count minutes',
+    'date_format' => 'M j, Y',
+    'datetime_format' => 'M j, Y H:i',
 ];

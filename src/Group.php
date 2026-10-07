@@ -6,6 +6,7 @@ use Closure;
 use Illuminate\Contracts\Support\Arrayable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Traits\Conditionable;
+use UnitEnum;
 
 /**
  * One row group (a swimlane): a project, an assignee, a room, a machine. Groups are
@@ -20,7 +21,7 @@ class Group implements Arrayable
 
     protected string|Closure|null $label = null;
 
-    protected string|Closure|null $color = null;
+    protected mixed $color = null;
 
     protected bool|Closure $collapsed = false;
 
@@ -45,7 +46,7 @@ class Group implements Arrayable
         foreach ($records as $record) {
             $groups[] = static::make($record->getKey())
                 ->label((string) data_get($record, $label))
-                ->color($color instanceof Closure ? $color($record) : ($color === null ? null : (string) data_get($record, $color)));
+                ->color($color instanceof Closure ? $color($record) : ($color === null ? null : data_get($record, $color)));
         }
 
         return $groups;
@@ -58,8 +59,14 @@ class Group implements Arrayable
         return $this;
     }
 
-    /** A Tailwind-ish name (gray, sky, amber, emerald…), a panel colour (primary, success…) or any CSS colour. */
-    public function color(string|Closure|null $color): static
+    /**
+     * Whatever Bar::color() takes: a Tailwind-ish name (gray, sky, amber, emerald…), a
+     * panel colour (primary, success…), a Filament palette, an enum implementing
+     * HasColor or a CSS colour; or a closure returning one.
+     *
+     * @param  string|array<int|string, string>|UnitEnum|Closure|null  $color
+     */
+    public function color(string|array|UnitEnum|Closure|null $color): static
     {
         $this->color = $color;
 
@@ -88,7 +95,7 @@ class Group implements Arrayable
 
     public function getColor(): ?string
     {
-        return $this->evaluate($this->color);
+        return Bar::colorName($this->evaluate($this->color));
     }
 
     public function isCollapsed(): bool

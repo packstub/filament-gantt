@@ -3,6 +3,7 @@
 namespace Packstub\Gantt\Tests\Fixtures;
 
 use Carbon\CarbonImmutable;
+use Closure;
 use Filament\Actions\Action;
 use Filament\Actions\Concerns\InteractsWithActions;
 use Filament\Actions\Contracts\HasActions;
@@ -33,6 +34,9 @@ class TaskGantt extends Component implements HasActions, HasSchemas
     /** @var list<array<int, mixed>> what afterMove() received */
     public static array $moved = [];
 
+    /** Shapes each bar when set: `fn (Task $task): ?Bar`. */
+    public static ?Closure $bar = null;
+
     public function gantt(Gantt $gantt): Gantt
     {
         return $gantt
@@ -40,6 +44,7 @@ class TaskGantt extends Component implements HasActions, HasSchemas
             ->start('starts_on')->end('ends_on')
             ->label('title')
             ->progress('progress')
+            ->bar(fn (Task $task) => static::$bar ? (static::$bar)($task) : null)
             ->groupBy('project', label: 'project.name')
             ->filters([
                 Filter::select('project_id')->options(fn () => Project::query()->pluck('name', 'id')->all()),

@@ -1,6 +1,7 @@
 <?php
 
 return [
+    'hour' => 'Oră',
     'day' => 'Zi',
     'week' => 'Săptămână',
     'month' => 'Lună',
@@ -14,9 +15,17 @@ return [
     'collapse' => 'Restrânge grupul',
     'expand' => 'Extinde grupul',
     'empty' => 'Nimic în acest interval',
-    'bars' => ':count bare',
+    'bars' => [
+        'one' => ':count bară',
+        'few' => ':count bare',
+        'other' => ':count de bare',
+    ],
+    'truncated' => ':count din :total bare',
+    'truncated_hint' => 'Prea multe bare pentru un interval: restrânge datele sau filtrează ca să le vezi pe toate.',
+    'window_limited' => 'Un interval arată cel mult :days de zile: :from – :until.',
     'milestone' => 'Jalon',
     'bar_menu' => 'Acțiuni',
+    'keyboard' => 'Săgețile mută bara, Shift cu o săgeată îi mută sfârșitul, Alt cu o săgeată începutul. Enter o deschide.',
     'create_here' => 'Creează aici',
     'progress' => ':percent% finalizat',
     'missing' => 'Bara nu mai este pe grafic. Reîncarcă pagina pentru ultima versiune.',
@@ -29,7 +38,9 @@ return [
     'locked' => 'Nimic nu poate fi programat înainte de :date.',
     'failed' => 'Modificarea nu a reușit.',
     'offline' => 'Serverul nu a răspuns. Bara a revenit la locul ei.',
-    'days' => '{1} :count zi|[2,19] :count zile|[20,*] :count de zile',
-    'hours' => '{1} :count oră|[2,19] :count ore|[20,*] :count de ore',
-    'minutes' => '{1} :count minut|[2,19] :count minute|[20,*] :count de minute',
+    'days' => ':count zi|:count zile|:count de zile',
+    'hours' => ':count oră|:count ore|:count de ore',
+    'minutes' => ':count minut|:count minute|:count de minute',
+    'date_format' => 'j M Y',
+    'datetime_format' => 'j M Y H:i',
 ];

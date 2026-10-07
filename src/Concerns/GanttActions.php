@@ -5,6 +5,7 @@ namespace Packstub\Gantt\Concerns;
 use Closure;
 use Filament\Actions\Action;
 use Filament\Schemas\Schema;
+use Illuminate\Database\Eloquent\Model;
 
 /**
  * Registers the chart's bar and create actions with Filament's action system, on
@@ -17,17 +18,29 @@ use Filament\Schemas\Schema;
  */
 trait GanttActions
 {
+    /** The record a bar action is asked about while the bars are presented (see ganttActionsFor()). */
+    protected ?Model $ganttActionRecord = null;
+
     public function cacheGanttActions(): void
     {
         $gantt = $this->getGantt();
 
         foreach ($gantt->getBarActions() as $action) {
-            $action->record(fn () => $gantt->findRecord(static::ganttArgument($action, 'ganttRecord')));
+            $record = fn () => $this->ganttActionRecord ?? $gantt->findRecord(static::ganttArgument($action, 'ganttRecord'));
 
-            static::ganttChainHidden($action, fn () => $gantt->findRecord(static::ganttArgument($action, 'ganttRecord')) === null);
+            $action->record($record);
+
+            // Refused for a bar that is not on the chart, and for one whose
+            // Bar::actions() leaves this action out, whatever the browser asks.
+            static::ganttChainHidden($action, fn () => ($found = $record()) === null || ! $gantt->offersAction($found, $action->getName()));
             $this->ganttRefreshAfter($action);
 
             $this->cacheAction($action);
+        }
+
+        // Each bar carries the actions this user may run on its record.
+        if ($gantt->getBarActions() !== []) {
+            $gantt->resolveActionsUsing(fn (Model $record) => $this->ganttActionsFor($record));
         }
 
         if ($action = $gantt->getCreateAction()) {
@@ -80,6 +93,31 @@ trait GanttActions
 
             $this->cacheAction($action);
         }
+    }
+
+    /**
+     * The bar actions visible to the user on a record: the action's own hidden() and
+     * visible(), its authorization (on a resource page, the resource's policy) and
+     * Bar::actions().
+     *
+     * @return list<string>
+     */
+    protected function ganttActionsFor(Model $record): array
+    {
+        $names = [];
+        $this->ganttActionRecord = $record;
+
+        try {
+            foreach ($this->getGantt()->getBarActions() as $action) {
+                if ($action->isVisible()) {
+                    $names[] = $action->getName();
+                }
+            }
+        } finally {
+            $this->ganttActionRecord = null;
+        }
+
+        return $names;
     }
 
     /** Once the action has run, the browser reloads the chart (keeping its window and filters). */

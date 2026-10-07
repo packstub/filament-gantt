@@ -2,7 +2,11 @@
 
 namespace Packstub\Gantt\Concerns;
 
+use Closure;
+use Filament\Actions\Action;
 use Filament\Actions\Contracts\HasActions;
+use Filament\Facades\Filament;
+use Illuminate\Support\Str;
 use Livewire\Attributes\Locked;
 use Livewire\Attributes\Renderless;
 use Packstub\Gantt\Exceptions\MoveRejected;
@@ -32,32 +36,38 @@ trait InteractsWithGantt
 
     public function getGantt(): Gantt
     {
-        return $this->ganttDefinition ??= $this->gantt(Gantt::make()->key(static::class));
+        return $this->ganttDefinition ??= $this->gantt($this->makeGantt());
     }
 
     /**
-     * The bars and groups of the current window, with the current filters.
-     *
-     * @param  array<string, mixed>  $filters
-     * @return array{window: array{start: string, end: string}, groups: list<array<string, mixed>>, bars: list<array<string, mixed>>}
+     * The definition gantt() starts from: the defaults of this kind of component
+     * (the widget is read-only, the resource page asks the resource's canEdit()).
      */
-    #[Renderless]
-    public function ganttRefresh(array $filters = [], ?string $from = null, ?string $until = null): array
+    protected function makeGantt(): Gantt
     {
-        return $this->getGantt()->getState($filters, $from, $until);
+        return Gantt::make()->key(static::class);
     }
 
     /**
-     * Another time window (the date range in the toolbar). The server clamps it
-     * and answers with the window it settled on.
+     * The bars and groups of a window (the current one, or the one the toolbar asks
+     * for), with the current filters. The server clamps the window and answers with
+     * the one it settled on; with $withFilters, the filters' definitions too (a
+     * config rendered without them).
      *
      * @param  array<string, mixed>  $filters
-     * @return array{window: array{start: string, end: string}, groups: list<array<string, mixed>>, bars: list<array<string, mixed>>}
+     * @return array<string, mixed>
      */
     #[Renderless]
-    public function ganttWindow(?string $from, ?string $until, array $filters = []): array
+    public function ganttRefresh(array $filters = [], ?string $from = null, ?string $until = null, bool $withFilters = false): array
     {
-        return $this->getGantt()->getState($filters, $from, $until);
+        $gantt = $this->getGantt();
+        $state = $gantt->getState($filters, $from, $until);
+
+        if ($withFilters) {
+            $state['filters'] = array_map(fn ($filter) => $filter->toArray(), $gantt->getFilters());
+        }
+
+        return $state;
     }
 
     /**
@@ -108,55 +118,84 @@ trait InteractsWithGantt
     {
         $gantt = $this->getGantt();
 
-        if ($withState ?? ! $this->ganttRendered) {
+        if ($withState = $withState ?? ! $this->ganttRendered) {
             $state = $gantt->getState();
             $this->ganttRendered = true;
         } else {
-            $state = ['window' => ['start' => null, 'end' => null], 'groups' => [], 'bars' => []];
+            $state = ['window' => ['start' => null, 'end' => null], 'groups' => [], 'bars' => [], 'total' => 0];
         }
 
         // Bar and create actions need Filament's action system on the component.
         $actions = $this instanceof HasActions;
+        $create = $actions && $gantt->canCreate() ? $gantt->getCreateAction() : null;
+        $user = Filament::getCurrentPanel() ? Filament::auth()->id() : auth()->id();
 
         return [
-            'key' => 'gantt:'.($gantt->getKey() ?? static::class).':'.(auth()->id() ?? 'guest'),
+            'key' => 'gantt:'.($gantt->getKey() ?? static::class).':'.($user ?? 'guest'),
             'window' => $state['window'],
             'groups' => $state['groups'],
             'bars' => $state['bars'],
+            'total' => $state['total'],
             'grouped' => $gantt->isGrouped(),
             'compact' => $gantt->isCompact(),
             'scale' => $gantt->getScale()->value,
             'unit' => $gantt->getUnit()->value,
             'minMinutes' => $gantt->getMinMinutes(),
             'maxMinutes' => $gantt->getMaxMinutes(),
+            'scales' => array_map(fn ($scale) => $scale->value, $gantt->getScales()),
             'firstDayOfWeek' => $gantt->getFirstDayOfWeek(),
             'weekendDays' => array_values(array_map('intval', (array) config('filament-gantt.weekend_days', [6, 7]))),
             'rowHeight' => max(24, (int) config('filament-gantt.row_height', 36)),
             'pxPerDay' => [
+                'hour' => (int) config('filament-gantt.px_per_day.hour', 960),
                 'day' => (int) config('filament-gantt.px_per_day.day', 48),
                 'week' => (int) config('filament-gantt.px_per_day.week', 18),
                 'month' => (int) config('filament-gantt.px_per_day.month', 5),
             ],
             'today' => now()->toDateString(),
+            'now' => now()->format('Y-m-d H:i'),
             'locale' => str_replace('_', '-', app()->getLocale()),
-            'dateFormat' => (string) config('filament-gantt.date_format', 'M j, Y'),
-            'dateTimeFormat' => (string) config('filament-gantt.datetime_format', 'M j, Y H:i'),
+            'dateFormat' => Gantt::dateFormat(),
+            'dateTimeFormat' => Gantt::dateTimeFormat(),
             'readOnly' => $gantt->isReadOnly(),
             'height' => $this->getGanttHeight(),
-            'filters' => array_map(fn ($f) => $f->toArray(), $gantt->getFilters()),
+            // Filter options are often queries: a render after the first one (the chart
+            // is wire:ignore) does without them, and a chart that is new on such a render
+            // asks for them along with its state.
+            'filters' => $withState ? array_map(fn ($f) => $f->toArray(), $gantt->getFilters()) : null,
             'refreshOn' => $gantt->getRefreshOn(),
             'poll' => $gantt->getPoll(),
-            'barActions' => array_map(fn ($action) => [
-                'name' => $action->getName(),
-                'label' => $action->getLabel(),
-                'icon' => ($icon = $action->getIcon() ?? $action->getGroupedIcon()) ? \Filament\Support\generate_icon_html($icon)?->toHtml() : null,
-                'color' => is_string($color = $action->getColor()) ? $color : null,
-            ], $actions ? $gantt->getBarActions() : []),
+            'barActions' => array_map(fn ($action) => $this->ganttActionConfig($action), $actions ? $gantt->getBarActions() : []),
             'barAction' => $gantt->getBarAction(),
-            'createAction' => $actions && $gantt->canCreate() && ($create = $gantt->getCreateAction())
+            // Offered only when the user may run it (its hidden(), its authorization).
+            'createAction' => $create && $create->isVisible()
                 ? ['name' => $create->getName(), 'label' => $create->getLabel()]
                 : null,
             'i18n' => __('packstub-gantt::gantt'),
+        ];
+    }
+
+    /**
+     * How a bar action looks in the menu. Read without a record: a label, icon or
+     * colour closure that needs one falls back to the action's name.
+     *
+     * @return array{name: string, label: string, icon: ?string, color: ?string}
+     */
+    protected function ganttActionConfig(Action $action): array
+    {
+        $read = function (Closure $read, mixed $fallback) {
+            try {
+                return $read();
+            } catch (\Throwable) {
+                return $fallback;
+            }
+        };
+
+        return [
+            'name' => $action->getName(),
+            'label' => (string) $read(fn () => $action->getLabel(), Str::headline($action->getName())),
+            'icon' => $read(fn () => ($icon = $action->getIcon() ?? $action->getGroupedIcon()) ? \Filament\Support\generate_icon_html($icon)?->toHtml() : null, null),
+            'color' => $read(fn () => is_string($color = $action->getColor()) ? $color : null, null),
         ];
     }
 

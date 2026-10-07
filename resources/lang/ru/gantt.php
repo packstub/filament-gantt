@@ -1,6 +1,7 @@
 <?php
 
 return [
+    'hour' => 'Час',
     'day' => 'День',
     'week' => 'Неделя',
     'month' => 'Месяц',
@@ -15,8 +16,12 @@ return [
     'expand' => 'Развернуть группу',
     'empty' => 'В этом периоде ничего нет',
     'bars' => 'Полос: :count',
+    'truncated' => 'Показано :count из :total',
+    'truncated_hint' => 'Слишком много полос для одного периода: сузьте даты или отфильтруйте, чтобы увидеть все.',
+    'window_limited' => 'Период — не больше :days дней: :from – :until.',
     'milestone' => 'Веха',
     'bar_menu' => 'Действия',
+    'keyboard' => 'Стрелки двигают полосу, Shift со стрелкой — её конец, Alt со стрелкой — начало. Enter открывает её.',
     'create_here' => 'Создать здесь',
     'progress' => 'Выполнено :percent%',
     'missing' => 'Этой полосы больше нет на графике. Обновите страницу.',
@@ -29,7 +34,9 @@ return [
     'locked' => 'Ничего нельзя запланировать раньше :date.',
     'failed' => 'Изменение не удалось.',
     'offline' => 'Сервер недоступен. Полоса вернулась на место.',
-    'days' => '{1} :count день|[2,4] :count дня|[5,*] :count дней',
-    'hours' => '{1} :count час|[2,4] :count часа|[5,*] :count часов',
-    'minutes' => '{1} :count минута|[2,4] :count минуты|[5,*] :count минут',
+    'days' => ':count день|:count дня|:count дней',
+    'hours' => ':count час|:count часа|:count часов',
+    'minutes' => ':count минута|:count минуты|:count минут',
+    'date_format' => 'j M Y',
+    'datetime_format' => 'j M Y H:i',
 ];

@@ -1,6 +1,7 @@
 <?php
 
 return [
+    'hour' => 'Stunde',
     'day' => 'Tag',
     'week' => 'Woche',
     'month' => 'Monat',
@@ -15,8 +16,12 @@ return [
     'expand' => 'Gruppe ausklappen',
     'empty' => 'Nichts in diesem Zeitraum',
     'bars' => ':count Balken',
+    'truncated' => ':count von :total Balken',
+    'truncated_hint' => 'Zu viele Balken für einen Zeitraum: Daten eingrenzen oder filtern, um alle zu sehen.',
+    'window_limited' => 'Ein Zeitraum zeigt höchstens :days Tage: :from – :until.',
     'milestone' => 'Meilenstein',
     'bar_menu' => 'Aktionen',
+    'keyboard' => 'Pfeiltasten verschieben den Balken, Umschalt mit Pfeil sein Ende, Alt mit Pfeil seinen Anfang. Enter öffnet ihn.',
     'create_here' => 'Hier anlegen',
     'progress' => ':percent% erledigt',
     'missing' => 'Dieser Balken ist nicht mehr im Diagramm. Neu laden, um den aktuellen Stand zu sehen.',
@@ -32,4 +37,6 @@ return [
     'days' => '{1} :count Tag|[2,*] :count Tage',
     'hours' => '{1} :count Stunde|[2,*] :count Stunden',
     'minutes' => '{1} :count Minute|[2,*] :count Minuten',
+    'date_format' => 'j. M Y',
+    'datetime_format' => 'j. M Y H:i',
 ];

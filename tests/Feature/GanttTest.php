@@ -18,27 +18,11 @@ use Packstub\Gantt\Tests\Fixtures\Project;
 use Packstub\Gantt\Tests\Fixtures\Shift;
 use Packstub\Gantt\Tests\Fixtures\Task;
 
-function gantt(): Gantt
-{
-    return Gantt::make()
-        ->query(fn () => Task::query()->with('project'))
-        ->start('starts_on')->end('ends_on')
-        ->label('title')
-        ->progress('progress')
-        ->groupBy('project', label: 'project.name');
-}
-
-function shifts(): Gantt
-{
-    return Gantt::make()
-        ->query(fn () => Shift::query())
-        ->start('starts_at')->end('ends_at')
-        ->label('title')
-        ->groupBy('room')
-        ->snapTo(Unit::Hour);
-}
-
-beforeEach(fn () => CarbonImmutable::setTestNow('2026-10-14 10:00:00'));
+beforeEach(function () {
+    CarbonImmutable::setTestNow('2026-10-14 10:00:00');
+    // Task has a policy: a move asks it, so the tests move as a signed-in user.
+    $this->actingAs(user());
+});
 
 afterEach(function () {
     CarbonImmutable::setTestNow();
@@ -233,7 +217,11 @@ it('takes the definition\'s dates, then the browser\'s, and clamps both', functi
         ->and($window['end']->toDateString())->toBe('2026-10-28') // stretched to the minimum
         ->and($gantt->getWindow('2027-01-01', '2029-06-01')['end']->toDateString())->toBe('2028-12-30') // 730 days at most
         ->and($gantt->getWindow('garbage', '2026-12-31')['start']->toDateString())->toBe('2026-10-01')
-        ->and($gantt->getWindow('2026-12-31', '2026-01-01')['start']->toDateString())->toBe('2026-12-31');
+        // "until" before "from": swapped, not collapsed
+        ->and($gantt->getWindow('2026-12-31', '2026-01-01'))->sequence(
+            fn ($start) => $start->toDateString()->toBe('2026-01-01'),
+            fn ($end) => $end->toDateString()->toBe('2026-12-31'),
+        );
 });
 
 it('loads only the bars overlapping the window, milestones by their start', function () {

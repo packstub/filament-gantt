@@ -29,9 +29,9 @@ abstract class GanttWidget extends Widget implements HasActions, HasSchemas
     /** The chart's height inside the widget (a CSS length). */
     protected string $height = '24rem';
 
-    public function getGantt(): Gantt
+    protected function makeGantt(): Gantt
     {
-        return $this->ganttDefinition ??= $this->gantt(Gantt::make()->key(static::class)->readOnly());
+        return Gantt::make()->key(static::class)->readOnly();
     }
 
     public function getHeading(): ?string
