@@ -53,7 +53,7 @@ it('queries and serialises the bars on the first render only: a re-render carrie
     $queries = collect(DB::getQueryLog())->pluck('query');
     DB::disableQueryLog();
 
-    expect($queries->filter(fn (string $sql) => str_contains($sql, 'from "tasks"') && str_contains($sql, 'order by')))->toBeEmpty()
+    expect($queries->filter(fn (string $sql) => str_contains(str_replace(['"', '`'], '', $sql), 'from tasks') && str_contains($sql, 'order by')))->toBeEmpty()
         ->and($component->instance()->ganttRendered)->toBeTrue()
         ->and($component->instance()->getGanttConfig())->toMatchArray(['bars' => [], 'groups' => [], 'readOnly' => false])
         ->and($component->instance()->getGanttConfig(withState: true)['bars'][0]['label'])->toBe('Final docs');

@@ -95,8 +95,8 @@ it('runs a listed groups() closure once per request, whatever a create from a cl
         }
     };
 
-    // The closure's own query, not the eager load of the bars' projects.
-    $projects = fn () => collect(DB::getQueryLog())->pluck('query')->filter(fn (string $sql) => $sql === 'select * from "projects"')->count();
+    // The closure's own query, not the eager load of the bars' projects (quotes differ per database).
+    $projects = fn () => collect(DB::getQueryLog())->pluck('query')->filter(fn (string $sql) => str_replace(['"', '`'], '', $sql) === 'select * from projects')->count();
 
     DB::enableQueryLog();
     $test = Livewire::test($component::class);

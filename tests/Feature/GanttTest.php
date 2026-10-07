@@ -245,12 +245,12 @@ it('asks for the window with plain ranges on the columns, so their indexes stay 
 
     DB::enableQueryLog();
     $bars = shifts()->getBars(from: CarbonImmutable::parse('2026-10-01'), until: CarbonImmutable::parse('2026-10-31'));
-    $sql = collect(DB::getQueryLog())->pluck('query')->implode(' ');
+    $sql = str_replace(['"', '`'], '', collect(DB::getQueryLog())->pluck('query')->implode(' ')); // quotes differ per database
     DB::disableQueryLog();
 
     expect(array_column($bars, 'label'))->toBe(['Ends as the window opens', 'Starts as the window closes'])
         ->and($sql)->not->toContain('strftime', 'date(')
-        ->and($sql)->toContain('"starts_at" < ?', '"ends_at" >= ?');
+        ->and($sql)->toContain('starts_at < ?', 'ends_at >= ?');
 });
 
 /* ------------------------------------------------------------------ filters */
@@ -287,12 +287,12 @@ it('narrows a date range with plain ranges on the column, the last day included 
 
     DB::enableQueryLog();
     $bars = $gantt->getBars(['starts_at' => ['from' => '2026-10-10', 'until' => '2026-10-12']]);
-    $sql = collect(DB::getQueryLog())->pluck('query')->implode(' ');
+    $sql = str_replace(['"', '`'], '', collect(DB::getQueryLog())->pluck('query')->implode(' ')); // quotes differ per database
     DB::disableQueryLog();
 
     expect(array_column($bars, 'label'))->toBe(['First thing', 'Late on the last day'])
         ->and($sql)->not->toContain('strftime', 'date(')
-        ->and($sql)->toContain('"starts_at" >= ?', '"starts_at" < ?')
+        ->and($sql)->toContain('starts_at >= ?', 'starts_at < ?')
         ->and(array_column($gantt->getBars(['starts_at' => ['until' => '2026-10-09']]), 'label'))->toBe(['The day before']);
 });
 
