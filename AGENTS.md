@@ -71,6 +71,8 @@ and the Pest suite again on MySQL 8.4 and PostgreSQL 17 (the `databases` job): S
   transaction: the browser's rollback and the database agree. Date-only records snap by `Unit::Day` (`unitFor()`).
 - Colours end up in a style attribute: `Bar::safeColor()` (PHP) and `tone()` (JS) keep colour shapes only, and the
   Blade binds `barStyle()`/`cell()` as objects, never concatenated strings.
+- `init()` sets `this.fit` (the height fitter on window resize): a method of that name is overwritten after init, so
+  the Fit button's method is `fitAll()`.
 - Alpine hands back reactive proxies: after `this.pointer = p`, compare and mutate `this.pointer`, never `p` (the
   harness proxies `pointer`/`keyboard`/`menu` the same way, so such a bug fails `composer test:js`).
 - The toolbar is Filament's own components. The date picker and the select are Filament's form-field Alpine components

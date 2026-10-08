@@ -1619,7 +1619,33 @@ class Gantt
      */
     protected function dataSpan(): array
     {
-        $query = $this->baseQuery();
+        $today = CarbonImmutable::today()->shiftTimezone('UTC');
+        [$min, $max] = $this->spanOf([]) ?? [$today, $today];
+
+        return [$min, $max];
+    }
+
+    /**
+     * The first day and the last day of the bars the filters leave, as `Y-m-d`, or
+     * null when there are none: what "Fit" loads.
+     *
+     * @param  array<string, mixed>  $filters
+     * @return array{start: string, end: string}|null
+     */
+    public function getSpan(array $filters = []): ?array
+    {
+        $span = $this->spanOf($filters);
+
+        return $span === null ? null : ['start' => $span[0]->toDateString(), 'end' => $span[1]->toDateString()];
+    }
+
+    /**
+     * @param  array<string, mixed>  $filters
+     * @return array{0: CarbonImmutable, 1: CarbonImmutable}|null
+     */
+    protected function spanOf(array $filters): ?array
+    {
+        $query = $this->filteredQuery($filters);
         $start = $query->qualifyColumn($this->startAttribute);
         $end = $query->qualifyColumn($this->endAttribute);
 
@@ -1639,9 +1665,7 @@ class Gantt
         $min = $this->toCarbon($row->gantt_min ?? null)?->startOfDay();
         $max = collect([$this->toCarbon($row->gantt_max ?? null), $this->toCarbon($row->gantt_max_start ?? null)])->filter()->max()?->startOfDay();
 
-        $today = CarbonImmutable::today()->shiftTimezone('UTC');
-
-        return [$min ?? $today, $max ?? $min ?? $today];
+        return $min === null ? null : [$min, $max ?? $min];
     }
 
     /**

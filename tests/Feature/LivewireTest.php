@@ -254,3 +254,15 @@ it('answers a select filter\'s options, a search and a value\'s label renderless
         ->call('ganttFilterOptionLabel', 'project_id', '999')
         ->assertReturned(null);
 });
+
+it('answers the span of the filtered bars renderless, for Fit', function () {
+    $acme = project('Acme');
+    task('A', '2026-10-05', '2026-10-06', ['project_id' => $acme->id]);
+    task('B', '2026-11-20', '2026-12-21');
+
+    Livewire::test(TaskGantt::class)
+        ->call('ganttSpan', ['project_id' => (string) $acme->id])
+        ->assertReturned(['start' => '2026-10-05', 'end' => '2026-10-06'])
+        ->call('ganttSpan', [])
+        ->assertReturned(['start' => '2026-10-05', 'end' => '2026-12-21']);
+});

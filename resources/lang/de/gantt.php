@@ -7,6 +7,8 @@ return [
     'month' => 'Monat',
     'year' => 'Jahr',
     'today' => 'Heute',
+    'fit' => 'Einpassen',
+    'fit_hint' => 'Alles, was die Filter übrig lassen, auf einen Blick',
     'from' => 'Von',
     'until' => 'Bis',
     'all' => 'Alle',

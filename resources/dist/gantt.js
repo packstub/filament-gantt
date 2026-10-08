@@ -38,6 +38,9 @@ const EDGE_PX = 48
 const EDGE_MAX_STEP = 18
 // Above this many columns (hours over months) only the ones in view are drawn.
 const COLUMNS_IN_DOM = 400
+// A zoom level's pixels per day may be stretched this far either way before the next level takes over
+const ZOOM_MIN = 0.5
+const ZOOM_MAX = 2
 // How far an arrow leaves a bar before it turns
 const ARROW_GAP = 8
 
@@ -386,6 +389,9 @@ export default function packstubGantt(config) {
         scales: config.scales || ['day', 'week', 'month', 'year'],
         t: config.i18n,
         scale: config.scale,
+        // A factor on the level's pixels per day: Ctrl/⌘ + wheel, a pinch, or Fit
+        zoom: 1,
+        pinch: null,
         active: {},
         collapsed: {},
         view: { start: 0, days: 0, width: 0, pxPerDay: 1, columns: [], top: [], shades: [], todayX: null, rows: [] },
@@ -538,7 +544,7 @@ export default function packstubGantt(config) {
                 end: this.period.end,
                 today: config.today,
                 now: config.now,
-                pxPerDay: config.pxPerDay[this.scale] || 18,
+                pxPerDay: (config.pxPerDay[this.scale] || 18) * this.zoom,
                 rowHeight: config.rowHeight,
                 firstDayOfWeek: config.firstDayOfWeek,
                 weekendDays: config.weekendDays,
@@ -760,6 +766,8 @@ export default function packstubGantt(config) {
 
         setScale(scale) {
             if (! config.pxPerDay[scale] || ! this.scales.includes(scale)) return
+            // A level chosen by hand is shown as designed.
+            this.zoom = 1
             const el = this.$refs.scroll
             // scrollLeft counts from the start edge and is negative in RTL: work on its size, keep its sign.
             const dir = this.rtl() ? -1 : 1
@@ -778,6 +786,96 @@ export default function packstubGantt(config) {
 
         rtl() {
             return getComputedStyle(this.$root).direction === 'rtl'
+        },
+
+        /* ------------------------------------------------------------ zoom */
+
+        /**
+         * Draw the chart at this many pixels per day, keeping the day under `clientX`
+         * where it is (the window's start when there is none): the nearest level's
+         * factor, and the next finer or coarser level when the factor leaves its
+         * range. Levels not offered by the chart are skipped.
+         */
+        zoomTo(ppd, clientX = null) {
+            const el = this.$refs.scroll
+            const rect = el?.getBoundingClientRect?.()
+            const label = this.labelWidth()
+            const xIn = rect && clientX !== null
+                ? Math.max(0, this.rtl() ? rect.right - label - clientX : clientX - rect.left - label)
+                : 0
+            const day = el ? (Math.abs(el.scrollLeft || 0) + xIn) / (this.view.pxPerDay || 1) : 0
+
+            const base = (s) => config.pxPerDay[s] || 18
+            let scale = this.scale
+            let zoom = ppd / base(scale)
+            // Finer levels come first in the list: step while the factor is out of range.
+            while (zoom > ZOOM_MAX && this.scales.indexOf(scale) > 0) {
+                scale = this.scales[this.scales.indexOf(scale) - 1]
+                zoom = ppd / base(scale)
+            }
+            while (zoom < ZOOM_MIN && this.scales.indexOf(scale) < this.scales.length - 1) {
+                scale = this.scales[this.scales.indexOf(scale) + 1]
+                zoom = ppd / base(scale)
+            }
+            this.scale = scale
+            this.zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoom))
+            this.rebuild()
+            this.persist()
+
+            if (el) {
+                this.$nextTick(() => {
+                    el.scrollLeft = (this.rtl() ? -1 : 1) * Math.max(0, day * this.view.pxPerDay - xIn)
+                    this.onScroll()
+                    this.fill()
+                })
+            }
+        },
+
+        /** Ctrl/⌘ + wheel zooms around the pointer; a plain wheel scrolls as usual. */
+        onWheel(event) {
+            if (! (event.ctrlKey || event.metaKey)) return
+            event.preventDefault()
+            this.zoomTo(this.view.pxPerDay * Math.exp(-event.deltaY * 0.0015), event.clientX)
+        },
+
+        pinchStart(event) {
+            if (event.touches?.length !== 2) return
+            const [a, b] = event.touches
+            this.pinch = { d0: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), ppd0: this.view.pxPerDay }
+        },
+
+        pinchMove(event) {
+            const p = this.pinch
+            if (! p || event.touches?.length !== 2) return
+            if (event.cancelable) event.preventDefault()
+            const [a, b] = event.touches
+            const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
+            this.zoomTo(p.ppd0 * d / (p.d0 || 1), (a.clientX + b.clientX) / 2)
+        },
+
+        pinchEnd() {
+            this.pinch = null
+        },
+
+        /**
+         * Everything the filters leave, in one screen: the span of those bars is
+         * loaded (the server caps it like any window), then drawn at the pixels per
+         * day that fill the chart's width.
+         */
+        fitAll() {
+            return this.$wire.ganttSpan(this.activeFilters()).then((span) => {
+                if (! span?.start) return
+                this.range = { start: span.start, end: span.end }
+
+                // As a typed range: kept as asked (never widened), and a span the server cut short says so.
+                return this.applyWindow(() => {
+                    const el = this.$refs.scroll
+                    const room = Math.max(120, (el?.clientWidth || 1200) - this.labelWidth())
+                    // from the window's start: the zoom anchors on the day under the pointer, here the first
+                    if (el) el.scrollLeft = 0
+                    this.zoomTo(room / Math.max(1, this.view.days))
+                }, { user: true, keepScroll: true })
+            })
         },
 
         /** Width of the sticky label column, in px. */
@@ -1439,6 +1537,7 @@ export default function packstubGantt(config) {
                 const saved = JSON.parse(localStorage.getItem(config.key) || 'null')
                 if (saved) {
                     if (saved.scale && config.pxPerDay[saved.scale] && this.scales.includes(saved.scale)) this.scale = saved.scale
+                    if (Number.isFinite(saved.zoom)) this.zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, saved.zoom))
                     for (const [key, value] of Object.entries(saved.collapsed || {})) {
                         if (key in this.collapsed) this.collapsed[key] = !! value
                     }
@@ -1449,6 +1548,8 @@ export default function packstubGantt(config) {
                 const params = new URLSearchParams(window.location.search)
                 const scale = params.get('scale')
                 if (scale && config.pxPerDay[scale] && this.scales.includes(scale)) this.scale = scale
+                const zoom = parseFloat(params.get('zoom'))
+                if (Number.isFinite(zoom)) this.zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoom))
                 const from = params.get('from')
                 const until = params.get('until')
                 if ((from && from !== this.period.start) || (until && until !== this.period.end)) {
@@ -1485,13 +1586,15 @@ export default function packstubGantt(config) {
 
         persist() {
             try {
-                localStorage.setItem(config.key, JSON.stringify({ scale: this.scale, collapsed: this.collapsed }))
+                localStorage.setItem(config.key, JSON.stringify({ scale: this.scale, zoom: this.zoom, collapsed: this.collapsed }))
             } catch (e) {}
 
             try {
                 const url = new URL(window.location.href)
                 const params = url.searchParams
                 params.set('scale', this.scale)
+                if (Math.abs(this.zoom - 1) > 0.001) params.set('zoom', String(Math.round(this.zoom * 1000) / 1000))
+                else params.delete('zoom')
                 params.set('from', this.period.start)
                 params.set('until', this.period.end)
                 for (const f of this.filters) {

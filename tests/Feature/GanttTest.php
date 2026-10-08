@@ -911,3 +911,15 @@ it('searches a searchable select on the server, over the labels or through a clo
     expect(array_column($gantt->getBars(['project_id' => (string) $beta->id]), 'label'))->toBe(['B'])
         ->and(array_column(gantt()->filters([Filter::select('project_id')->options([$acme->id => 'Acme'])])->getBars(['project_id' => (string) $beta->id]), 'label'))->toBe(['A', 'B']);
 });
+
+it('tells the span of the bars the filters leave, or nothing', function () {
+    $acme = project('Acme');
+    task('A', '2026-10-05', '2026-10-06', ['project_id' => $acme->id]);
+    task('B', '2026-11-20', '2026-12-21');
+    $gantt = gantt()->filters([Filter::select('project_id')->options(fn () => [$acme->id => 'Acme'])]);
+
+    expect($gantt->getSpan())->toBe(['start' => '2026-10-05', 'end' => '2026-12-21'])
+        ->and($gantt->getSpan(['project_id' => (string) $acme->id]))->toBe(['start' => '2026-10-05', 'end' => '2026-10-06'])
+        ->and($gantt->getSpan(['project_id' => '999']))->toBe(['start' => '2026-10-05', 'end' => '2026-12-21'])
+        ->and(gantt()->filters([Filter::select('project_id')->options([$acme->id => 'Acme'])->query(fn ($q) => $q->whereRaw('1 = 0'))])->getSpan(['project_id' => (string) $acme->id]))->toBeNull();
+});
