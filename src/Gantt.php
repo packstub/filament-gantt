@@ -1281,7 +1281,8 @@ class Gantt
         }
 
         if ($lock = $this->getLockedBefore()) {
-            if (($startChanged && ($newStart < $lock || $previousStart < $lock)) || ($endChanged && $newEnd < $lock)) {
+            // A bar wholly before the lock keeps its row too: the past stays as it happened.
+            if (($startChanged && ($newStart < $lock || $previousStart < $lock)) || ($endChanged && $newEnd < $lock) || ($regroup && $previousEnd <= $lock)) {
                 // A lock at midnight reads as a date; one during the day (now()) says the time too.
                 $format = $lock->isStartOfDay() ? static::dateFormat() : static::dateTimeFormat();
 

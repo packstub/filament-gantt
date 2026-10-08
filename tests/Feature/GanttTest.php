@@ -872,3 +872,15 @@ it('loads the predecessors relation with the bars, never lazily', function () {
         Model::preventLazyLoading(false);
     }
 });
+
+it('keeps the row of a bar that ended before the lock, and lets an ongoing one change rows', function () {
+    $acme = project('Acme');
+    $beta = project('Beta');
+    $past = task('Past', '2026-10-01', '2026-10-05', ['project_id' => $acme->id]);
+    $ongoing = task('Ongoing', '2026-10-10', '2026-10-20', ['project_id' => $acme->id]);
+    task('Other', '2026-10-01', '2026-10-02', ['project_id' => $beta->id]);
+    $gantt = gantt()->lockedBefore(CarbonImmutable::parse('2026-10-14'));
+
+    expect(fn () => $gantt->move((string) $past->id, '2026-10-01 00:00', '2026-10-06 00:00', (string) $beta->id))->toThrow(MoveRejected::class)
+        ->and($gantt->move((string) $ongoing->id, '2026-10-10 00:00', '2026-10-21 00:00', (string) $beta->id)['group'])->toBe((string) $beta->id);
+});
