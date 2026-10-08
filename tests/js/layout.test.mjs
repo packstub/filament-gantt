@@ -153,10 +153,10 @@ test('arrows(): finish-to-start paths between bars on the chart, dashed when the
 
     // elbows stay inside the canvas: a successor at the window's edge, a predecessor ending at its end
     const edge = layout([
-        { id: 'a', group: '1', start: '2026-10-05', end: '2026-11-01', label: 'A', movable: true, resizable: true },
+        { id: 'a', group: '1', start: '2026-10-05', end: '2026-11-02', label: 'A', movable: true, resizable: true },
         { id: 'b', group: '1', start: '2026-10-05', end: '2026-10-07', label: 'B', movable: true, resizable: true, deps: ['a'] },
     ], window, 'week')
-    assert.equal(arrows(edge)[0].d, 'M486,54 H486 V72 H0 V90 H0 m-6,-4 l6,4 l-6,4')
+    assert.equal(arrows(edge)[0].d, 'M504,54 H504 V72 H0 V90 H0 m-6,-4 l6,4 l-6,4')
 
     // a bar carried to another row takes its arrows along
     const carried = arrows(v, { id: 'b', dy: 36 })
