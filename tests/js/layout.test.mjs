@@ -133,10 +133,10 @@ test('arrows(): finish-to-start paths between bars on the chart, dashed when the
     const out = arrows(v)
     // rows: group (0), a (36), b (72), c (108); a bar's centre is 4 + 28 / 2 into its row
     assert.deepEqual(out.map((a) => a.key), ['a>b', 'a>c'])
-    assert.equal(out[0].d, 'M54,54 h8 V90 H90 m-6,-4 l6,4 l-6,4')
+    assert.equal(out[0].d, 'M54,54 H62 V90 H90 m-6,-4 l6,4 l-6,4')
     assert.equal(out[0].late, false)
     // c starts before a ends: around through the gap, and late
-    assert.equal(out[1].d, 'M54,54 h8 V90 H28 V126 H36 m-6,-4 l6,4 l-6,4')
+    assert.equal(out[1].d, 'M54,54 H62 V90 H28 V126 H36 m-6,-4 l6,4 l-6,4')
     assert.equal(out[1].late, true)
 
     // a predecessor in a folded group, or outside the window, draws nothing
@@ -151,9 +151,16 @@ test('arrows(): finish-to-start paths between bars on the chart, dashed when the
     assert.equal(lanes.find((a) => a.key === 'a>c').d.startsWith('M54,18 '), true)
     assert.equal(lanes.find((a) => a.key === 'a>c').d.includes('V54'), true, 'c is in the second lane')
 
+    // elbows stay inside the canvas: a successor at the window's edge, a predecessor ending at its end
+    const edge = layout([
+        { id: 'a', group: '1', start: '2026-10-05', end: '2026-11-01', label: 'A', movable: true, resizable: true },
+        { id: 'b', group: '1', start: '2026-10-05', end: '2026-10-07', label: 'B', movable: true, resizable: true, deps: ['a'] },
+    ], window, 'week')
+    assert.equal(arrows(edge)[0].d, 'M486,54 H486 V72 H0 V90 H0 m-6,-4 l6,4 l-6,4')
+
     // a bar carried to another row takes its arrows along
     const carried = arrows(v, { id: 'b', dy: 36 })
-    assert.equal(carried[0].d, 'M54,54 h8 V126 H90 m-6,-4 l6,4 l-6,4')
+    assert.equal(carried[0].d, 'M54,54 H62 V126 H90 m-6,-4 l6,4 l-6,4')
 })
 
 test('year scale: month columns over quarters, no shades, the today line', () => {

@@ -141,8 +141,7 @@
     flex: none;
     width: var(--ps-gantt-label-width);
     border-inline-end: 1px solid var(--ps-gantt-border);
-    background: var(--ps-gantt-bg);
-}
+    background: var(--ps-gantt-bg); box-sizing: border-box; }
 
 .ps-gantt-axis { position: relative; flex: none; }
 .ps-gantt-axis-row { position: relative; height: 1.5rem; }
@@ -230,7 +229,7 @@
 .ps-gantt-fold-closed { transform: rotate(-90deg); }
 [dir="rtl"] .ps-gantt-fold-closed { transform: rotate(90deg); }
 
-.ps-gantt-canvas { position: relative; z-index: 1; flex: none; height: 100%; }
+.ps-gantt-canvas { position: relative; z-index: 1; flex: none; height: 100%; background-clip: padding-box; }
 .ps-gantt-canvas-creatable { cursor: cell; }
 .ps-gantt-is-readonly .ps-gantt-canvas { cursor: default; }
 

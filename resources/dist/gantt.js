@@ -331,10 +331,13 @@ export function arrows(view, carried = null) {
             const yb = y2 + shift(bar)
             const tip = 'm-6,-4 l6,4 l-6,4'
             // Room for the elbow: straight through when the successor starts after the
-            // predecessor ends, otherwise out, around through the gap between the rows, and in.
+            // predecessor ends, otherwise out, around through the gap between the rows, and
+            // in; the elbows stay inside the canvas (a bar at the window's edge).
+            const away = Math.min(x1 + ARROW_GAP, view.width)
+            const back = Math.max(x2 - ARROW_GAP, 0)
             const d = x2 - x1 >= ARROW_GAP * 2
-                ? `M${x1},${y1} h${ARROW_GAP} V${yb} H${x2} ${tip}`
-                : `M${x1},${y1} h${ARROW_GAP} V${(y1 + yb) / 2} H${x2 - ARROW_GAP} V${yb} H${x2} ${tip}`
+                ? `M${x1},${y1} H${away} V${yb} H${x2} ${tip}`
+                : `M${x1},${y1} H${away} V${(y1 + yb) / 2} H${back} V${yb} H${x2} ${tip}`
             out.push({ key: `${dep}>${bar.id}`, d, late: bar.s < from.bar.e })
         }
     }
