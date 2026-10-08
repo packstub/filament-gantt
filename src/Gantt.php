@@ -102,6 +102,10 @@ class Gantt
 
     protected bool|Closure $resizable = true;
 
+    protected bool|Closure $regroupable = true;
+
+    protected ?Closure $canRegroup = null;
+
     protected bool|Closure $readOnly = false;
 
     protected ?bool $readOnlyCache = null;
@@ -364,6 +368,19 @@ class Gantt
         return $this;
     }
 
+    /**
+     * Whether a bar may be dragged to another row (another group): a bool or
+     * `fn (Model $record): bool`. Only on a chart grouped by a column or a BelongsTo,
+     * and for a user authorizeMoves() allows; `groups()` and the rows on the chart
+     * are the only targets.
+     */
+    public function regroupable(bool|Closure $condition = true): static
+    {
+        $this->regroupable = $condition;
+
+        return $this;
+    }
+
     /** Show only: nothing moves, nothing resizes, nothing is created. The widget's default. */
     public function readOnly(bool|Closure $condition = true): static
     {
@@ -430,8 +447,22 @@ class Gantt
     }
 
     /**
+     * A last check before a bar lands in another group: `fn (Model $record, ?string $group,
+     * ?string $previousGroup): bool|string` (the keys of the group column or the related
+     * records, null for ungrouped). Return false to refuse, or a string to refuse with
+     * that message. canMove() runs too, with the groups as its last two arguments.
+     */
+    public function canRegroup(?Closure $callback): static
+    {
+        $this->canRegroup = $callback;
+
+        return $this;
+    }
+
+    /**
      * What a move does: `fn (Model $record, CarbonImmutable $start, CarbonImmutable $end,
-     * CarbonImmutable $previousStart, CarbonImmutable $previousEnd): void`. Throw
+     * CarbonImmutable $previousStart, CarbonImmutable $previousEnd, ?string $group,
+     * ?string $previousGroup): void` (the groups only when the chart is grouped). Throw
      * MoveRejected to refuse it with a message the user sees; any other exception
      * is reported and the user sees "The change did not go through." Default: write
      * the start and end attributes and save. The dates are the chart's half-open
@@ -707,6 +738,12 @@ class Gantt
     public function isResizable(Model $record): bool
     {
         return ! $this->isReadOnly() && $this->canMoveRecord($record) && (bool) $this->evaluate($this->resizable, $record);
+    }
+
+    /** Whether this record may be dragged to another row: the chart groups by something writable, and the rules allow it. */
+    public function isRegroupable(Model $record): bool
+    {
+        return $this->getGroupForeignKey() !== null && ! $this->isReadOnly() && $this->canMoveRecord($record) && (bool) $this->evaluate($this->regroupable, $record);
     }
 
     public function getMinMinutes(): int
@@ -1088,6 +1125,7 @@ class Gantt
             'milestone' => $milestone,
             'movable' => $this->isMovable($record),
             'resizable' => ! $milestone && $this->isResizable($record),
+            'regroupable' => $this->isRegroupable($record),
             ...$shape,
         ];
     }
@@ -1097,15 +1135,16 @@ class Gantt
     /**
      * Move or resize a bar, enforcing every rule on the server whatever the browser
      * claimed. Dates are the chart's half-open range as `Y-m-d H:i` (seconds allowed,
-     * a date alone too); without an end the duration is kept. Returns the bar as it
-     * looks afterwards. A refused move throws MoveRejected; an exception thrown
+     * a date alone too); without an end the duration is kept; with a group (a row's
+     * key, '' for the ungrouped row) the bar lands in that group too. Returns the bar
+     * as it looks afterwards. A refused move throws MoveRejected; an exception thrown
      * while saving (the database's, moveUsing()'s) propagates as it is.
      *
      * @return array<string, mixed>
      *
      * @throws MoveRejected
      */
-    public function move(string $id, string $start, ?string $end = null): array
+    public function move(string $id, string $start, ?string $end = null, ?string $group = null): array
     {
         $record = $this->findRecord($id)
             ?? throw new MoveRejected(__('packstub-gantt::gantt.missing'));
@@ -1131,7 +1170,24 @@ class Gantt
             ? $newStart
             : ($end === null ? $newStart->addMinutes($previousMinutes) : $unit->snapFrom($this->parse($end), $previousEnd));
 
-        if ($newStart->equalTo($previousStart) && $newEnd->equalTo($previousEnd)) {
+        // The row the bar lands in: the one it is in, unless the browser named another
+        // ('' is the ungrouped row). Only a row that is on the chart, never a related
+        // record that merely exists (see knowsGroup()).
+        $previousGroup = $this->groupKey($record);
+        $newGroup = $group === null ? $previousGroup : ($group === '' ? null : $group);
+        $regroup = $newGroup !== $previousGroup;
+
+        if ($regroup) {
+            if (! $this->isRegroupable($record)) {
+                throw new MoveRejected(__('packstub-gantt::gantt.not_regroupable'));
+            }
+
+            if (! $this->knowsRow($group)) {
+                throw new MoveRejected(__('packstub-gantt::gantt.unknown_group'));
+            }
+        }
+
+        if ($newStart->equalTo($previousStart) && $newEnd->equalTo($previousEnd) && ! $regroup) {
             return $this->presentBar($record);
         }
 
@@ -1141,8 +1197,9 @@ class Gantt
 
         // Classified by the edges, not by the duration alone: a bar that changed its
         // length and both its edges was moved as well as resized, and needs both rights.
+        // A change of row alone needs neither: regroupable() decided above.
         if ($minutes === $previousMinutes) {
-            if (! $this->isMovable($record)) {
+            if (($startChanged || $endChanged) && ! $this->isMovable($record)) {
                 throw new MoveRejected(__('packstub-gantt::gantt.not_movable'));
             }
         } else {
@@ -1179,16 +1236,12 @@ class Gantt
         // read naturally; the maths above and the save below keep the UTC-tagged ones.
         [$start, $end, $from, $until] = array_map($this->inAppTimezone(...), [$newStart, $newEnd, $previousStart, $previousEnd]);
 
+        if ($regroup && $this->canRegroup) {
+            $this->verdict(($this->canRegroup)($record, $newGroup, $previousGroup));
+        }
+
         if ($this->canMove) {
-            $verdict = ($this->canMove)($record, $start, $end, $from, $until);
-
-            if ($verdict === false) {
-                throw new MoveRejected(__('packstub-gantt::gantt.not_allowed'));
-            }
-
-            if (is_string($verdict) && $verdict !== '') {
-                throw new MoveRejected($verdict);
-            }
+            $this->verdict(($this->canMove)($record, $start, $end, $from, $until, $newGroup, $previousGroup));
         }
 
         // One transaction from the save to the bar the browser gets back: when
@@ -1197,17 +1250,17 @@ class Gantt
         // thrown here refuses with its message; anything else (a database error, a bug
         // in a closure) propagates for the caller to report: its message is not for
         // the user (see InteractsWithGantt::ganttMove()).
-        return $record->getConnection()->transaction(function () use ($id, $record, $newStart, $newEnd, $milestone, $previousStart, $start, $end, $from, $until) {
+        return $record->getConnection()->transaction(function () use ($id, $record, $newStart, $newEnd, $milestone, $previousStart, $start, $end, $from, $until, $regroup, $newGroup, $previousGroup) {
             if ($this->moveUsing) {
-                ($this->moveUsing)($record, $start, $end, $from, $until);
+                ($this->moveUsing)($record, $start, $end, $from, $until, $newGroup, $previousGroup);
             } else {
-                $this->store($record, $newStart, $newEnd, $milestone, $previousStart);
+                $this->store($record, $newStart, $newEnd, $milestone, $previousStart, $regroup ? [$newGroup] : null);
             }
 
-            BarMoved::dispatch($record, $from, $until, $start, $end, $this->key);
+            BarMoved::dispatch($record, $from, $until, $start, $end, $this->key, $previousGroup, $newGroup);
 
             if ($this->afterMove) {
-                ($this->afterMove)($record, $start, $end, $from, $until);
+                ($this->afterMove)($record, $start, $end, $from, $until, $newGroup, $previousGroup);
             }
 
             unset($this->records[(string) $id]);
@@ -1401,9 +1454,22 @@ class Gantt
         return is_string($value) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) === 1;
     }
 
-    protected function store(Model $record, CarbonImmutable $start, CarbonImmutable $end, bool $milestone, CarbonImmutable $previousStart): void
+    /**
+     * Write the dates (and, when a one-element list is given, the group) and save.
+     *
+     * @param  array{0: ?string}|null  $group
+     */
+    protected function store(Model $record, CarbonImmutable $start, CarbonImmutable $end, bool $milestone, CarbonImmutable $previousStart, ?array $group = null): void
     {
         $dateOnly = $this->isDateOnly($record);
+
+        if ($group !== null) {
+            $record->setAttribute($this->getGroupForeignKey(), $group[0]);
+            // The loaded relation would still say the old group (the label, the key).
+            if ($record->isRelation($this->groupAttribute)) {
+                $record->unsetRelation($this->groupAttribute);
+            }
+        }
         $format = fn (CarbonImmutable $moment) => $dateOnly ? $moment->toDateString() : $moment->format('Y-m-d H:i:s');
 
         $record->setAttribute($this->startAttribute, $format($start));
@@ -1425,6 +1491,30 @@ class Gantt
     protected function minutes(CarbonImmutable $from, CarbonImmutable $until): int
     {
         return (int) round($from->diffInMinutes($until, false));
+    }
+
+    /** A canMove()/canRegroup() answer: false refuses, a string refuses with that message. */
+    protected function verdict(mixed $verdict): void
+    {
+        if ($verdict === false) {
+            throw new MoveRejected(__('packstub-gantt::gantt.not_allowed'));
+        }
+
+        if (is_string($verdict) && $verdict !== '') {
+            throw new MoveRejected($verdict);
+        }
+    }
+
+    /** Whether a row key names a row on the chart: a group it knows, or '' when there is an ungrouped row. */
+    protected function knowsRow(string $group): bool
+    {
+        if ($group !== '') {
+            return $this->knowsGroup($group);
+        }
+
+        $query = $this->baseQuery();
+
+        return $query->whereNull($query->qualifyColumn($this->getGroupForeignKey()))->exists();
     }
 
     /** Whether a group key is one the chart knows (see canCreateIn()). */

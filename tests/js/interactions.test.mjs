@@ -375,3 +375,138 @@ test('a keyboard move works on the reactive copy of its state, like a drag', () 
     assert.ok(c.keyboard.timer)
     assert.equal(c.keyboard.s, Date.UTC(2026, 9, 6))
 }))
+
+/* ------------------------------------------------------------------ moving to another row */
+
+/** Two groups with a bar each; the body starts at y = 0, so row i is at offsets[i]. */
+function groupedChart(over = {}) {
+    const c = chart({
+        grouped: true,
+        groups: [{ key: '1', label: 'Acme', color: null, collapsed: false, count: 1 }, { key: '2', label: 'Beta', color: null, collapsed: false, count: 1 }],
+        bars: [bar({ id: '1', group: '1', regroupable: true }), bar({ id: '2', group: '2', start: '2026-10-10', end: '2026-10-12', regroupable: true })],
+        ...over,
+    })
+    c.$refs.body = { getBoundingClientRect: () => ({ top: 0 }) }
+    return c
+}
+
+test('a bar dragged onto another group\'s row lights that group up, is drawn over the row, and lands there on release', () => {
+    const c = groupedChart()
+    // rows: Acme (0), bar 1 (36), Beta (72), bar 2 (108)
+    const p = press(c, rowBar(c, '1'), { y: 50 })
+    c.drag({ pointerId: 7, clientX: 100, clientY: 125 })
+
+    assert.equal(c.target, '2')
+    assert.equal(c.barStyle(rowBar(c, '1')).transform, 'translateY(72px)')
+    assert.equal(c.hint, 'Oct 5, 2026 – Oct 7, 2026 · Beta')
+    assert.equal(rowBar(c, '1').s, Date.UTC(2026, 9, 5), 'no horizontal move')
+
+    p.up()
+    assert.deepEqual(c.wire.moves, [['1', '2026-10-05 00:00', '2026-10-08 00:00', '2']])
+    assert.equal(c.target, null)
+    // optimistic: the bar is in Beta's rows now, the counts follow
+    assert.equal(c.view.rows.find((r) => r.key === 'b:1').group.key, '2')
+    assert.deepEqual(c.groups.map((g) => g.count), [0, 2])
+})
+
+test('a refused change of row puts the bar back in its group', async () => {
+    const c = groupedChart()
+    c.$wire.ganttMove = () => Promise.resolve({ ok: false, message: 'That row is not on the chart.' })
+    const notices = []
+    c.notify = (m) => notices.push(m)
+
+    const p = press(c, rowBar(c, '1'), { y: 50 })
+    c.drag({ pointerId: 7, clientX: 100, clientY: 125 })
+    p.up()
+    assert.equal(c.bars[0].group, '2')
+
+    await new Promise((r) => setTimeout(r, 0))
+    assert.equal(c.bars[0].group, '1')
+    assert.deepEqual(c.groups.map((g) => g.count), [1, 1])
+    assert.deepEqual(notices, ['That row is not on the chart.'])
+})
+
+test('a bar that may not change rows, an edge drag, and an ungrouped chart stay in their row', () => {
+    const c = groupedChart({ bars: [bar({ id: '1', group: '1', regroupable: false }), bar({ id: '2', group: '2', regroupable: true })] })
+    let p = press(c, rowBar(c, '1'), { y: 50 })
+    c.drag({ pointerId: 7, clientX: 148, clientY: 125 })
+    assert.equal(c.target, null)
+    p.up(48)
+    assert.deepEqual(c.wire.moves, [['1', '2026-10-06 00:00', '2026-10-09 00:00']])
+
+    // the end handle resizes, whatever row the pointer crosses
+    p = press(c, rowBar(c, '2'), { y: 125, edge: 'end' })
+    c.drag({ pointerId: 7, clientX: 148, clientY: 50 })
+    assert.equal(c.target, null)
+    assert.equal(c.barStyle(rowBar(c, '2')).transform, undefined)
+    p.up(48)
+    assert.equal(c.wire.moves.at(-1).length, 3)
+
+    // released over its own group's row: no group sent, the dates alone
+    p = press(c, rowBar(c, '2'), { y: 125 })
+    c.drag({ pointerId: 7, clientX: 148, clientY: 80 })
+    assert.equal(c.target, null)
+    p.up(48)
+    assert.equal(c.wire.moves.at(-1).length, 3)
+
+    const u = chart({ bars: [bar({ regroupable: true })] })
+    u.$refs.body = { getBoundingClientRect: () => ({ top: 0 }) }
+    p = press(u, rowBar(u), { y: 10 })
+    u.drag({ pointerId: 7, clientX: 100, clientY: 500 })
+    assert.equal(u.target, null)
+})
+
+test('up and down arrows carry a focused bar to the previous or next group, keep its focus, and send the row once the keys rest', () => fakeTimers((timers) => {
+    const c = groupedChart()
+    const focused = []
+    c.$root.querySelector = (selector) => ({ focus: () => focused.push(selector) })
+    document.activeElement = { dataset: { id: '1' } }
+
+    key(c, rowBar(c, '1'), 'ArrowDown')
+    assert.equal(c.view.rows.find((r) => r.key === 'b:1').group.key, '2')
+    assert.equal(c.hint, 'Oct 5, 2026 – Oct 7, 2026 · Beta')
+    assert.equal(c.live, c.hint)
+    assert.deepEqual(focused, ['.ps-gantt-bar[data-id="1"]'])
+
+    // the last group: it stays
+    key(c, rowBar(c, '1'), 'ArrowDown')
+    assert.equal(c.view.rows.find((r) => r.key === 'b:1').group.key, '2')
+
+    // dates and row in the same move
+    key(c, rowBar(c, '1'), 'ArrowRight')
+    timers.filter((t) => t.fn).at(-1).fn()
+    assert.deepEqual(c.wire.moves, [['1', '2026-10-06 00:00', '2026-10-09 00:00', '2']])
+
+    // a bar that may not change rows says so
+    const d = groupedChart({ bars: [bar({ id: '1', group: '1', regroupable: false })] })
+    key(d, rowBar(d, '1'), 'ArrowUp')
+    assert.equal(d.live, '')
+    d.t.not_regroupable = 'Not to another row.'
+    key(d, rowBar(d, '1'), 'ArrowUp')
+    assert.equal(d.live, 'Not to another row.')
+    assert.deepEqual(d.wire.moves, [])
+    document.activeElement = null
+}))
+
+test('Escape before the keys rest puts the bar back in its row and sends nothing', () => fakeTimers(() => {
+    const c = groupedChart()
+    key(c, rowBar(c, '1'), 'ArrowDown')
+    assert.equal(c.bars[0].group, '2')
+
+    c.onEscape()
+    assert.equal(c.bars[0].group, '1')
+    assert.equal(c.keyboard, null)
+    assert.deepEqual(c.groups.map((g) => g.count), [1, 1])
+    assert.deepEqual(c.wire.moves, [])
+}))
+
+test('in the compact layout the target is the group\'s one row', () => {
+    const c = groupedChart({ compact: true })
+    // rows: Acme lanes (0), Beta lanes (36)
+    const p = press(c, rowBar(c, '1'), { y: 10 })
+    c.drag({ pointerId: 7, clientX: 100, clientY: 50 })
+    assert.equal(c.target, '2')
+    assert.equal(c.barStyle(rowBar(c, '1')).transform, 'translateY(36px)')
+    p.up()
+    assert.deepEqual(c.wire.moves, [['1', '2026-10-05 00:00', '2026-10-08 00:00', '2']])
+})

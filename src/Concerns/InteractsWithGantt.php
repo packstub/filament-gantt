@@ -79,10 +79,10 @@ trait InteractsWithGantt
      * @return array{ok: bool, bar?: array<string, mixed>, message?: string}
      */
     #[Renderless]
-    public function ganttMove(string $id, string $start, ?string $end = null): array
+    public function ganttMove(string $id, string $start, ?string $end = null, ?string $group = null): array
     {
         try {
-            $bar = $this->getGantt()->move($id, $start, $end);
+            $bar = $this->getGantt()->move($id, $start, $end, $group);
         } catch (MoveRejected $e) {
             return ['ok' => false, 'message' => $e->getMessage()];
         } catch (\Throwable $e) {

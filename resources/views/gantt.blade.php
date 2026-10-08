@@ -106,7 +106,7 @@
             <div class="ps-gantt-pad" :style="'height:' + slice.top + 'px'"></div>
 
             <template x-for="row in visibleRows" :key="row.key">
-                <div class="ps-gantt-row" :class="'ps-gantt-row-' + row.type" :style="'height:' + row.height + 'px'">
+                <div class="ps-gantt-row" :class="{ ['ps-gantt-row-' + row.type]: true, 'ps-gantt-row-target': target !== null && row.group.key === target }" :style="'height:' + row.height + 'px'">
                     <div class="ps-gantt-label">
                         <template x-if="row.type === 'group'">
                             <button type="button" class="ps-gantt-fold" x-on:click="toggle(row.group.key)" :title="row.collapsed ? t.expand : t.collapse" :aria-expanded="! row.collapsed">
@@ -137,6 +137,7 @@
                                     'ps-gantt-bar-narrow': narrow(bar),
                                     'ps-gantt-bar-outside': labelOutside(bar),
                                     'ps-gantt-bar-picked': pointer?.picked && pointer.bar.id === bar.id,
+                                    'ps-gantt-bar-carried': pointer?.dy && pointer.bar.id === bar.id,
                                 }"
                                 :style="barStyle(bar)"
                                 :title="tooltip(bar)"
@@ -155,6 +156,8 @@
                                 x-on:keydown.space.prevent="open(bar, $event)"
                                 x-on:keydown.left.prevent="nudge($event, bar)"
                                 x-on:keydown.right.prevent="nudge($event, bar)"
+                                x-on:keydown.up.prevent="nudge($event, bar)"
+                                x-on:keydown.down.prevent="nudge($event, bar)"
                                 x-on:contextmenu.prevent.stop="openMenu($event, bar)"
                             >
                                 <span class="ps-gantt-progress" x-show="bar.progress !== null && bar.progress !== undefined && ! bar.milestone" :style="{ width: (bar.progress || 0) + '%' }"></span>

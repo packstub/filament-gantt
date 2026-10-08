@@ -10,6 +10,17 @@
 
 Read-only charts (`->readOnly()`, the widget's default) show no handles, and the server refuses moves anyway.
 
+### To another row
+
+On a grouped chart a bar dragged up or down is carried to another group: the rows of the group under the pointer light up, the hint names it, and on release the bar lands there (and on its new dates, when it moved sideways too). The server writes the group column, or the `BelongsTo`'s foreign key, in the same transaction as the dates. Only a row that is on the chart is a target: a group listed by `groups()`, a group that has a bar in the chart's query, or the ungrouped row when there is one; a related record that merely exists is refused. Dragging between rows is what a resource timeline is for: a booking to another room, a job to another machine, a task to another person.
+
+```php
+->regroupable(fn (Booking $booking) => ! $booking->checked_in)       // may it change rows? default: whoever may move it
+->canRegroup(fn (Booking $booking, ?string $room, ?string $previousRoom) => Room::find($room)->fits($booking) ?: 'That room is too small.')
+```
+
+A change of row alone asks `regroupable()` and `canRegroup()`, not `movable()`: the dates did not change. A chart grouped by a relation it cannot write (a `HasOne`, say), or not grouped at all, never offers it.
+
 ### On touch
 
 A swipe always scrolls the chart, wherever it starts, so scrolling a phone screen never reschedules anything. To move a bar, press and hold it until it lifts (the device vibrates where it can), then drag. Held and lifted without moving, the bar opens its menu; a tap runs the click action.
@@ -21,6 +32,7 @@ A bar is a focusable button. On a focused bar:
 | Keys | Does |
 | --- | --- |
 | ← / → | Move the bar by one snap unit (mirrored right to left). |
+| ↑ / ↓ | Carry the bar to the previous or next group (the focus follows it). |
 | Shift + ← / → | Move its end (resize). |
 | Alt + ← / → | Move its start (resize). |
 | Enter, Space | The click action. |
@@ -64,9 +76,11 @@ Every rule takes a boolean or a closure that receives the record, and is checked
 ->minDuration(days: 1)                                        // default: one snap unit
 ->maxDuration(days: 30, hours: 0)
 ->lockedBefore(today())                                       // or fn () => now()->startOfMonth()
-->canMove(function (Task $task, CarbonImmutable $start, CarbonImmutable $end, CarbonImmutable $previousStart, CarbonImmutable $previousEnd) {
+->regroupable(fn (Task $task) => $task->status !== 'done')  // may the bar change rows (groups)?
+->canMove(function (Task $task, CarbonImmutable $start, CarbonImmutable $end, CarbonImmutable $previousStart, CarbonImmutable $previousEnd, ?string $group, ?string $previousGroup) {
     return $start->isWeekend() ? 'Not on a weekend.' : true;
 })
+->canRegroup(fn (Task $task, ?string $group, ?string $previousGroup) => $group !== null)   // not to the ungrouped row
 ```
 
 | Rule | Refuses |
@@ -75,15 +89,17 @@ Every rule takes a boolean or a closure that receives the record, and is checked
 | `authorizeMoves()` | Any move or resize by a user it does not allow (default: the policy's `update`). |
 | `movable()` | A change of position (same duration), any move of a milestone, and a change of both edges together with the duration (that is a move as well as a resize, so it needs both). |
 | `resizable()` | A change of duration, from either edge. Milestones are never resizable. |
+| `regroupable()` | A change of row (group). A row that is not on the chart is refused whatever this says. |
 | `minDuration()` / `maxDuration()` | A resize that makes the bar shorter or longer than that. The browser knows the bounds too and stops the handle there. |
 | `lockedBefore($moment)` | A start moved to before the moment, a start that was already before it (the past stays as it happened), or an end moved to before it. A bar that started in the past may still change its end. The message names the moment: a date for a midnight lock (`today()`), date and time otherwise (`now()`). |
-| `canMove()` | Whatever the closure says: `false` refuses with a generic message, a string refuses with that message. |
+| `canMove()` | Whatever the closure says: `false` refuses with a generic message, a string refuses with that message. Its last two arguments are the new and the previous group key (null when ungrouped, or not grouped). |
+| `canRegroup()` | The same, for a change of row only, with the record, the new and the previous group key. |
 
 The dates a closure receives are the chart's half-open range: a whole-day record's end is the day after its last day ([Bars](bars.md#whole-days-and-moments)), as wall-clock moments in the app's timezone ([Time zones](#time-zones)), so `$start->isPast()` means what it says.
 
 ## Your own move logic
 
-`moveUsing()` replaces the default save. Throw `MoveRejected` to refuse the move: the bar goes back and the message is shown.
+`moveUsing()` replaces the default save. Throw `MoveRejected` to refuse the move: the bar goes back and the message is shown. After the dates it receives the new and the previous group key (`?string`), so a closure that writes the record itself writes the group too when they differ.
 
 ```php
 ->moveUsing(function (Task $task, CarbonImmutable $start, CarbonImmutable $end) {
@@ -120,7 +136,8 @@ use Packstub\Gantt\Events\BarMoved;
 
 Event::listen(function (BarMoved $event) {
     // $event->record, $event->previousStart, $event->previousEnd, $event->start, $event->end
-    // $event->isResize(), $event->gantt (the chart's key())
+    // $event->previousGroup, $event->group (keys, null when ungrouped)
+    // $event->isResize(), $event->isRegroup(), $event->gantt (the chart's key())
 });
 ```
 

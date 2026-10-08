@@ -744,3 +744,88 @@ it('keeps a group colour read from a model only when it is one', function () {
         ->and(Group::make('x')->color($acme->id)->toArray()['color'])->toBeNull()
         ->and(Group::make('x')->color(0x336699)->toArray()['color'])->toBeNull();
 });
+
+/* ------------------------------------------------------------------ moving to another row */
+
+it('moves a bar to another group, with or without new dates, and answers with the bar in its new row', function () {
+    Event::fake([BarMoved::class]);
+    $acme = project('Acme');
+    $beta = project('Beta');
+    $task = task('Build', '2026-10-05', '2026-10-07', ['project_id' => $acme->id]);
+    task('Keep', '2026-10-01', '2026-10-02', ['project_id' => $acme->id]);
+    task('Other', '2026-10-01', '2026-10-02', ['project_id' => $beta->id]);
+    $after = [];
+
+    $gantt = gantt()->afterMove(function (Task $t, CarbonImmutable $start, CarbonImmutable $end, CarbonImmutable $from, CarbonImmutable $until, ?string $group, ?string $previousGroup) use (&$after) {
+        $after[] = [$previousGroup, $group, $start->toDateString()];
+    });
+
+    // the same dates, another row: a move all the same
+    $bar = $gantt->move((string) $task->id, '2026-10-05 00:00', '2026-10-08 00:00', (string) $beta->id);
+
+    expect($bar['group'])->toBe((string) $beta->id)
+        ->and($bar['start'])->toBe('2026-10-05 00:00')
+        ->and($task->fresh()->project_id)->toBe($beta->id)
+        ->and($gantt->getGroups([$bar])[0]['label'])->toBe('Beta');
+    Event::assertDispatched(BarMoved::class, fn (BarMoved $e) => $e->isRegroup() && ! $e->isResize() && $e->previousGroup === (string) $acme->id && $e->group === (string) $beta->id);
+
+    // new dates and another row at once
+    $bar = $gantt->move((string) $task->id, '2026-10-12 00:00', '2026-10-15 00:00', (string) $acme->id);
+
+    expect($bar['group'])->toBe((string) $acme->id)
+        ->and($task->fresh()->only(['project_id', 'starts_on']))->toMatchArray(['project_id' => $acme->id])
+        ->and($after)->toBe([[(string) $acme->id, (string) $beta->id, '2026-10-05'], [(string) $beta->id, (string) $acme->id, '2026-10-12']]);
+
+    // the row it is in already: nothing to do
+    Event::fake([BarMoved::class]);
+    $gantt->move((string) $task->id, '2026-10-12 00:00', '2026-10-15 00:00', (string) $acme->id);
+    Event::assertNotDispatched(BarMoved::class);
+});
+
+it('moves a bar to another value of a group column, and to the ungrouped row only when there is one', function () {
+    $early = shift('Early', '2026-10-05 08:00:00', '2026-10-05 12:00:00', ['room' => 'A']);
+    shift('Late', '2026-10-05 14:00:00', '2026-10-05 18:00:00', ['room' => 'B']);
+
+    expect(shifts()->move((string) $early->id, '2026-10-05 08:00', null, 'B')['group'])->toBe('B')
+        ->and($early->fresh()->room)->toBe('B')
+        ->and(fn () => shifts()->move((string) $early->id, '2026-10-05 08:00', null, ''))->toThrow('That row is not on the chart.');
+
+    shift('Spare', '2026-10-06 08:00:00', '2026-10-06 12:00:00');
+
+    expect(shifts()->move((string) $early->id, '2026-10-05 08:00', null, '')['group'])->toBe('')
+        ->and($early->fresh()->room)->toBeNull();
+});
+
+it('refuses a row that is not on the chart, and a change of row the rules do not allow', function () {
+    $acme = project('Acme');
+    $beta = project('Beta');
+    $empty = project('Empty');
+    $task = task('Build', '2026-10-05', '2026-10-07', ['project_id' => $acme->id]);
+    task('Other', '2026-10-01', '2026-10-02', ['project_id' => $beta->id]);
+    $to = fn (Gantt $gantt, string $group) => fn () => $gantt->move((string) $task->id, '2026-10-05 00:00', '2026-10-08 00:00', $group);
+
+    expect($to(gantt(), '424242'))->toThrow('That row is not on the chart.')
+        // a project that exists but has no row
+        ->and($to(gantt(), (string) $empty->id))->toThrow('That row is not on the chart.')
+        // listed by groups(), so a row
+        ->and($to(gantt()->groups([Group::make((string) $empty->id)]), (string) $empty->id))->not->toThrow(MoveRejected::class)
+        ->and($to(gantt()->regroupable(false), (string) $beta->id))->toThrow('This bar cannot be moved to another row.')
+        ->and($to(gantt()->regroupable(fn (Task $t) => $t->title !== 'Build'), (string) $beta->id))->toThrow('This bar cannot be moved to another row.')
+        ->and($to(gantt()->canRegroup(fn (Task $t, ?string $group, ?string $previous) => false), (string) $beta->id))->toThrow('You cannot move this bar.')
+        ->and($to(gantt()->canRegroup(fn (Task $t, ?string $group, ?string $previous) => "Not into {$group} from {$previous}."), (string) $beta->id))->toThrow("Not into {$beta->id} from {$empty->id}.")
+        ->and($to(gantt()->canMove(fn (Task $t, $s, $e, $ps, $pe, ?string $group) => $group === (string) $beta->id ? 'Beta is full.' : true), (string) $beta->id))->toThrow('Beta is full.')
+        ->and($to(gantt()->readOnly(), (string) $beta->id))->toThrow(MoveRejected::class)
+        // a change of row alone needs no movable(): the dates did not change
+        ->and($to(gantt()->movable(false), (string) $beta->id))->not->toThrow(MoveRejected::class);
+});
+
+it('offers a change of row only on a chart grouped by something it can write, to a user who may move', function () {
+    $acme = project('Acme');
+    $task = task('Build', '2026-10-05', '2026-10-07', ['project_id' => $acme->id]);
+
+    expect(gantt()->presentBar($task)['regroupable'])->toBeTrue()
+        ->and(gantt()->regroupable(false)->presentBar($task)['regroupable'])->toBeFalse()
+        ->and(gantt()->authorizeMoves(false)->presentBar($task)['regroupable'])->toBeFalse()
+        ->and(Gantt::make()->query(fn () => Task::query())->start('starts_on')->end('ends_on')->presentBar($task)['regroupable'])->toBeFalse()
+        ->and(fn () => Gantt::make()->query(fn () => Task::query())->start('starts_on')->end('ends_on')->move((string) $task->id, '2026-10-05 00:00', null, '7'))->toThrow('This bar cannot be moved to another row.');
+});

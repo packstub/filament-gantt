@@ -11,7 +11,8 @@ use Illuminate\Foundation\Events\Dispatchable;
  * sees it: a half-open range, so a date-only record ending on the 7th has an end of
  * the 8th at 00:00 here. A milestone has start == end. They are wall-clock moments
  * in the app's timezone, the way Eloquent tags a record's dates, so a comparison
- * with now() reads naturally (see Gantt on time zones).
+ * with now() reads naturally (see Gantt on time zones). The groups are the keys of
+ * the group column or the related records (null when ungrouped, or not grouped).
  */
 class BarMoved
 {
@@ -24,7 +25,15 @@ class BarMoved
         public readonly CarbonImmutable $start,
         public readonly CarbonImmutable $end,
         public readonly ?string $gantt = null,
+        public readonly ?string $previousGroup = null,
+        public readonly ?string $group = null,
     ) {}
+
+    /** Whether the bar landed in another group (another row). */
+    public function isRegroup(): bool
+    {
+        return $this->group !== $this->previousGroup;
+    }
 
     /** Whether the duration changed (a resize) rather than the position (a move). */
     public function isResize(): bool

@@ -340,6 +340,8 @@ export default function packstubGantt(config) {
         dragging: false,
         pointer: null,
         keyboard: null,
+        // The group a dragged bar would land in, when it is not its own (its rows light up).
+        target: null,
         swallowClick: false,
         autoScrolling: false,
         filling: false,
@@ -587,6 +589,12 @@ export default function packstubGantt(config) {
             const inner = config.rowHeight - 8
             const style = { 'inset-inline-start': bar.x + 'px', top: top + 'px', height: inner + 'px', '--ps-bar': this.tone(bar.color) }
 
+            // Carried to another row: drawn over that row while the pointer is down.
+            const p = this.pointer
+            if (p && p.dy && p.bar.id === bar.id) {
+                style.transform = `translateY(${p.dy}px)`
+            }
+
             // The diamond centres itself on the row's inner height, whatever row_height is.
             if (bar.milestone) {
                 style['--ps-gantt-row-inner'] = inner + 'px'
@@ -770,6 +778,8 @@ export default function packstubGantt(config) {
                 id: event.pointerId, bar, edge, allowed, touch, picked: false, moved: false, press: null,
                 x0: event.clientX, y0: event.clientY, cx: event.clientX, cy: event.clientY,
                 s: bar.s, e: bar.e, sl0: this.$refs.scroll?.scrollLeft || 0,
+                // A whole bar on a grouped chart may be carried to another row.
+                rows: ! edge && !! bar.regroupable && !! config.grouped, g0: String(bar.group ?? ''), g: String(bar.group ?? ''), dy: 0,
                 dir: this.rtl() ? -1 : 1, el: event.currentTarget,
             }
             // From here on the reactive copy: it is what this.pointer returns (an
@@ -839,8 +849,34 @@ export default function packstubGantt(config) {
             }
 
             this.place(bar)
-            this.hint = this.dates(bar)
+
+            if (p.rows) {
+                const at = this.rowAt(p.cy)
+                const own = this.view.rows.findIndex((row) => row.bars.includes(bar))
+                const other = at !== null && this.view.rows[at].group.key !== p.g0
+                this.target = other ? this.view.rows[at].group.key : null
+                p.g = other ? this.target : p.g0
+                p.dy = other && own >= 0 ? this.offsets[at] - this.offsets[own] : 0
+            }
+
+            this.hint = this.dates(bar) + (p.g !== p.g0 ? ' · ' + this.groupLabel(p.g) : '')
             this.autoScroll(p)
+        },
+
+        /** The index of the row under a point on screen, or null outside the rows. */
+        rowAt(clientY) {
+            const body = this.$refs.body
+            if (! body?.getBoundingClientRect || ! this.offsets.length) return null
+            const y = clientY - body.getBoundingClientRect().top
+            if (y < 0) return null
+            for (let i = this.offsets.length - 1; i >= 0; i--) {
+                if (y >= this.offsets[i]) return y < this.offsets[i] + this.view.rows[i].height ? i : null
+            }
+            return null
+        },
+
+        groupLabel(key) {
+            return this.groups.find((g) => String(g.key) === String(key))?.label ?? (key || this.t.ungrouped || '')
         },
 
         /** While a bar is dragged near the chart's start or end edge, the chart scrolls, faster the closer it gets. */
@@ -862,11 +898,19 @@ export default function packstubGantt(config) {
                 let v = 0
                 if (p.cx < left + EDGE_PX) v = -Math.min(EDGE_MAX_STEP, Math.ceil((left + EDGE_PX - p.cx) / 3))
                 else if (p.cx > right - EDGE_PX) v = Math.min(EDGE_MAX_STEP, Math.ceil((p.cx - right + EDGE_PX) / 3))
+                // Carried to another row: the rows scroll too, under the sticky header.
+                let vy = 0
+                if (p.rows) {
+                    const top = r.top + (this.$refs.body?.getBoundingClientRect ? Math.max(0, this.$refs.body.getBoundingClientRect().top - r.top + (el.scrollTop || 0)) : 0)
+                    if (p.cy < top + EDGE_PX) vy = -Math.min(EDGE_MAX_STEP, Math.ceil((top + EDGE_PX - p.cy) / 3))
+                    else if (p.cy > r.bottom - EDGE_PX) vy = Math.min(EDGE_MAX_STEP, Math.ceil((p.cy - r.bottom + EDGE_PX) / 3))
+                }
 
-                if (v) {
-                    const before = el.scrollLeft
-                    el.scrollLeft += v
-                    if (el.scrollLeft !== before) this.track(p)
+                if (v || vy) {
+                    const before = [el.scrollLeft, el.scrollTop]
+                    if (v) el.scrollLeft += v
+                    if (vy) el.scrollTop += vy
+                    if (el.scrollLeft !== before[0] || el.scrollTop !== before[1]) this.track(p)
                 }
 
                 requestAnimationFrame(step)
@@ -889,9 +933,9 @@ export default function packstubGantt(config) {
                 return this.open(p.bar, event)
             }
 
-            if (! p.allowed || (p.bar.s === p.s && p.bar.e === p.e)) return
+            if (! p.allowed || (p.bar.s === p.s && p.bar.e === p.e && p.g === p.g0)) return
 
-            this.commit(p.bar, p.s, p.e)
+            this.commit(p.bar, p.s, p.e, p.g !== p.g0 ? p.g : null, p.g0)
         },
 
         /**
@@ -918,6 +962,7 @@ export default function packstubGantt(config) {
             this.pointer = null
             this.dragging = false
             this.hint = null
+            this.target = null
             clearTimeout(p.press)
             try { p.el.releasePointerCapture?.(p.id) } catch (e) {}
         },
@@ -929,40 +974,67 @@ export default function packstubGantt(config) {
          */
         nudge(event, bar) {
             if (bar.src._pending || this.pointer || this.readOnly) return
-            const edge = event.shiftKey ? 'end' : event.altKey ? 'start' : null
+            const vertical = event.key === 'ArrowUp' || event.key === 'ArrowDown'
+            const edge = vertical ? null : event.shiftKey ? 'end' : event.altKey ? 'start' : null
             if (edge && bar.milestone) return
-            const allowed = edge ? bar.resizable : bar.movable
+            const allowed = vertical ? bar.regroupable && config.grouped : edge ? bar.resizable : bar.movable
 
             if (! allowed) {
-                return this.say(this.t[edge ? 'not_resizable' : 'not_movable'] || '')
+                return this.say(this.t[vertical ? 'not_regroupable' : edge ? 'not_resizable' : 'not_movable'] || '')
             }
 
             if (this.keyboard && this.keyboard.id !== bar.id) this.flushNudge()
             // The reactive copy, never the plain object just assigned (see down()).
-            this.keyboard ??= { id: bar.id, s0: bar.s, e0: bar.e, s: bar.s, e: bar.e, timer: null }
+            this.keyboard ??= { id: bar.id, s0: bar.s, e0: bar.e, s: bar.s, e: bar.e, g0: String(bar.group ?? ''), g: String(bar.group ?? ''), timer: null }
             const k = this.keyboard
-            const forward = (event.key === 'ArrowRight') !== this.rtl()
-            const unit = this.unitFor(bar)
-            const { min, max } = this.limitsFor(bar)
-            const d = forward ? unit : -unit
 
-            if (edge === 'end') {
-                k.e = Math.min(Math.max(k.e + d, k.s + min), k.s + max)
-            } else if (edge === 'start') {
-                k.s = Math.max(Math.min(k.s + d, k.e - min), k.e - max)
+            if (vertical) {
+                // The previous or next group in the chart's order; at either end the bar stays.
+                const keys = this.groups.map((g) => String(g.key))
+                const next = keys[keys.indexOf(k.g) + (event.key === 'ArrowDown' ? 1 : -1)]
+                if (next === undefined) return
+                k.g = next
+                this.regroup(bar.src, next)
             } else {
-                k.s += d
-                k.e += d
+                const forward = (event.key === 'ArrowRight') !== this.rtl()
+                const unit = this.unitFor(bar)
+                const { min, max } = this.limitsFor(bar)
+                const d = forward ? unit : -unit
+
+                if (edge === 'end') {
+                    k.e = Math.min(Math.max(k.e + d, k.s + min), k.s + max)
+                } else if (edge === 'start') {
+                    k.s = Math.max(Math.min(k.s + d, k.e - min), k.e - max)
+                } else {
+                    k.s += d
+                    k.e += d
+                }
+
+                bar.s = k.s
+                bar.e = k.e
+                this.place(bar)
             }
 
-            bar.s = k.s
-            bar.e = k.e
-            this.place(bar)
-            this.hint = this.dates(bar)
+            this.hint = this.dates(this.rowBar(k.id) || bar) + (k.g !== k.g0 ? ' · ' + this.groupLabel(k.g) : '')
             this.say(this.hint)
 
             clearTimeout(k.timer)
             k.timer = setTimeout(() => this.flushNudge(), NUDGE_MS)
+        },
+
+        /**
+         * Put a bar in another group in the browser (optimistically, or back): its row
+         * changes, so the chart is rebuilt and, when the bar had the focus, the new
+         * element takes it.
+         */
+        regroup(src, group) {
+            const focused = typeof document !== 'undefined' && document.activeElement?.dataset?.id === src.id
+            src.group = group
+            this.groups = this.recount()
+            this.rebuild()
+            if (focused) {
+                this.$nextTick(() => this.$root.querySelector?.(`.ps-gantt-bar[data-id="${src.id}"]`)?.focus())
+            }
         },
 
         /** Send the keyboard move in progress, if it changed anything. */
@@ -974,25 +1046,32 @@ export default function packstubGantt(config) {
             this.hint = null
 
             const bar = this.rowBar(k.id)
-            if (! bar || (k.s === k.s0 && k.e === k.e0)) return
+            if (! bar || (k.s === k.s0 && k.e === k.e0 && k.g === k.g0)) return
             bar.s = k.s
             bar.e = k.e
-            this.commit(bar, k.s0, k.e0)
+            this.commit(bar, k.s0, k.e0, k.g !== k.g0 ? k.g : null, k.g0)
         },
 
-        commit(bar, s0, e0) {
+        /** Send a move: new dates (and, with a group, a new row) against where the bar was; the server's answer, or the bar back. */
+        commit(bar, s0, e0, group = null, g0 = null) {
             const src = bar.src
             src._pending = true
             this.pending++
+            if (group !== null && String(src.group ?? '') !== group) this.regroup(src, group)
 
             const undo = (message) => {
                 src._pending = false
+                if (group !== null) src.group = g0
+                this.groups = this.recount()
                 this.rebuild()
                 this.notify(message, 'danger')
                 this.say(message)
             }
 
-            this.$wire.ganttMove(bar.id, format(bar.s), bar.milestone ? null : format(bar.e))
+            const args = [bar.id, format(bar.s), bar.milestone ? null : format(bar.e)]
+            if (group !== null) args.push(group)
+
+            this.$wire.ganttMove(...args)
                 .then((result) => {
                     if (! result?.ok) {
                         return undo(result?.message || this.t.failed)
@@ -1111,6 +1190,8 @@ export default function packstubGantt(config) {
                 clearTimeout(k.timer)
                 this.keyboard = null
                 this.hint = null
+                const src = this.bars.find((b) => b.id === k.id)
+                if (src && k.g !== k.g0) return this.regroup(src, k.g0)
                 return this.rebuild()
             }
             if (this.menu) this.closeMenu(true)
