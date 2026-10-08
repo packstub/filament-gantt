@@ -663,6 +663,17 @@ test('Ctrl + wheel zooms around the pointer: the day under it stays put, and the
     c.zoomTo(0.1, 300)
     assert.equal(c.zoom, 0.5)
 
+    // a range typed earlier pinned the window; zooming out lets it fill the width again
+    c.range = { start: '2026-10-01', end: '2026-10-14' }
+    c.applyWindow(null, { user: true })
+    c.apply({ window: { start: '2026-10-01', end: '2026-10-14' }, groups: [], bars: [], total: 0 })
+    assert.equal(c.userRange, true)
+    c.filling = false // an earlier fill's fake request never answered
+    const loads = c.wire.refreshes.length
+    c.zoomTo(10, 300)
+    assert.equal(c.userRange, false)
+    assert.ok(c.wire.refreshes.length > loads, 'the fill loads a window as wide as the chart')
+
     // a plain wheel is left to the browser; a level chosen by hand is shown as designed
     c.onWheel({ ctrlKey: false, deltaY: -300, clientX: 300, preventDefault() { throw new Error('prevented') } })
     c.setScale('month')

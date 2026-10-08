@@ -819,6 +819,9 @@ export default function packstubGantt(config) {
             }
             this.scale = scale
             this.zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoom))
+            // A zoom asks for another view of the dates: a range typed earlier no longer
+            // pins the window, so zooming out fills the width again (fill()).
+            this.userRange = false
             this.rebuild()
             this.persist()
 
