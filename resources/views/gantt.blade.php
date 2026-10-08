@@ -40,6 +40,11 @@
             <span x-text="t.today"></span>
         </x-filament::button>
 
+        {{-- Everything the filters leave, in one screen --}}
+        <x-filament::button color="gray" x-on:click="fitAll()" x-bind:title="t.fit_hint">
+            <span x-text="t.fit"></span>
+        </x-filament::button>
+
         <div class="ps-gantt-range" role="group" x-bind:aria-label="t.range">
             <x-filament::input.wrapper>
                 <x-slot name="prefix"><span x-text="t.from"></span></x-slot>
@@ -79,7 +84,16 @@
         <span class="ps-gantt-count" :class="{ 'ps-gantt-count-truncated': total > bars.length }" x-text="countText()" :title="total > bars.length ? t.truncated_hint : null"></span>
     </div>
 
-    <div class="ps-gantt-scroll" x-ref="scroll" x-on:scroll.passive="onScroll()">
+    <div
+        class="ps-gantt-scroll"
+        x-ref="scroll"
+        x-on:scroll.passive="onScroll()"
+        x-on:wheel="onWheel($event)"
+        x-on:touchstart="pinchStart($event)"
+        x-on:touchmove="pinchMove($event)"
+        x-on:touchend="pinchEnd($event)"
+        x-on:touchcancel="pinchEnd($event)"
+    >
         <div class="ps-gantt-head">
             <div class="ps-gantt-corner"></div>
             <div class="ps-gantt-axis" :style="'width:' + view.width + 'px'">

@@ -7,6 +7,8 @@ return [
     'month' => 'Month',
     'year' => 'Year',
     'today' => 'Today',
+    'fit' => 'Fit',
+    'fit_hint' => 'Show everything the filters leave in one screen',
     'from' => 'From',
     'until' => 'Until',
     'all' => 'All',

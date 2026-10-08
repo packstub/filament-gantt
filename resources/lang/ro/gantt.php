@@ -7,6 +7,8 @@ return [
     'month' => 'Lună',
     'year' => 'An',
     'today' => 'Azi',
+    'fit' => 'Încadrează',
+    'fit_hint' => 'Tot ce lasă filtrele, pe un singur ecran',
     'from' => 'De la',
     'until' => 'Până la',
     'all' => 'Toate',

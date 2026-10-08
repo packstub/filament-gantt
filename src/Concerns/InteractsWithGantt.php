@@ -72,6 +72,19 @@ trait InteractsWithGantt
     }
 
     /**
+     * The span of the bars the filters leave (`start`/`end` as `Y-m-d`), or null when
+     * there are none: the window "Fit" asks for.
+     *
+     * @param  array<string, mixed>  $filters
+     * @return array{start: string, end: string}|null
+     */
+    #[Renderless]
+    public function ganttSpan(array $filters = []): ?array
+    {
+        return $this->getGantt()->getSpan($filters);
+    }
+
+    /**
      * The options of a select filter: its list, or the ones matching a search (a
      * searchable filter's live search), as the browser's select expects them.
      *

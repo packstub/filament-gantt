@@ -638,3 +638,88 @@ test('an option chosen in a select filter refreshes once; the URL restores any v
         globalThis.window.location = location
     }
 })
+
+/* ------------------------------------------------------------------ zoom */
+
+test('Ctrl + wheel zooms around the pointer: the day under it stays put, and the factor crosses levels at its bounds', () => {
+    const c = chart({ scale: 'week', bars: [bar()] })
+    c.persist = () => {}
+    const el = { scrollLeft: 180, clientWidth: 600, scrollTop: 0, clientHeight: 600, getBoundingClientRect: () => ({ left: 100, right: 700, top: 0, bottom: 600 }), querySelector: () => ({ offsetWidth: 100 }) }
+    c.$refs.scroll = el
+    // the pointer 100px into the canvas: day (180 + 100) / 18 = 15.56 under it
+    c.onWheel({ ctrlKey: true, deltaY: -300, clientX: 300, preventDefault() {} })
+    assert.equal(c.scale, 'week')
+    assert.ok(c.zoom > 1.5 && c.zoom < 1.6, String(c.zoom))
+    assert.equal(Math.round(el.scrollLeft), Math.round(15.556 * c.view.pxPerDay - 100))
+
+    // zooming in past 2× the week level becomes the day level with a smaller factor
+    c.zoomTo(40, 300)
+    assert.equal(c.scale, 'day')
+    assert.ok(Math.abs(c.zoom - 40 / 48) < 0.001)
+    // and out past 0.5× becomes the coarser level; below year's floor it clamps
+    c.zoomTo(1, 300)
+    assert.equal(c.scale, 'year')
+    assert.equal(c.zoom, 1 / 1.5)
+    c.zoomTo(0.1, 300)
+    assert.equal(c.zoom, 0.5)
+
+    // a plain wheel is left to the browser; a level chosen by hand is shown as designed
+    c.onWheel({ ctrlKey: false, deltaY: -300, clientX: 300, preventDefault() { throw new Error('prevented') } })
+    c.setScale('month')
+    assert.equal(c.zoom, 1)
+    assert.equal(c.view.pxPerDay, 5)
+})
+
+test('a pinch zooms by the fingers\' distance; one finger does nothing', () => {
+    const c = chart({ scale: 'week', bars: [bar()] })
+    c.persist = () => {}
+    c.$refs.scroll = { scrollLeft: 0, clientWidth: 600, getBoundingClientRect: () => ({ left: 0, right: 600, top: 0, bottom: 600 }), querySelector: () => ({ offsetWidth: 0 }) }
+    c.pinchStart({ touches: [{ clientX: 100, clientY: 100 }] })
+    assert.equal(c.pinch, null)
+    c.pinchStart({ touches: [{ clientX: 100, clientY: 100 }, { clientX: 200, clientY: 100 }] })
+    c.pinchMove({ touches: [{ clientX: 50, clientY: 100 }, { clientX: 250, clientY: 100 }], cancelable: true, preventDefault() {} })
+    assert.equal(c.zoom, 2)
+    c.pinchEnd()
+    assert.equal(c.pinch, null)
+})
+
+test('Fit loads the span of the filtered bars and draws it at the width of the chart', async () => {
+    const c = chart({ scale: 'day', bars: [bar()] })
+    c.persist = () => {}
+    c.$refs.scroll = { scrollLeft: 0, clientWidth: 1100, querySelector: () => ({ offsetWidth: 200 }), getBoundingClientRect: () => ({ left: 0, right: 1100, top: 0, bottom: 600 }) }
+    c.$wire.ganttSpan = async (filters) => { c.wire.spans = [filters]; return { start: '2026-07-01', end: '2026-12-31' } }
+    c.$wire.ganttRefresh = async (filters, from, until) => ({ window: { start: from, end: until }, groups: [], bars: [], total: 0 })
+
+    await c.fitAll()
+    assert.deepEqual(c.wire.spans, [{}])
+    // 184 days plus 8% of room after the last bar (15 days): 199 days in 900px, the month level at nearly 1×
+    assert.deepEqual(c.period, { start: '2026-07-01', end: '2027-01-15' })
+    assert.equal(c.scale, 'month')
+    assert.ok(Math.abs(c.view.pxPerDay - 900 / 199) < 0.01, String(c.view.pxPerDay))
+    assert.equal(c.userRange, true, 'not widened afterwards')
+
+    // nothing to fit: nothing changes
+    c.$wire.ganttSpan = async () => null
+    await c.fitAll()
+    assert.equal(c.scale, 'month')
+})
+
+test('the zoom factor lives in the URL and local storage, clamped', () => {
+    const location = globalThis.window.location
+    const saved = []
+    globalThis.window.location = { href: 'https://x.test/?scale=week&zoom=9', search: '?scale=week&zoom=9' }
+    globalThis.window.history.replaceState = (s, t, url) => saved.push(String(url))
+    try {
+        const c = chart({ bars: [] })
+        c.init()
+        assert.equal(c.zoom, 2)
+        c.zoom = 1.25
+        c.persist()
+        assert.ok(saved.at(-1).includes('zoom=1.25'))
+        c.zoom = 1
+        c.persist()
+        assert.ok(! saved.at(-1).includes('zoom='))
+    } finally {
+        globalThis.window.location = location
+    }
+})
