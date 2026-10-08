@@ -37,7 +37,7 @@ Bars whose group is not in the list are appended after it, so nothing silently d
 | `collapsed()` | Start folded; the user can unfold it and the chart remembers. |
 | `fromModels($records, $label = 'name', $color = null)` | One group per model. |
 
-Folding a group hides its bar rows; folds are remembered in the browser under the chart's `key()`. With a `createAction()`, a click on the group's own row creates in that group, so a group listed by `groups()` that has no bars yet can get its first one from the chart.
+Folding a group hides its bar rows; folds are remembered in the browser under the chart's `key()`. With a `createAction()`, a click on the group's own row creates in that group, so a group listed by `groups()` that has no bars yet can get its first one from the chart. A bar dragged onto another group's rows (or carried there with ↑/↓) moves into that group: the column or the foreign key is written with the dates, within the same rules ([Moving to another row](moves.md#to-another-row)).
 
 ## Resource timelines
 

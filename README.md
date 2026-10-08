@@ -16,9 +16,9 @@ A Gantt chart and resource timeline for Filament: any Eloquent query with a star
 
 ## Features
 
-- **[Drag to move, drag an edge to resize](#moving-and-resizing)**: the bar moves at once, snapped to the day (or the hour), and the server is asked afterwards. If it says no, the bar slides back and the reason is shown. Nothing re-renders on a move. The chart scrolls when a bar nears its edge; on touch a swipe scrolls and a held bar is picked up.
-- **[Keyboard moves](#moving-and-resizing)**: arrow keys move a focused bar, Shift or Alt with an arrow resizes it, announced to screen readers (WCAG 2.2 2.5.7).
-- **[Rules on the server](#moving-and-resizing)**: who may move (the model policy, the resource's `canEdit()`), `movable()`, `resizable()`, `minDuration()`, `maxDuration()`, `lockedBefore(today())` and a `canMove()` closure, all checked again in `Gantt::move()` whatever the browser sent.
+- **[Drag to move, drag an edge to resize, drag to another row](#moving-and-resizing)**: the bar moves at once, snapped to the day (or the hour), and the server is asked afterwards. If it says no, the bar slides back and the reason is shown. Dragged up or down, it lands in another group: a booking in another room, a task on another person. Nothing re-renders on a move. The chart scrolls when a bar nears its edge; on touch a swipe scrolls and a held bar is picked up.
+- **[Keyboard moves](#moving-and-resizing)**: arrow keys move a focused bar, ↑/↓ carry it to another row, Shift or Alt with an arrow resizes it, announced to screen readers (WCAG 2.2 2.5.7).
+- **[Rules on the server](#moving-and-resizing)**: who may move (the model policy, the resource's `canEdit()`), `movable()`, `resizable()`, `regroupable()`, `minDuration()`, `maxDuration()`, `lockedBefore(today())` and `canMove()`/`canRegroup()` closures, all checked again in `Gantt::move()` whatever the browser sent.
 - **[Groups and swimlanes](#groups-and-resource-timelines)**: rows grouped by a column or a relation, collapsible, with a count; or the compact layout where a room's bookings share one row and overlapping ones stack.
 - **[Milestones and progress](#defining-bars)**: a null end is a diamond; `progress('progress')` fills the bar.
 - **[Filament actions on bars](#actions)**: click a bar to edit it in a modal or slide-over, right-click for more; click an empty spot to create a record with that date and group already filled in. Each bar offers only the actions the user may run on its record.
@@ -108,20 +108,21 @@ Read more: [Groups](https://packstub.dev/docs/filament-gantt/groups).
 
 ![TODO screenshot: dragging a bar, the date hint under the pointer](https://raw.githubusercontent.com/packstub/art/main/filament-gantt/docs/drag.png)
 
-A drag changes the bar in the browser and sends `ganttMove(id, start, end)`, a renderless Livewire call. The server loads the record through the chart's `query()`, snaps the dates, checks every rule and saves; the bar flashes when it is saved or slides back with the reason when it is refused.
+A drag changes the bar in the browser and sends `ganttMove(id, start, end, group)`, a renderless Livewire call (the group only when the bar was dragged to another row). The server loads the record through the chart's `query()`, snaps the dates, checks every rule and saves; the bar flashes when it is saved or slides back with the reason when it is refused.
 
 ```php
 ->snapTo(Unit::Day)                     // or Unit::Hour for datetime records
 ->authorizeMoves(fn (Task $task) => auth()->user()->can('update', $task))   // the default when Task has a policy
 ->movable(fn (Task $task) => $task->status !== 'done')
 ->resizable(true)
+->regroupable(fn (Task $task) => $task->status !== 'done')   // may it be dragged to another row (project)?
 ->minDuration(days: 1)->maxDuration(days: 30)
 ->lockedBefore(today())                 // the past stays as it happened
 ->canMove(fn (Task $task, CarbonImmutable $start) => $start->isWeekend() ? 'Not on a weekend.' : true)
 ->afterMove(fn (Task $task, CarbonImmutable $start, CarbonImmutable $end) => $task->touch())
 ```
 
-Give your own persistence to `moveUsing()` and throw `MoveRejected` to refuse with a message (any other exception is reported and the user sees a generic one). `Packstub\Gantt\Events\BarMoved` fires after every saved move. The chart's own maths is on wall-clock moments tagged UTC, so a daylight-saving change never lengthens a bar; your closures and the event get the same moments in the app's timezone, so `$start->isPast()` reads naturally. Escape abandons a drag. On a focused bar, ←/→ move it, Shift+←/→ move its end and Alt+←/→ its start.
+Give your own persistence to `moveUsing()` and throw `MoveRejected` to refuse with a message (any other exception is reported and the user sees a generic one). `Packstub\Gantt\Events\BarMoved` fires after every saved move. The chart's own maths is on wall-clock moments tagged UTC, so a daylight-saving change never lengthens a bar; your closures and the event get the same moments in the app's timezone, so `$start->isPast()` reads naturally. Escape abandons a drag. On a focused bar, ←/→ move it, ↑/↓ carry it to another row, Shift+←/→ move its end and Alt+←/→ its start.
 
 Read more: [Moving and resizing](https://packstub.dev/docs/filament-gantt/moves).
 

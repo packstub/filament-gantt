@@ -59,7 +59,8 @@ and the Pest suite again on MySQL 8.4 and PostgreSQL 17 (the `databases` job): S
   action arguments (`ganttRecord`, `ganttStart`, `ganttEnd`, `ganttGroup`) are read as strings or nothing.
 - `safeUrl()` (PHP and JS, same rules): strip C0/space, refuse `^[\/\\]{2}` (protocol-relative hosts), allow-list schemes.
 - In the Blade view, an element with `x-show` binds `:style` with the object syntax (a string `:style` overwrites the
-  `display` that `x-show` sets).
+  `display` that `x-show` sets). `:class` takes a string or one object, never an array holding an object (Alpine joins
+  an array with spaces, so the object becomes `[object Object]`): `{ ['ps-gantt-row-' + row.type]: true, 'x': cond }`.
 - Who may move: `authorizeMoves()` (default: the model policy's `update` when it has one; `GanttResourcePage::makeGantt()`
   sets the resource's `canEdit()`), part of `isMovable()`/`isResizable()` and checked first in `move()`. Each bar's
   `actions` is the list the user may run on its record (`GanttActions::ganttActionsFor()` evaluates every action's

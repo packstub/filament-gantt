@@ -220,3 +220,18 @@ it('offers no actions on a component without Filament\'s action system', functio
         ->and($config['createAction'])->toBeNull()
         ->and($config['grouped'])->toBeFalse();
 });
+
+it('moves a bar to another row renderless, and answers a refused row with its reason', function () {
+    $acme = project('Acme');
+    $beta = project('Beta');
+    $task = task('Build', '2026-10-05', '2026-10-07', ['project_id' => $acme->id]);
+    task('Other', '2026-10-01', '2026-10-02', ['project_id' => $beta->id]);
+
+    Livewire::test(TaskGantt::class)
+        ->call('ganttMove', (string) $task->id, '2026-10-05 00:00', '2026-10-08 00:00', (string) $beta->id)
+        ->assertReturned(fn ($result) => $result['ok'] === true && $result['bar']['group'] === (string) $beta->id)
+        ->call('ganttMove', (string) $task->id, '2026-10-05 00:00', '2026-10-08 00:00', '424242')
+        ->assertReturned(['ok' => false, 'message' => 'That row is not on the chart.']);
+
+    expect($task->fresh()->project_id)->toBe($beta->id);
+});

@@ -182,6 +182,9 @@
 
 .ps-gantt-row { display: flex; width: max-content; border-bottom: 1px solid var(--ps-gantt-line); }
 .ps-gantt-row-group { background: var(--ps-gantt-group); }
+/* The rows of the group a dragged bar would land in */
+.ps-gantt-row-target .ps-gantt-canvas { background: color-mix(in oklab, var(--primary-500) 10%, transparent); }
+.ps-gantt-row-target .ps-gantt-label { box-shadow: inset 3px 0 0 var(--primary-500); }
 
 .ps-gantt-label {
     position: sticky;
@@ -292,6 +295,7 @@
 .ps-gantt-is-compact .ps-gantt-bar-narrow .ps-gantt-bar-label { display: none; }
 
 /* picked up on touch (held), ready to follow the finger */
+.ps-gantt-bar-carried { z-index: 4; }
 .ps-gantt-bar-picked { z-index: 3; box-shadow: 0 8px 18px -6px rgb(0 0 0 / 0.45), 0 0 0 2px var(--ps-bar); }
 
 .ps-gantt-handle {
