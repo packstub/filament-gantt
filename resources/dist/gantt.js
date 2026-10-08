@@ -1322,6 +1322,14 @@ export default function packstubGantt(config) {
             this.applyWindow(null, { user: true })
         },
 
+        /** An option chosen in a select filter (null or '' is "all"). */
+        pickSelect(name, value) {
+            const v = value === null || value === undefined ? '' : String(value)
+            if ((this.active[name] ?? '') === v) return
+            this.active[name] = v
+            this.refresh()
+        },
+
         /** A day picked for one end of a date-range filter. */
         pickFilter(name, edge, value) {
             this.active[name] = { ...(this.active[name] || { from: '', until: '' }), [edge]: value ? String(value).slice(0, 10) : '' }
@@ -1466,7 +1474,8 @@ export default function packstubGantt(config) {
                         if (a || b) { this.active[f.name] = { from: a, until: b }; any = true }
                     } else {
                         const v = params.get(`f.${f.name}`)
-                        if (v && f.options.some((o) => o.value === v)) { this.active[f.name] = v; any = true }
+                        // A listed option, or any value for a searchable select (its options come from a search)
+                        if (v && (f.searchable || f.options.some((o) => o.value === v))) { this.active[f.name] = v; any = true }
                     }
                 }
             } catch (e) {}

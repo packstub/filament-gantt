@@ -73,5 +73,10 @@ and the Pest suite again on MySQL 8.4 and PostgreSQL 17 (the `databases` job): S
   Blade binds `barStyle()`/`cell()` as objects, never concatenated strings.
 - Alpine hands back reactive proxies: after `this.pointer = p`, compare and mutate `this.pointer`, never `p` (the
   harness proxies `pointer`/`keyboard`/`menu` the same way, so such a bug fails `composer test:js`).
+- The toolbar is Filament's own components. The date picker and the select are Filament's form-field Alpine components
+  driven by the chart (`resources/views/partials/{date-picker,select}.blade.php`, markup after `DateTimePicker::` and
+  `Select::toEmbeddedHtml()`): the chart's value flows in (`x-effect`, or the initial `state`), a pick flows out as a
+  `gantt-pick`/`gantt-select` event to `pickRange()`/`pickFilter()`/`pickSelect()`. Searches are renderless
+  (`ganttFilterOptions`, `ganttFilterOptionLabel`).
 - Every change needs a test; `CHANGELOG.md` stays current. Strings in `resources/lang/{en,ro,ru,de}` (same keys in
   all four; plural forms as Laravel's locale rules, `bars` as Intl.PluralRules categories for the browser).

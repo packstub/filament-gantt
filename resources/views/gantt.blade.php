@@ -68,12 +68,7 @@
                 <template x-if="filter.type !== 'dateRange'">
                     <x-filament::input.wrapper>
                         <x-slot name="prefix"><span x-text="filter.label"></span></x-slot>
-                        <x-filament::input.select x-model="active[filter.name]" x-on:change="refresh()" x-bind:aria-label="filter.label">
-                            <option value="" x-text="t.all"></option>
-                            <template x-for="option in filter.options" :key="option.value">
-                                <option :value="option.value" x-text="option.label"></option>
-                            </template>
-                        </x-filament::input.select>
+                        @include('packstub-gantt::partials.select')
                     </x-filament::input.wrapper>
                 </template>
             </div>

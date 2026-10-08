@@ -610,3 +610,31 @@ test('a day picked in the date picker sets the window edge as a date and loads i
     assert.deepEqual(c.active.starts_on, { from: '2026-10-07', until: '' })
     assert.equal(c.wire.refreshes.at(-1)[0].starts_on.from, '2026-10-07')
 })
+
+test('an option chosen in a select filter refreshes once; the URL restores any value of a searchable one', () => {
+    const location = globalThis.window.location
+    globalThis.window.location = { href: '', search: '?f.assignee_id=42&f.status=open' }
+    try {
+        const c = chart({ bars: [], filters: [
+            { name: 'assignee_id', type: 'select', searchable: true, options: [] },
+            { name: 'status', type: 'select', searchable: false, options: [{ value: 'done', label: 'Done' }] },
+        ] })
+        c.persist = () => {}
+        c.init()
+        // the searchable filter takes the URL's 42 (it has no list to check against); the plain one ignores 'open'
+        assert.equal(c.active.assignee_id, '42')
+        assert.equal(c.active.status, '')
+
+        const before = c.wire.refreshes.length
+        c.pickSelect('status', 'done')
+        assert.equal(c.active.status, 'done')
+        assert.equal(c.wire.refreshes.length, before + 1)
+        c.pickSelect('status', 'done')
+        assert.equal(c.wire.refreshes.length, before + 1, 'the same value again sends nothing')
+        c.pickSelect('status', null)
+        assert.equal(c.active.status, '')
+        assert.equal(c.wire.refreshes.length, before + 2)
+    } finally {
+        globalThis.window.location = location
+    }
+})
