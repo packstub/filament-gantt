@@ -1316,6 +1316,18 @@ export default function packstubGantt(config) {
 
         /* ------------------------------------------------------------ window, filters, refresh */
 
+        /** A day picked in Filament's date picker for the window's start or end (`Y-m-d H:i:s`, or null when cleared). */
+        pickRange(edge, value) {
+            this.range = { ...this.range, [edge]: value ? String(value).slice(0, 10) : '' }
+            this.applyWindow(null, { user: true })
+        },
+
+        /** A day picked for one end of a date-range filter. */
+        pickFilter(name, edge, value) {
+            this.active[name] = { ...(this.active[name] || { from: '', until: '' }), [edge]: value ? String(value).slice(0, 10) : '' }
+            this.refresh()
+        },
+
         blank(filter) {
             return filter.type === 'dateRange' ? { from: '', until: '' } : ''
         },

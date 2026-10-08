@@ -43,11 +43,11 @@
         <div class="ps-gantt-range" role="group" x-bind:aria-label="t.range">
             <x-filament::input.wrapper>
                 <x-slot name="prefix"><span x-text="t.from"></span></x-slot>
-                <x-filament::input type="date" x-model="range.start" x-on:change="applyWindow(null, { user: true })" />
+                @include('packstub-gantt::partials.date-picker', ['model' => 'range.start', 'pick' => "pickRange('start', \$event.detail)", 'label' => 't.from'])
             </x-filament::input.wrapper>
             <x-filament::input.wrapper>
                 <x-slot name="prefix"><span x-text="t.until"></span></x-slot>
-                <x-filament::input type="date" x-model="range.end" x-on:change="applyWindow(null, { user: true })" />
+                @include('packstub-gantt::partials.date-picker', ['model' => 'range.end', 'pick' => "pickRange('end', \$event.detail)", 'label' => 't.until'])
             </x-filament::input.wrapper>
         </div>
 
@@ -57,11 +57,11 @@
                     <div class="ps-gantt-range">
                         <x-filament::input.wrapper>
                             <x-slot name="prefix"><span x-text="filter.label"></span></x-slot>
-                            <x-filament::input type="date" x-model="active[filter.name].from" x-on:change="refresh()" x-bind:aria-label="filter.label + ' ' + t.from" />
+                            @include('packstub-gantt::partials.date-picker', ['model' => 'active[filter.name].from', 'pick' => "pickFilter(filter.name, 'from', \$event.detail)", 'label' => "filter.label + ' ' + t.from"])
                         </x-filament::input.wrapper>
                         <x-filament::input.wrapper>
                             <x-slot name="prefix">–</x-slot>
-                            <x-filament::input type="date" x-model="active[filter.name].until" x-on:change="refresh()" x-bind:aria-label="filter.label + ' ' + t.until" />
+                            @include('packstub-gantt::partials.date-picker', ['model' => 'active[filter.name].until', 'pick' => "pickFilter(filter.name, 'until', \$event.detail)", 'label' => "filter.label + ' ' + t.until"])
                         </x-filament::input.wrapper>
                     </div>
                 </template>
