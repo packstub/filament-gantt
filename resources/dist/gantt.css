@@ -189,7 +189,9 @@
 .ps-gantt-line { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--ps-gantt-line); }
 .ps-gantt-today-line { position: absolute; top: 0; bottom: 0; width: 2px; margin-inline-start: -1px; background: var(--ps-gantt-today); opacity: 0.7; }
 
-.ps-gantt-row { display: flex; width: max-content; border-bottom: 1px solid var(--ps-gantt-line); }
+/* The row line is drawn by the label and the canvas, not the row: the sticky label then covers it, so an arrow routed along it never shows beside the labels. */
+.ps-gantt-row { display: flex; width: max-content; }
+.ps-gantt-label, .ps-gantt-canvas { box-sizing: border-box; border-bottom: 1px solid var(--ps-gantt-line); }
 .ps-gantt-row-group { background: var(--ps-gantt-group); }
 /* The rows of the group a dragged bar would land in */
 .ps-gantt-row-target .ps-gantt-canvas { background: color-mix(in oklab, var(--primary-500) 10%, transparent); }
