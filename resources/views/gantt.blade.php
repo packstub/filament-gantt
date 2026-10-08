@@ -26,46 +26,55 @@
     :class="{ 'ps-gantt-is-dragging': dragging, 'ps-gantt-is-readonly': readOnly, 'ps-gantt-is-compact': compact }"
     :style="height ? '--ps-gantt-height:' + height : null"
 >
+    {{-- The toolbar is Filament's own components (tabs, button, input wrapper, input, select), so it follows the panel's theme. --}}
     <div class="ps-gantt-toolbar">
-        <div class="ps-gantt-seg" role="group" :aria-label="t.zoom">
+        <x-filament::tabs x-bind:aria-label="t.zoom">
             <template x-for="s in scales" :key="s">
-                <button type="button" class="ps-gantt-seg-btn" :class="{ 'ps-gantt-seg-on': scale === s }" :aria-pressed="scale === s" x-on:click="setScale(s)" x-text="t[s]"></button>
+                <x-filament::tabs.item alpine-active="scale === s" x-on:click="setScale(s)">
+                    <span x-text="t[s]"></span>
+                </x-filament::tabs.item>
             </template>
-        </div>
+        </x-filament::tabs>
 
-        <button type="button" class="ps-gantt-btn" x-on:click="scrollToToday()" x-text="t.today"></button>
+        <x-filament::button color="gray" x-on:click="scrollToToday()">
+            <span x-text="t.today"></span>
+        </x-filament::button>
 
-        <div class="ps-gantt-range" :aria-label="t.range">
-            <label class="ps-gantt-field">
-                <span x-text="t.from"></span>
-                <input type="date" x-model="range.start" x-on:change="applyWindow(null, { user: true })">
-            </label>
-            <label class="ps-gantt-field">
-                <span x-text="t.until"></span>
-                <input type="date" x-model="range.end" x-on:change="applyWindow(null, { user: true })">
-            </label>
+        <div class="ps-gantt-range" role="group" x-bind:aria-label="t.range">
+            <x-filament::input.wrapper>
+                <x-slot name="prefix"><span x-text="t.from"></span></x-slot>
+                <x-filament::input type="date" x-model="range.start" x-on:change="applyWindow(null, { user: true })" />
+            </x-filament::input.wrapper>
+            <x-filament::input.wrapper>
+                <x-slot name="prefix"><span x-text="t.until"></span></x-slot>
+                <x-filament::input type="date" x-model="range.end" x-on:change="applyWindow(null, { user: true })" />
+            </x-filament::input.wrapper>
         </div>
 
         <template x-for="filter in filters" :key="filter.name">
-            <div class="ps-gantt-filter-wrap">
+            <div class="ps-gantt-filter" :class="{ 'ps-gantt-filter-on': filter.type === 'dateRange' ? (active[filter.name].from || active[filter.name].until) : !! active[filter.name] }">
                 <template x-if="filter.type === 'dateRange'">
-                    <div class="ps-gantt-range ps-gantt-filter" :class="{ 'ps-gantt-filter-on': active[filter.name].from || active[filter.name].until }">
-                        <span class="ps-gantt-filter-label" x-text="filter.label"></span>
-                        <label class="ps-gantt-field"><input type="date" x-model="active[filter.name].from" x-on:change="refresh()" :aria-label="filter.label + ' ' + t.from"></label>
-                        <span class="ps-gantt-dash">–</span>
-                        <label class="ps-gantt-field"><input type="date" x-model="active[filter.name].until" x-on:change="refresh()" :aria-label="filter.label + ' ' + t.until"></label>
+                    <div class="ps-gantt-range">
+                        <x-filament::input.wrapper>
+                            <x-slot name="prefix"><span x-text="filter.label"></span></x-slot>
+                            <x-filament::input type="date" x-model="active[filter.name].from" x-on:change="refresh()" x-bind:aria-label="filter.label + ' ' + t.from" />
+                        </x-filament::input.wrapper>
+                        <x-filament::input.wrapper>
+                            <x-slot name="prefix">–</x-slot>
+                            <x-filament::input type="date" x-model="active[filter.name].until" x-on:change="refresh()" x-bind:aria-label="filter.label + ' ' + t.until" />
+                        </x-filament::input.wrapper>
                     </div>
                 </template>
                 <template x-if="filter.type !== 'dateRange'">
-                    <label class="ps-gantt-field ps-gantt-filter" :class="{ 'ps-gantt-filter-on': active[filter.name] }">
-                        <span x-text="filter.label"></span>
-                        <select x-model="active[filter.name]" x-on:change="refresh()">
+                    <x-filament::input.wrapper>
+                        <x-slot name="prefix"><span x-text="filter.label"></span></x-slot>
+                        <x-filament::input.select x-model="active[filter.name]" x-on:change="refresh()" x-bind:aria-label="filter.label">
                             <option value="" x-text="t.all"></option>
                             <template x-for="option in filter.options" :key="option.value">
                                 <option :value="option.value" x-text="option.label"></option>
                             </template>
-                        </select>
-                    </label>
+                        </x-filament::input.select>
+                    </x-filament::input.wrapper>
                 </template>
             </div>
         </template>
