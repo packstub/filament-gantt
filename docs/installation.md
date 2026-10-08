@@ -15,7 +15,7 @@ php artisan filament:assets
 
 There are no migrations: the chart reads and writes your own columns. The script and the stylesheet load only on pages that show a chart. Run `php artisan filament:assets` again after every update of the package: Filament copies the assets into `public/`.
 
-The config file is optional; publish it to change the defaults (scale, weekend days, pixels per day, window bounds, date formats):
+The config file is optional; publish it to change the defaults (scale, weekend days, pixels per day, window bounds, `max_bars`, date formats):
 
 ```bash
 php artisan vendor:publish --tag=packstub-gantt-config

@@ -10,8 +10,7 @@ test('a config without a window (a chart that appeared after the component\'s fi
     // the harness lays out on construction; the component itself starts with an empty view
     Object.assign(c.view, { days: 0, width: 0, columns: [], top: [], shades: [], rows: [] })
     c.init()
-    assert.deepEqual(c.wire.refreshes, [[{}, null, null]])
-    assert.deepEqual(c.wire.windows, [])
+    assert.deepEqual(c.wire.refreshes, [[{}, null, null, false]])
     // nothing is drawn for the round trip: no one-column, no-row chart before the answer
     assert.equal(c.view.columns.length, 0)
     assert.equal(c.view.rows.length, 0)
@@ -23,11 +22,11 @@ test('a config without a window (a chart that appeared after the component\'s fi
     assert.equal(d.view.rows.length, 1)
 })
 
-test('a vertical pan may start on a bar: only the horizontal drag is claimed', async () => {
+test('a swipe that starts on a bar scrolls the chart: the browser keeps panning on bars', async () => {
     const css = await readFile(new URL('../../resources/dist/gantt.css', import.meta.url), 'utf8')
     const block = /\.ps-gantt-bar \{[^}]*\}/.exec(css)[0]
 
-    assert.match(block, /touch-action: pan-y;/)
+    assert.match(block, /touch-action: manipulation;/)
     assert.doesNotMatch(css, /touch-action: none/)
 })
 
@@ -76,8 +75,9 @@ test('above 200 rows only the rows in view are drawn, and the pads keep the heig
 test('a milestone centres its diamond on the row\'s inner height', () => {
     const c = chart({ rowHeight: 48, bars: [bar({ milestone: true, end: '2026-10-05' })] })
 
-    assert.match(c.barStyle(rowBar(c)), /height:40px;.*--ps-gantt-row-inner:40px/)
-    assert.doesNotMatch(c.barStyle(rowBar(c)), /width:/)
+    assert.equal(c.barStyle(rowBar(c)).height, '40px')
+    assert.equal(c.barStyle(rowBar(c))['--ps-gantt-row-inner'], '40px')
+    assert.equal(c.barStyle(rowBar(c)).width, undefined)
 })
 
 /* ------------------------------------------------------------------ moving and resizing */
@@ -268,7 +268,7 @@ test('a link opened aside gets no opener: the new tab cannot steer this one', ()
 
 /* ------------------------------------------------------------------ the bar menu */
 
-test('a finger held on a bar opens the menu; a mouse or a finger that moved does not', () => {
+test('on touch a swipe scrolls, a held bar follows the finger, and held then lifted opens the menu', () => {
     const timers = []
     const realSet = globalThis.setTimeout
     const realClear = globalThis.clearTimeout
@@ -276,27 +276,44 @@ test('a finger held on a bar opens the menu; a mouse or a finger that moved does
     globalThis.clearTimeout = (id) => { if (id) timers[id - 1].fn = null }
 
     try {
-        const c = chart({ barActions: [{ name: 'edit' }], bars: [bar()] })
+        const c = chart({ barActions: [{ name: 'edit' }], barAction: 'edit', bars: [bar()] })
 
+        // a mouse drags at once, no timer
         press(c, rowBar(c), { pointerType: 'mouse' })
         assert.equal(timers.length, 0)
         c.cancel()
 
-        press(c, rowBar(c), { pointerType: 'touch', x: 120, y: 60 })
-        assert.equal(timers.length, 1)
-        assert.equal(timers[0].ms, 500)
-        timers[0].fn()
+        // a swipe before the hold is the browser's scroll: no drag, no move, no click
+        let p = press(c, rowBar(c), { pointerType: 'touch' })
+        assert.equal(timers[0].ms, 450)
+        p.move(40)
         assert.equal(c.pointer, null)
-        assert.equal(c.menu.bar, rowBar(c))
-        assert.deepEqual([c.menu.x, c.menu.y], [120, 60])
-        c.closeMenu()
+        assert.equal(rowBar(c).s, Date.UTC(2026, 9, 5))
+        p.up(40)
+        assert.deepEqual(c.wire.moves, [])
+        assert.deepEqual(c.wire.mounted, [])
 
-        const p = press(c, rowBar(c), { pointerType: 'touch' })
-        p.move(50)
-        assert.equal(timers[1].fn, null) // disarmed by the drag
-        p.up(50)
-        assert.equal(c.menu, null)
-        assert.equal(c.wire.moves.length, 1)
+        // held still, the bar is picked up and follows the finger
+        p = press(c, rowBar(c), { pointerType: 'touch' })
+        timers.at(-1).fn()
+        assert.equal(c.pointer.picked, true)
+        p.move(96)
+        assert.equal(rowBar(c).s, Date.UTC(2026, 9, 7))
+        p.up(96)
+        assert.deepEqual(c.wire.moves, [['1', '2026-10-07 00:00', '2026-10-10 00:00']])
+
+        // held, then lifted without moving: the menu, at the finger
+        const d = chart({ barActions: [{ name: 'edit' }], bars: [bar()] })
+        p = press(d, rowBar(d), { pointerType: 'touch', x: 120, y: 60 })
+        timers.at(-1).fn()
+        p.up()
+        assert.equal(d.menu.bar, rowBar(d))
+        assert.deepEqual([d.menu.x, d.menu.y], [120, 60])
+
+        // a tap runs the click action, as before
+        const e = chart({ barActions: [{ name: 'edit' }], barAction: 'edit', bars: [bar()] })
+        press(e, rowBar(e), { pointerType: 'touch' }).up()
+        assert.deepEqual(e.wire.mounted, [['edit', { ganttRecord: '1' }]])
     } finally {
         globalThis.setTimeout = realSet
         globalThis.clearTimeout = realClear

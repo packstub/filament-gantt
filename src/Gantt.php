@@ -7,16 +7,22 @@ use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Closure;
 use Filament\Actions\Action;
+use Filament\Facades\Filament;
 use Filament\Support\Contracts\HasLabel;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\MorphTo;
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Date;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Traits\Conditionable;
+use LogicException;
 use Packstub\Gantt\Enums\Scale;
 use Packstub\Gantt\Enums\Unit;
 use Packstub\Gantt\Events\BarMoved;
 use Packstub\Gantt\Exceptions\MoveRejected;
+use UnitEnum;
 
 /**
  * The chart definition: which records, which attributes hold the dates, how a bar
@@ -38,6 +44,12 @@ use Packstub\Gantt\Exceptions\MoveRejected;
  * moments in the app's timezone (the same wall-clock time, tagged the way Eloquent
  * tags a record's dates), so `$start->isPast()` or a comparison with now() reads
  * naturally; only the chart's own maths stays on the UTC-tagged values.
+ *
+ * Closures: the ones about a record (label(), color(), bar(), movable(),
+ * canMove(), moveUsing(), authorizeMoves()…) are called with positional arguments,
+ * the record first, so they may name and type them as they like; the others
+ * (query(), groups(), readOnly(), lockedBefore(), a Filter's options) are called
+ * through the container, so they may ask for any service.
  */
 class Gantt
 {
@@ -91,6 +103,20 @@ class Gantt
     protected bool|Closure $resizable = true;
 
     protected bool|Closure $readOnly = false;
+
+    protected ?bool $readOnlyCache = null;
+
+    protected bool|Closure|null $authorizeMoves = null;
+
+    /** @var array<string, bool> authorizeMoves() answers, by record key */
+    protected array $authorizedMoves = [];
+
+    /** @var list<Scale>|null */
+    protected ?array $scales = null;
+
+    protected ?Closure $actionsResolver = null;
+
+    protected ?bool $sampledDateOnly = null;
 
     protected ?int $minMinutes = null;
 
@@ -274,6 +300,22 @@ class Gantt
         return $this;
     }
 
+    /**
+     * The zoom levels offered in the toolbar, in order. Default: day, week and month,
+     * with hour first when the chart snaps to hours.
+     *
+     * @param  list<Scale|string>|null  $scales
+     */
+    public function scales(?array $scales): static
+    {
+        $this->scales = $scales === null ? null : array_values(array_unique(array_map(
+            fn (Scale|string $scale) => $scale instanceof Scale ? $scale : Scale::fromName($scale),
+            $scales,
+        ), SORT_REGULAR));
+
+        return $this;
+    }
+
     /** What a drag snaps to: whole days (default) or hours, for datetime records. */
     public function snapTo(Unit|string $unit): static
     {
@@ -326,6 +368,23 @@ class Gantt
     public function readOnly(bool|Closure $condition = true): static
     {
         $this->readOnly = $condition;
+        $this->readOnlyCache = null;
+
+        return $this;
+    }
+
+    /**
+     * Who may move and resize a record from the chart: a bool or
+     * `fn (Model $record): bool`. Default: the model policy's `update` ability, when
+     * the model has a policy with one; on a GanttResourcePage, the resource's
+     * canEdit(). A record refused here is drawn locked, and its moves are refused on
+     * the server whatever the browser sends. movable() and resizable() still apply
+     * on top: they say what may change, this says who may change it.
+     */
+    public function authorizeMoves(bool|Closure|null $condition = true): static
+    {
+        $this->authorizeMoves = $condition;
+        $this->authorizedMoves = [];
 
         return $this;
     }
@@ -517,8 +576,32 @@ class Gantt
         return $this->groupAttribute;
     }
 
-    /** The attribute a new record's group is written to: the column, or a BelongsTo's foreign key. */
+    /**
+     * The attribute a new record's group is written to: the column, or a BelongsTo's foreign key.
+     *
+     * @internal
+     */
     public function getGroupForeignKey(): ?string
+    {
+        if ($this->groupAttribute === null) {
+            return null;
+        }
+
+        if (! $this->newModel()->isRelation($this->groupAttribute)) {
+            return $this->groupAttribute;
+        }
+
+        $relation = $this->groupRelation();
+
+        return $relation instanceof BelongsTo ? $relation->getForeignKeyName() : null;
+    }
+
+    /**
+     * The groupBy() relation, or null for a column.
+     *
+     * @throws LogicException for a MorphTo: its id alone names no group
+     */
+    protected function groupRelation(): ?Relation
     {
         if ($this->groupAttribute === null) {
             return null;
@@ -527,12 +610,16 @@ class Gantt
         $model = $this->newModel();
 
         if (! $model->isRelation($this->groupAttribute)) {
-            return $this->groupAttribute;
+            return null;
         }
 
         $relation = $model->{$this->groupAttribute}();
 
-        return $relation instanceof BelongsTo ? $relation->getForeignKeyName() : null;
+        if ($relation instanceof MorphTo) {
+            throw new LogicException("The Gantt cannot group by the MorphTo relation [{$this->groupAttribute}]: two related records of different types may share an id. Group by a column, or by a BelongsTo relation.");
+        }
+
+        return $relation;
     }
 
     public function isGrouped(): bool
@@ -547,7 +634,22 @@ class Gantt
 
     public function getScale(): Scale
     {
-        return $this->scale ?? Scale::fromName(config('filament-gantt.default_scale'));
+        $scale = $this->scale ?? Scale::fromName(config('filament-gantt.default_scale'));
+        $scales = $this->getScales();
+
+        return in_array($scale, $scales, true) ? $scale : ($scales[0] ?? Scale::Week);
+    }
+
+    /** @return list<Scale> */
+    public function getScales(): array
+    {
+        if ($this->scales !== null && $this->scales !== []) {
+            return $this->scales;
+        }
+
+        return $this->unit === Unit::Hour
+            ? [Scale::Hour, Scale::Day, Scale::Week, Scale::Month]
+            : [Scale::Day, Scale::Week, Scale::Month];
     }
 
     public function getUnit(): Unit
@@ -560,19 +662,51 @@ class Gantt
         return $this->firstDayOfWeek ?? max(1, min(7, (int) config('filament-gantt.first_day_of_week', 1)));
     }
 
+    /** Evaluated once per instance (a request): every bar asks. */
     public function isReadOnly(): bool
     {
-        return (bool) ($this->readOnly instanceof Closure ? app()->call($this->readOnly) : $this->readOnly);
+        return $this->readOnlyCache ??= (bool) ($this->readOnly instanceof Closure ? app()->call($this->readOnly) : $this->readOnly);
+    }
+
+    /** Whether the user may move and resize this record (see authorizeMoves()). */
+    public function canMoveRecord(Model $record): bool
+    {
+        $key = (string) $record->getKey();
+
+        if (array_key_exists($key, $this->authorizedMoves)) {
+            return $this->authorizedMoves[$key];
+        }
+
+        if ($this->authorizeMoves === null) {
+            $policy = Gate::getPolicyFor($record);
+
+            if ($policy === null) {
+                $allowed = true;
+            } elseif (method_exists($policy, 'update')) {
+                $allowed = Gate::allows('update', $record);
+            } elseif (method_exists($policy, 'before')) {
+                // No update() rule, but a before() that may still say no (a suspended
+                // user): the Gate alone would refuse everyone for the missing method.
+                $user = (Filament::getCurrentPanel() ? Filament::auth() : auth())->user();
+                $allowed = $user === null || ($policy->before($user, 'update') ?? true) !== false;
+            } else {
+                $allowed = true;
+            }
+        } else {
+            $allowed = (bool) $this->evaluate($this->authorizeMoves, $record);
+        }
+
+        return $record->exists ? $this->authorizedMoves[$key] = $allowed : $allowed;
     }
 
     public function isMovable(Model $record): bool
     {
-        return ! $this->isReadOnly() && (bool) $this->evaluate($this->movable, $record);
+        return ! $this->isReadOnly() && $this->canMoveRecord($record) && (bool) $this->evaluate($this->movable, $record);
     }
 
     public function isResizable(Model $record): bool
     {
-        return ! $this->isReadOnly() && (bool) $this->evaluate($this->resizable, $record);
+        return ! $this->isReadOnly() && $this->canMoveRecord($record) && (bool) $this->evaluate($this->resizable, $record);
     }
 
     public function getMinMinutes(): int
@@ -580,8 +714,13 @@ class Gantt
         return $this->minMinutes ?? $this->unit->minutes();
     }
 
+    /** @throws LogicException when the longest a bar may be is shorter than the shortest */
     public function getMaxMinutes(): ?int
     {
+        if ($this->maxMinutes !== null && $this->maxMinutes < $this->getMinMinutes()) {
+            throw new LogicException("The Gantt's maxDuration() ({$this->maxMinutes} minutes) is shorter than its minDuration() or one snap unit ({$this->getMinMinutes()} minutes): no resize could ever be saved.");
+        }
+
         return $this->maxMinutes;
     }
 
@@ -670,7 +809,51 @@ class Gantt
         return $this->newModel()::class;
     }
 
-    /** The record behind a bar, if it is still on this chart for this user. */
+    /** The PHP date format for whole days: the config's, or the locale's. */
+    public static function dateFormat(): string
+    {
+        return (string) (config('filament-gantt.date_format') ?: __('packstub-gantt::gantt.date_format'));
+    }
+
+    /** The PHP date format for moments with a time: the config's, or the locale's. */
+    public static function dateTimeFormat(): string
+    {
+        return (string) (config('filament-gantt.datetime_format') ?: __('packstub-gantt::gantt.datetime_format'));
+    }
+
+    /**
+     * How a bar finds the actions the user may run on its record: set by the
+     * component (Filament's visibility and authorization, record by record).
+     *
+     * @internal
+     *
+     * @param  (Closure(Model): list<string>)|null  $resolver
+     */
+    public function resolveActionsUsing(?Closure $resolver): static
+    {
+        $this->actionsResolver = $resolver;
+
+        return $this;
+    }
+
+    /**
+     * Whether a bar action is offered on this record by Bar::actions() (every one,
+     * unless the bar() closure narrows them). Checked again when the action mounts.
+     *
+     * @internal
+     */
+    public function offersAction(Model $record, string $name): bool
+    {
+        $actions = $this->bar && ($custom = ($this->bar)($record)) instanceof Bar ? $custom->getActions() : null;
+
+        return $actions === null || in_array($name, $actions, true);
+    }
+
+    /**
+     * The record behind a bar, if it is still on this chart for this user.
+     *
+     * @internal
+     */
     public function findRecord(string|int|null $id): ?Model
     {
         if (blank($id)) {
@@ -695,17 +878,32 @@ class Gantt
         $start = Filter::date($from) ? CarbonImmutable::parse($from, 'UTC')->startOfDay() : $this->windowStart;
         $end = Filter::date($until) ? CarbonImmutable::parse($until, 'UTC')->startOfDay() : $this->windowEnd;
 
-        if ($start === null || $end === null) {
-            [$min, $max] = $this->span();
-            $start ??= $min->subDays((int) config('filament-gantt.window_padding_days.before', 7));
-            $end ??= $max->addDays((int) config('filament-gantt.window_padding_days.after', 14));
-        }
-
         $minDays = max(7, (int) config('filament-gantt.min_window_days', 28));
         $maxDays = max($minDays, (int) config('filament-gantt.max_window_days', 730));
+        $before = (int) config('filament-gantt.window_padding_days.before', 7);
+        $after = (int) config('filament-gantt.window_padding_days.after', 14);
 
+        if ($start === null && $end === null) {
+            [$min, $max] = $this->dataSpan();
+            $start = $min->subDays($before);
+            $end = $max->addDays($after);
+
+            // A long history (shifts, bookings over years) opens around today, not on
+            // its oldest years: the user moves from there.
+            if ((int) $start->diffInDays($end) + 1 > $maxDays) {
+                $today = CarbonImmutable::today()->shiftTimezone('UTC');
+                $start = $today->subDays($before);
+                $end = $today->addDays($after);
+            }
+        } elseif ($start === null || $end === null) {
+            [$min, $max] = $this->dataSpan();
+            $start ??= $min->subDays($before);
+            $end ??= $max->addDays($after);
+        }
+
+        // "Until" before "from": the user swapped them.
         if ($end < $start) {
-            $end = $start;
+            [$start, $end] = [$end, $start];
         }
 
         $days = (int) $start->diffInDays($end) + 1;
@@ -728,12 +926,19 @@ class Gantt
     public function getState(array $filters = [], ?string $from = null, ?string $until = null): array
     {
         $window = $this->getWindow($from, $until);
-        $bars = $this->getBars($filters, $window['start'], $window['end']);
+        $query = $this->windowQuery($filters, $window['start'], $window['end']);
+        $limit = max(1, (int) config('filament-gantt.max_bars', 2000));
+
+        $records = (clone $query)->limit($limit + 1)->get();
+        $total = $records->count() > $limit ? (clone $query)->toBase()->getCountForPagination() : $records->count();
+        $bars = $this->presentBars($records->take($limit));
 
         return [
             'window' => ['start' => $window['start']->toDateString(), 'end' => $window['end']->toDateString()],
             'groups' => $this->getGroups($bars),
             'bars' => $bars,
+            // More than max_bars in the window: the first ones are drawn and the toolbar says so.
+            'total' => $total,
         ];
     }
 
@@ -744,6 +949,29 @@ class Gantt
      * @return list<array<string, mixed>>
      */
     public function getBars(array $filters = [], ?CarbonInterface $from = null, ?CarbonInterface $until = null): array
+    {
+        return $this->presentBars($this->windowQuery($filters, $from, $until)->get());
+    }
+
+    /**
+     * @param  iterable<Model>  $records
+     * @return list<array<string, mixed>>
+     */
+    protected function presentBars(iterable $records): array
+    {
+        return collect($records)
+            ->map(fn (Model $record) => $this->presentBar($record))
+            ->filter()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * The chart's records overlapping a window (all of them without one), filtered and in order.
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    protected function windowQuery(array $filters = [], ?CarbonInterface $from = null, ?CarbonInterface $until = null): Builder
     {
         $query = $this->filteredQuery($filters);
         $start = $query->qualifyColumn($this->startAttribute);
@@ -765,21 +993,24 @@ class Gantt
                     ->orWhere(fn (Builder $m) => $m->whereNull($end)->where($start, '>=', $first)));
         }
 
+        // The group's label reads the relation on every bar: loaded once, not per bar
+        // (and never lazily, which strict mode forbids).
+        if ($this->groupRelation() !== null && ! $this->groupLabel instanceof Closure && ! array_key_exists($this->groupAttribute, $query->getEagerLoads())) {
+            $query->with($this->groupAttribute);
+        }
+
         [$column, $direction] = $this->sort ?? [$this->startAttribute, 'asc'];
 
         return $query
             ->orderBy($query->qualifyColumn($column), $direction)
-            ->orderBy($query->getModel()->getQualifiedKeyName())
-            ->get()
-            ->map(fn (Model $record) => $this->presentBar($record))
-            ->filter()
-            ->values()
-            ->all();
+            ->orderBy($query->getModel()->getQualifiedKeyName());
     }
 
     /**
      * The groups in order: the definition's, plus any met on a bar that was not
      * listed, or the bars' in order of first appearance.
+     *
+     * @internal
      *
      * @param  list<array<string, mixed>>  $bars
      * @return list<array<string, mixed>>
@@ -809,7 +1040,11 @@ class Gantt
         return array_values(array_map(fn (array $group) => [...$group, 'count' => $counts[$group['key']] ?? 0], $groups));
     }
 
-    /** @return array<string, mixed>|null null when the record has no start */
+    /**
+     * @internal
+     *
+     * @return array<string, mixed>|null null when the record has no start
+     */
     public function presentBar(Model $record): ?array
     {
         $span = $this->span($record);
@@ -821,7 +1056,7 @@ class Gantt
         [$start, $end, $milestone] = $span;
 
         $bar = Bar::make()
-            ->label($this->label === null ? (string) $record->getKey() : (string) $this->read($this->label, $record))
+            ->label($this->label === null ? (string) $record->getKey() : static::text($this->read($this->label, $record)))
             ->color($this->color === null ? null : $this->read($this->color, $record))
             ->progress($this->progress === null ? null : $this->read($this->progress, $record));
 
@@ -829,6 +1064,13 @@ class Gantt
 
         if ($this->bar && ($custom = ($this->bar)($record)) instanceof Bar) {
             $shape = [...$shape, ...$custom->toArray()];
+        }
+
+        // The actions this user may run on this record (Filament's visibility and
+        // authorization), within those Bar::actions() offers.
+        if ($this->actionsResolver) {
+            $allowed = ($this->actionsResolver)($record);
+            $shape['actions'] = array_values(isset($shape['actions']) ? array_intersect($shape['actions'], $allowed) : $allowed);
         }
 
         $group = $this->groupKey($record);
@@ -872,16 +1114,22 @@ class Gantt
             throw new MoveRejected(__('packstub-gantt::gantt.read_only'));
         }
 
+        if (! $this->canMoveRecord($record)) {
+            throw new MoveRejected(__('packstub-gantt::gantt.not_allowed'));
+        }
+
         [$previousStart, $previousEnd, $milestone] = $this->span($record)
             ?? throw new MoveRejected(__('packstub-gantt::gantt.missing'));
 
         // Snapped relative to where the bar was, the way the browser drags: the time
-        // of day is kept and the delta is rounded to whole units.
+        // of day is kept and the delta is rounded to whole units (whole days for a
+        // date-only record, whatever snapTo() says: it has no hours to move).
+        $unit = $this->unitFor($record);
         $previousMinutes = $this->minutes($previousStart, $previousEnd);
-        $newStart = $this->unit->snapFrom($this->parse($start), $previousStart);
+        $newStart = $unit->snapFrom($this->parse($start), $previousStart);
         $newEnd = $milestone
             ? $newStart
-            : ($end === null ? $newStart->addMinutes($previousMinutes) : $this->unit->snapFrom($this->parse($end), $previousEnd));
+            : ($end === null ? $newStart->addMinutes($previousMinutes) : $unit->snapFrom($this->parse($end), $previousEnd));
 
         if ($newStart->equalTo($previousStart) && $newEnd->equalTo($previousEnd)) {
             return $this->presentBar($record);
@@ -906,19 +1154,21 @@ class Gantt
                 throw new MoveRejected(__('packstub-gantt::gantt.not_resizable'));
             }
 
-            if ($minutes < $this->getMinMinutes()) {
-                throw new MoveRejected(__('packstub-gantt::gantt.too_short', ['duration' => $this->humanMinutes($this->getMinMinutes())]));
+            [$min, $max] = $this->limitsFor($unit);
+
+            if ($minutes < $min) {
+                throw new MoveRejected(__('packstub-gantt::gantt.too_short', ['duration' => $this->humanMinutes($min)]));
             }
 
-            if ($this->getMaxMinutes() !== null && $minutes > $this->getMaxMinutes()) {
-                throw new MoveRejected(__('packstub-gantt::gantt.too_long', ['duration' => $this->humanMinutes($this->getMaxMinutes())]));
+            if ($max !== null && $minutes > $max) {
+                throw new MoveRejected(__('packstub-gantt::gantt.too_long', ['duration' => $this->humanMinutes($max)]));
             }
         }
 
         if ($lock = $this->getLockedBefore()) {
             if (($startChanged && ($newStart < $lock || $previousStart < $lock)) || ($endChanged && $newEnd < $lock)) {
                 // A lock at midnight reads as a date; one during the day (now()) says the time too.
-                $format = $lock->isStartOfDay() ? config('filament-gantt.date_format', 'M j, Y') : config('filament-gantt.datetime_format', 'M j, Y H:i');
+                $format = $lock->isStartOfDay() ? static::dateFormat() : static::dateTimeFormat();
 
                 throw new MoveRejected(__('packstub-gantt::gantt.locked', ['date' => $lock->translatedFormat($format)]));
             }
@@ -941,24 +1191,34 @@ class Gantt
             }
         }
 
-        // A MoveRejected thrown here refuses with its message; anything else (a
-        // database error, a bug in the closure) propagates for the caller to report:
-        // its message is not for the user (see InteractsWithGantt::ganttMove()).
-        if ($this->moveUsing) {
-            ($this->moveUsing)($record, $start, $end, $from, $until);
-        } else {
-            $this->store($record, $newStart, $newEnd, $milestone, $previousStart);
-        }
+        // One transaction from the save to the bar the browser gets back: when
+        // afterMove(), a listener or the bar's presentation fails, the save is undone
+        // too, so the browser putting the bar back matches the database. A MoveRejected
+        // thrown here refuses with its message; anything else (a database error, a bug
+        // in a closure) propagates for the caller to report: its message is not for
+        // the user (see InteractsWithGantt::ganttMove()).
+        return $record->getConnection()->transaction(function () use ($id, $record, $newStart, $newEnd, $milestone, $previousStart, $start, $end, $from, $until) {
+            if ($this->moveUsing) {
+                ($this->moveUsing)($record, $start, $end, $from, $until);
+            } else {
+                $this->store($record, $newStart, $newEnd, $milestone, $previousStart);
+            }
 
-        BarMoved::dispatch($record, $from, $until, $start, $end, $this->key);
+            BarMoved::dispatch($record, $from, $until, $start, $end, $this->key);
 
-        if ($this->afterMove) {
-            ($this->afterMove)($record, $start, $end, $from, $until);
-        }
+            if ($this->afterMove) {
+                ($this->afterMove)($record, $start, $end, $from, $until);
+            }
 
-        unset($this->records[(string) $id]);
+            unset($this->records[(string) $id]);
 
-        return $this->presentBar($record->fresh() ?? $record) ?? throw new MoveRejected(__('packstub-gantt::gantt.missing'));
+            // Read back through the chart's query, so what it adds (withCount, joins,
+            // eager loads) is still on the bar; a record the move took out of the query
+            // is presented as it is.
+            $fresh = $this->baseQuery()->whereKey($record->getKey())->first() ?? $record->fresh() ?? $record;
+
+            return $this->presentBar($fresh) ?? throw new MoveRejected(__('packstub-gantt::gantt.missing'));
+        });
     }
 
     /**
@@ -966,18 +1226,24 @@ class Gantt
      * and end attributes (a date-only record's end day is the day before the
      * chart's end).
      *
+     * @internal
+     *
      * @return array<string, string>
      */
     public function prefill(?string $start, ?string $end, ?string $group = null): array
     {
         $data = [];
-        $dateOnly = $this->isDateOnly($this->newModel());
+        $model = $this->newModel();
+        $dateOnly = $this->isDateOnly($model);
+        // Whole days for a date-only record, whatever snapTo() says (as move() does):
+        // an hour's click on such a chart would otherwise end the day before it starts.
+        $unit = $this->unitFor($model);
 
         try {
             if ($start !== null) {
-                $from = $this->unit->snap($this->parse($start));
-                $to = $end === null ? $from->addMinutes($this->unit->minutes()) : $this->unit->snap($this->parse($end));
-                $to = $to > $from ? $to : $from->addMinutes($this->unit->minutes());
+                $from = $unit->snap($this->parse($start));
+                $to = $end === null ? $from->addMinutes($unit->minutes()) : $unit->snap($this->parse($end));
+                $to = $to > $from ? $to : $from->addMinutes($unit->minutes());
 
                 $data[$this->startAttribute] = $dateOnly ? $from->toDateString() : $from->format('Y-m-d H:i:s');
                 $data[$this->endAttribute] = $dateOnly ? $to->subDay()->toDateString() : $to->format('Y-m-d H:i:s');
@@ -997,18 +1263,23 @@ class Gantt
 
     /* ------------------------------------------------------------------ internals */
 
+    /** @internal */
     public function baseQuery(): Builder
     {
         $query = $this->query instanceof Closure ? app()->call($this->query) : $this->query;
 
         if (! $query instanceof Builder) {
-            throw new \LogicException('The Gantt needs a query(): an Eloquent builder or a closure returning one.');
+            throw new LogicException('The Gantt needs a query(): an Eloquent builder or a closure returning one.');
         }
 
         return clone $query;
     }
 
-    /** @param  array<string, mixed>  $filters */
+    /**
+     * @internal
+     *
+     * @param  array<string, mixed>  $filters
+     */
     public function filteredQuery(array $filters = []): Builder
     {
         $query = $this->baseQuery();
@@ -1021,16 +1292,13 @@ class Gantt
     }
 
     /**
-     * A record's span as the chart sees it: [start, end) and whether it is a milestone.
+     * A record's span as the chart sees it: [start, end) and whether it is a
+     * milestone; null when it has no start.
      *
      * @return array{0: CarbonImmutable, 1: CarbonImmutable, 2: bool}|null
      */
-    public function span(?Model $record = null): ?array
+    public function span(Model $record): ?array
     {
-        if ($record === null) {
-            return $this->dataSpan();
-        }
-
         $start = $this->toCarbon($record->getAttribute($this->startAttribute));
 
         if ($start === null) {
@@ -1059,7 +1327,11 @@ class Gantt
         return [$start, $end, false];
     }
 
-    /** Whether the record's dates are whole days (see dateOnly()). */
+    /**
+     * Whether the record's dates are whole days (see dateOnly()).
+     *
+     * @internal
+     */
     public function isDateOnly(Model $record): bool
     {
         if ($this->dateOnly !== null) {
@@ -1082,7 +1354,51 @@ class Gantt
 
         $raw = $record->getAttributes()[$this->startAttribute] ?? null;
 
-        return is_string($raw) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $raw) === 1;
+        // A new record (the create form's prefill) has no value to look at: a stored
+        // one decides, read once.
+        if ($raw === null && ! $record->exists) {
+            return $this->sampledDateOnly ??= $this->sampleIsDateOnly();
+        }
+
+        return static::isDateString($raw);
+    }
+
+    /** The snap unit for a record: whole days for a date-only one, whatever snapTo() says. */
+    protected function unitFor(Model $record): Unit
+    {
+        return $this->isDateOnly($record) ? Unit::Day : $this->unit;
+    }
+
+    /**
+     * The shortest and the longest a bar may be resized to at a unit: minDuration()
+     * and maxDuration(), rounded to whole units the way the browser rounds them.
+     *
+     * @return array{0: int, 1: int|null}
+     */
+    protected function limitsFor(Unit $unit): array
+    {
+        $step = $unit->minutes();
+        $min = (int) ceil(max($step, $this->getMinMinutes()) / $step) * $step;
+        $max = $this->getMaxMinutes();
+
+        return [$min, $max === null ? null : max($min, intdiv($max, $step) * $step)];
+    }
+
+    protected function sampleIsDateOnly(): bool
+    {
+        $query = $this->baseQuery();
+        $column = $query->qualifyColumn($this->startAttribute);
+
+        // Any one row will do: the query's own columns and order go (an ORDER BY on an
+        // alias the dropped select defined, a withCount() say, would otherwise fail).
+        $raw = $query->toBase()->cloneWithout(['columns', 'orders'])->cloneWithoutBindings(['select', 'order'])->whereNotNull($column)->value($column);
+
+        return static::isDateString($raw);
+    }
+
+    protected static function isDateString(mixed $value): bool
+    {
+        return is_string($value) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) === 1;
     }
 
     protected function store(Model $record, CarbonImmutable $start, CarbonImmutable $end, bool $milestone, CarbonImmutable $previousStart): void
@@ -1131,10 +1447,12 @@ class Gantt
         $model = $this->newModel();
 
         if (! $model->isRelation($this->groupAttribute)) {
-            return $this->baseQuery()->where($this->groupAttribute, $group)->exists();
+            $query = $this->baseQuery();
+
+            return $query->where($query->qualifyColumn($this->groupAttribute), $group)->exists();
         }
 
-        $relation = $model->{$this->groupAttribute}();
+        $relation = $this->groupRelation();
 
         if (! $relation instanceof BelongsTo) {
             return false;
@@ -1156,7 +1474,18 @@ class Gantt
         $start = $query->qualifyColumn($this->startAttribute);
         $end = $query->qualifyColumn($this->endAttribute);
 
-        $row = $query->reorder()->toBase()->selectRaw("min({$start}) as gantt_min, max({$end}) as gantt_max, max({$start}) as gantt_max_start")->first();
+        // The two columns alone, from a subquery: whatever the chart's query selects
+        // (withCount, addSelect, a join) never sits next to an aggregate without a
+        // GROUP BY (MySQL's ONLY_FULL_GROUP_BY, PostgreSQL), and the grammar wraps the
+        // names (a table prefix, quoting).
+        $inner = $query->toBase();
+        $inner = ($inner->limit === null && $inner->offset === null ? $inner->cloneWithout(['columns', 'orders'])->cloneWithoutBindings(['select', 'order']) : $inner->cloneWithout(['columns'])->cloneWithoutBindings(['select']))
+            ->select(["{$start} as gantt_start", "{$end} as gantt_end"]);
+
+        $row = $inner->newQuery()
+            ->fromSub($inner, 'gantt_span')
+            ->selectRaw('min(gantt_start) as gantt_min, max(gantt_end) as gantt_max, max(gantt_start) as gantt_max_start')
+            ->first();
 
         $min = $this->toCarbon($row->gantt_min ?? null)?->startOfDay();
         $max = collect([$this->toCarbon($row->gantt_max ?? null), $this->toCarbon($row->gantt_max_start ?? null)])->filter()->max()?->startOfDay();
@@ -1191,7 +1520,7 @@ class Gantt
         }
 
         if ($record->isRelation($this->groupAttribute)) {
-            $relation = $record->{$this->groupAttribute}();
+            $relation = $this->groupRelation();
             $value = $relation instanceof BelongsTo
                 ? $record->getAttribute($relation->getForeignKeyName())
                 : $record->getRelationValue($this->groupAttribute)?->getKey();
@@ -1209,11 +1538,11 @@ class Gantt
     protected function groupLabelFor(Model $record, string $key): string
     {
         if ($this->groupLabel instanceof Closure) {
-            return (string) ($this->groupLabel)($record);
+            return static::text(($this->groupLabel)($record));
         }
 
         if (is_string($this->groupLabel)) {
-            return (string) (data_get($record, $this->groupLabel) ?? $key);
+            return static::text(data_get($record, $this->groupLabel) ?? $key);
         }
 
         if ($record->isRelation($this->groupAttribute)) {
@@ -1235,6 +1564,17 @@ class Gantt
         }
 
         return str($key)->headline()->toString();
+    }
+
+    /** A value as text: an enum by its label (HasLabel) or its value, anything else cast. */
+    protected static function text(mixed $value): string
+    {
+        return match (true) {
+            $value instanceof HasLabel => (string) $value->getLabel(),
+            $value instanceof BackedEnum => (string) $value->value,
+            $value instanceof UnitEnum => $value->name,
+            default => (string) $value,
+        };
     }
 
     protected function read(string|Closure $source, Model $record): mixed

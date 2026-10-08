@@ -17,6 +17,7 @@
     x-load-css="[@js(FilamentAsset::getStyleHref('gantt', 'packstub/filament-gantt'))]"
     x-data="packstubGantt(@js($config))"
     x-on:keydown.escape.window="onEscape()"
+    x-on:pointerdown.capture="swallowClick = false"
     x-on:packstub-gantt-refresh.window="refresh(true)"
     @foreach ($config['refreshOn'] as $event)
         x-on:{{ $event }}.window="refresh(true)"
@@ -27,7 +28,7 @@
 >
     <div class="ps-gantt-toolbar">
         <div class="ps-gantt-seg" role="group" :aria-label="t.zoom">
-            <template x-for="s in ['day', 'week', 'month']" :key="s">
+            <template x-for="s in scales" :key="s">
                 <button type="button" class="ps-gantt-seg-btn" :class="{ 'ps-gantt-seg-on': scale === s }" :aria-pressed="scale === s" x-on:click="setScale(s)" x-text="t[s]"></button>
             </template>
         </div>
@@ -37,11 +38,11 @@
         <div class="ps-gantt-range" :aria-label="t.range">
             <label class="ps-gantt-field">
                 <span x-text="t.from"></span>
-                <input type="date" x-model="range.start" x-on:change="applyWindow()">
+                <input type="date" x-model="range.start" x-on:change="applyWindow(null, { user: true })">
             </label>
             <label class="ps-gantt-field">
                 <span x-text="t.until"></span>
-                <input type="date" x-model="range.end" x-on:change="applyWindow()">
+                <input type="date" x-model="range.end" x-on:change="applyWindow(null, { user: true })">
             </label>
         </div>
 
@@ -71,7 +72,7 @@
 
         <div class="ps-gantt-spacer"></div>
 
-        <span class="ps-gantt-count" x-text="t.bars.replace(':count', bars.length)"></span>
+        <span class="ps-gantt-count" :class="{ 'ps-gantt-count-truncated': total > bars.length }" x-text="countText()" :title="total > bars.length ? t.truncated_hint : null"></span>
     </div>
 
     <div class="ps-gantt-scroll" x-ref="scroll" x-on:scroll.passive="onScroll()">
@@ -79,12 +80,12 @@
             <div class="ps-gantt-corner"></div>
             <div class="ps-gantt-axis" :style="'width:' + view.width + 'px'">
                 <div class="ps-gantt-axis-row ps-gantt-axis-top">
-                    <template x-for="c in view.top" :key="c.key">
+                    <template x-for="c in visibleTop" :key="c.key">
                         <div class="ps-gantt-cell" :style="cell(c)"><span x-text="c.label"></span></div>
                     </template>
                 </div>
                 <div class="ps-gantt-axis-row ps-gantt-axis-bottom">
-                    <template x-for="c in view.columns" :key="c.key">
+                    <template x-for="c in visibleColumns" :key="c.key">
                         <div class="ps-gantt-cell" :class="{ 'ps-gantt-cell-weekend': c.weekend, 'ps-gantt-cell-today': c.today }" :style="cell(c)"><span x-text="c.label"></span></div>
                     </template>
                 </div>
@@ -93,11 +94,11 @@
 
         <div class="ps-gantt-body" x-ref="body">
             <div class="ps-gantt-grid" :style="'width:' + view.width + 'px'">
-                <template x-for="s in view.shades" :key="s.key">
+                <template x-for="s in visibleShades" :key="s.key">
                     <div class="ps-gantt-shade" :style="cell(s)"></div>
                 </template>
-                <template x-for="c in view.columns" :key="c.key">
-                    <div class="ps-gantt-line" :style="'inset-inline-start:' + c.x + 'px'"></div>
+                <template x-for="c in visibleColumns" :key="c.key">
+                    <div class="ps-gantt-line" :style="{ 'inset-inline-start': c.x + 'px' }"></div>
                 </template>
                 <div class="ps-gantt-today-line" x-show="view.todayX !== null" :style="{ 'inset-inline-start': view.todayX + 'px' }"></div>
             </div>
@@ -120,8 +121,8 @@
                     <div
                         class="ps-gantt-canvas"
                         :style="'width:' + view.width + 'px'"
-                        :class="{ 'ps-gantt-canvas-creatable': createAction && row.type !== 'group' }"
-                        :title="createAction && row.type !== 'group' ? t.create_here : null"
+                        :class="{ 'ps-gantt-canvas-creatable': creatable(row) }"
+                        :title="creatable(row) ? t.create_here : null"
                         x-on:click="createAt($event, row)"
                     >
                         <template x-for="bar in row.bars" :key="bar.id">
@@ -133,10 +134,13 @@
                                     'ps-gantt-bar-flash': flash === bar.id,
                                     'ps-gantt-bar-locked': ! bar.movable,
                                     'ps-gantt-bar-clickable': !! (barAction || bar.url),
+                                    'ps-gantt-bar-narrow': narrow(bar),
+                                    'ps-gantt-bar-outside': labelOutside(bar),
+                                    'ps-gantt-bar-picked': pointer?.picked && pointer.bar.id === bar.id,
                                 }"
                                 :style="barStyle(bar)"
                                 :title="tooltip(bar)"
-                                :aria-label="tooltip(bar)"
+                                :aria-label="describe(bar)"
                                 :data-id="bar.id"
                                 role="button"
                                 tabindex="0"
@@ -145,14 +149,18 @@
                                 x-on:pointerup="up($event)"
                                 x-on:pointercancel="cancel($event)"
                                 x-on:lostpointercapture="cancel($event)"
+                                x-on:touchmove="pointer?.picked && $event.cancelable && $event.preventDefault()"
                                 x-on:click.stop
                                 x-on:keydown.enter.prevent="open(bar, $event)"
+                                x-on:keydown.space.prevent="open(bar, $event)"
+                                x-on:keydown.left.prevent="nudge($event, bar)"
+                                x-on:keydown.right.prevent="nudge($event, bar)"
                                 x-on:contextmenu.prevent.stop="openMenu($event, bar)"
                             >
                                 <span class="ps-gantt-progress" x-show="bar.progress !== null && bar.progress !== undefined && ! bar.milestone" :style="{ width: (bar.progress || 0) + '%' }"></span>
                                 <span class="ps-gantt-bar-label" x-text="bar.label"></span>
-                                <span class="ps-gantt-handle ps-gantt-handle-start" data-edge="start" x-show="bar.resizable"></span>
-                                <span class="ps-gantt-handle ps-gantt-handle-end" data-edge="end" x-show="bar.resizable"></span>
+                                <span class="ps-gantt-handle ps-gantt-handle-start" data-edge="start" x-show="bar.resizable && ! narrow(bar)"></span>
+                                <span class="ps-gantt-handle ps-gantt-handle-end" data-edge="end" x-show="bar.resizable && ! narrow(bar)"></span>
                             </div>
                         </template>
                     </div>
@@ -166,6 +174,9 @@
     </div>
 
     <div class="ps-gantt-hint" x-show="hint" x-cloak x-text="hint"></div>
+
+    {{-- What a keyboard move did, or why it was refused, for screen readers --}}
+    <div class="ps-gantt-sr" role="status" aria-live="polite" x-text="live"></div>
 
     {{-- x-show and :style share the style attribute: object syntax keeps the display x-show sets --}}
     <div

@@ -1,6 +1,6 @@
 # Groups
 
-Rows are grouped by a column or a `BelongsTo` relation. Each group is a row with a fold button, a colour dot and a count; the bars follow, one row each.
+Rows are grouped by a column or a `BelongsTo` relation (a `MorphTo` is refused: two related records of different types may share an id). Each group is a row with a fold button, a colour dot and a count; the bars follow, one row each.
 
 ```php
 ->groupBy('status')                              // a column: the label is the value in headline case (or the enum's HasLabel)
@@ -33,11 +33,11 @@ Bars whose group is not in the list are appended after it, so nothing silently d
 | --- | --- |
 | `make($key)` | The value of the group column, or the related record's key. |
 | `label()` | The row's text (default: the key in headline case). |
-| `color()` | The dot next to it: a colour name or any CSS colour. |
+| `color()` | The dot next to it: what a bar's `color()` takes ([Bars](bars.md)), or a closure. |
 | `collapsed()` | Start folded; the user can unfold it and the chart remembers. |
 | `fromModels($records, $label = 'name', $color = null)` | One group per model. |
 
-Folding a group hides its bar rows; folds are remembered in the browser under the chart's `key()`.
+Folding a group hides its bar rows; folds are remembered in the browser under the chart's `key()`. With a `createAction()`, a click on the group's own row creates in that group, so a group listed by `groups()` that has no bars yet can get its first one from the chart.
 
 ## Resource timelines
 

@@ -12,16 +12,17 @@
 
 </div>
 
-A Gantt chart and resource timeline for Filament: any Eloquent query with a start and an end becomes draggable bars on a day, week or month axis, grouped by project, assignee, room or machine, with every rule enforced on the server. The sibling of [Filament Kanban](https://github.com/packstub/filament-kanban).
+A Gantt chart and resource timeline for Filament: any Eloquent query with a start and an end becomes draggable bars on an hour, day, week or month axis, grouped by project, assignee, room or machine, with every rule enforced on the server. The sibling of [Filament Kanban](https://github.com/packstub/filament-kanban).
 
 ## Features
 
-- **[Drag to move, drag an edge to resize](#moving-and-resizing)**: the bar moves at once, snapped to the day (or the hour), and the server is asked afterwards. If it says no, the bar slides back and the reason is shown. Nothing re-renders on a move.
-- **[Rules on the server](#moving-and-resizing)**: `movable()`, `resizable()`, `minDuration()`, `maxDuration()`, `lockedBefore(today())` and a `canMove()` closure, all checked again in `Gantt::move()` whatever the browser sent.
+- **[Drag to move, drag an edge to resize](#moving-and-resizing)**: the bar moves at once, snapped to the day (or the hour), and the server is asked afterwards. If it says no, the bar slides back and the reason is shown. Nothing re-renders on a move. The chart scrolls when a bar nears its edge; on touch a swipe scrolls and a held bar is picked up.
+- **[Keyboard moves](#moving-and-resizing)**: arrow keys move a focused bar, Shift or Alt with an arrow resizes it, announced to screen readers (WCAG 2.2 2.5.7).
+- **[Rules on the server](#moving-and-resizing)**: who may move (the model policy, the resource's `canEdit()`), `movable()`, `resizable()`, `minDuration()`, `maxDuration()`, `lockedBefore(today())` and a `canMove()` closure, all checked again in `Gantt::move()` whatever the browser sent.
 - **[Groups and swimlanes](#groups-and-resource-timelines)**: rows grouped by a column or a relation, collapsible, with a count; or the compact layout where a room's bookings share one row and overlapping ones stack.
 - **[Milestones and progress](#defining-bars)**: a null end is a diamond; `progress('progress')` fills the bar.
-- **[Filament actions on bars](#actions)**: click a bar to edit it in a modal or slide-over, right-click for more; click an empty spot to create a record with that date and group already filled in.
-- **[Three scales, today line, weekends](#the-time-window)**: day, week and month, a two-row axis, a date-range picker and select or date-range filters, all kept in the URL.
+- **[Filament actions on bars](#actions)**: click a bar to edit it in a modal or slide-over, right-click for more; click an empty spot to create a record with that date and group already filled in. Each bar offers only the actions the user may run on its record.
+- **[Four scales, today line, weekends](#the-time-window)**: hour, day, week and month, a two-row axis, a date-range picker and select or date-range filters, all kept in the URL.
 - **[Resource page, standalone page or dashboard widget](#installation)**: `GanttResourcePage` (`/tasks/gantt`, follows the resource policy), `GanttPage`, and `GanttWidget` (read-only by default).
 - **Events**: a `BarMoved` Laravel event, an `afterMove()` hook, a browser event, `refreshOn([...])` for Livewire events and optional polling.
 - **No Gantt library, no build step**: one hand-written ES module and a stylesheet on your panel's palette. **Dark mode**, **RTL** and **translatable** (English, Romanian, Russian, German). MIT.
@@ -111,6 +112,7 @@ A drag changes the bar in the browser and sends `ganttMove(id, start, end)`, a r
 
 ```php
 ->snapTo(Unit::Day)                     // or Unit::Hour for datetime records
+->authorizeMoves(fn (Task $task) => auth()->user()->can('update', $task))   // the default when Task has a policy
 ->movable(fn (Task $task) => $task->status !== 'done')
 ->resizable(true)
 ->minDuration(days: 1)->maxDuration(days: 30)
@@ -119,13 +121,13 @@ A drag changes the bar in the browser and sends `ganttMove(id, start, end)`, a r
 ->afterMove(fn (Task $task, CarbonImmutable $start, CarbonImmutable $end) => $task->touch())
 ```
 
-Give your own persistence to `moveUsing()` and throw `MoveRejected` to refuse with a message (any other exception is reported and the user sees a generic one). `Packstub\Gantt\Events\BarMoved` fires after every saved move. The chart's own maths is on wall-clock moments tagged UTC, so a daylight-saving change never lengthens a bar; your closures and the event get the same moments in the app's timezone, so `$start->isPast()` reads naturally. Escape abandons a drag.
+Give your own persistence to `moveUsing()` and throw `MoveRejected` to refuse with a message (any other exception is reported and the user sees a generic one). `Packstub\Gantt\Events\BarMoved` fires after every saved move. The chart's own maths is on wall-clock moments tagged UTC, so a daylight-saving change never lengthens a bar; your closures and the event get the same moments in the app's timezone, so `$start->isPast()` reads naturally. Escape abandons a drag. On a focused bar, ←/→ move it, Shift+←/→ move its end and Alt+←/→ its start.
 
 Read more: [Moving and resizing](https://packstub.dev/docs/filament-gantt/moves).
 
 ## The time window
 
-Day, week and month scales, a today line, weekend shading, a date-range picker and filters in the toolbar. The window defaults to a week before the earliest bar and two weeks after the latest, or set it with `startDate()`/`endDate()`. Filters are applied on the server:
+Hour, day, week and month scales, a today line, weekend shading, a date-range picker and filters in the toolbar. The window defaults to a week before the earliest bar and two weeks after the latest (around today for a history longer than two years), or set it with `startDate()`/`endDate()`. Filters are applied on the server:
 
 ```php
 ->scale(Scale::Week)
@@ -141,7 +143,7 @@ Read more: [Filters and the time window](https://packstub.dev/docs/filament-gant
 
 ![TODO screenshot: editing a task in a slide-over opened by clicking its bar](https://raw.githubusercontent.com/packstub/art/main/filament-gantt/docs/edit.png)
 
-Your Filament actions work on bars: `barAction(EditAction::make()->schema([...]))` opens on click, `barActions([...])` fills the right-click menu, and `createAction(CreateAction::make()->schema([...]))` opens the create form with the clicked spot's start, end and group filled in. Records are resolved through the chart's query, so an action can never reach a record the user cannot see.
+Your Filament actions work on bars: `barAction(EditAction::make()->schema([...]))` opens on click, `barActions([...])` fills the right-click menu, and `createAction(CreateAction::make()->schema([...]))` opens the create form with the clicked spot's start, end and group filled in. Records are resolved through the chart's query, so an action can never reach a record the user cannot see, and each bar offers only the actions the user may run on its record (on a resource page, the resource's policy).
 
 Read more: [Actions](https://packstub.dev/docs/filament-gantt/actions).
 
@@ -161,7 +163,8 @@ Read more: [Kanban + Gantt](https://packstub.dev/docs/filament-gantt/kanban).
 
 ```php
 $gantt
-    ->scale('week')            // day | week | month; the user can change it
+    ->scale('week')            // hour | day | week | month; the user can change it
+    ->scales(['day', 'week'])  // the zoom levels offered
     ->snapTo('day')            // day | hour
     ->firstDayOfWeek(1)        // 1 = Monday … 7 = Sunday
     ->startDate('2026-01-01')->endDate('2026-12-31')
@@ -170,7 +173,7 @@ $gantt
     ->key('tasks');            // where the browser remembers the zoom and folded groups
 ```
 
-`config/filament-gantt.php` holds the defaults: scale, first day of week, weekend days, row height, pixels per day per scale, window padding and bounds, polling and the date formats of tooltips.
+`config/filament-gantt.php` holds the defaults: scale, first day of week, weekend days, row height, pixels per day per scale, window padding and bounds, `max_bars`, polling and the date formats of tooltips (the locale's by default).
 
 ![TODO screenshot: the chart in dark mode](https://raw.githubusercontent.com/packstub/art/main/filament-gantt/docs/dark.png)
 

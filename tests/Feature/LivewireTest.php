@@ -16,8 +16,10 @@ use Packstub\Gantt\Tests\Fixtures\TaskGantt;
 
 beforeEach(function () {
     CarbonImmutable::setTestNow('2026-10-14 10:00:00');
+    $this->actingAs(user());
     TaskGantt::$movable = null;
     TaskGantt::$readOnly = false;
+    TaskGantt::$bar = null;
     TaskGantt::$moved = [];
 });
 
@@ -51,7 +53,7 @@ it('queries and serialises the bars on the first render only: a re-render carrie
     $queries = collect(DB::getQueryLog())->pluck('query');
     DB::disableQueryLog();
 
-    expect($queries->filter(fn (string $sql) => str_contains($sql, 'from "tasks"') && str_contains($sql, 'order by')))->toBeEmpty()
+    expect($queries->filter(fn (string $sql) => str_contains(str_replace(['"', '`'], '', $sql), 'from tasks') && str_contains($sql, 'order by')))->toBeEmpty()
         ->and($component->instance()->ganttRendered)->toBeTrue()
         ->and($component->instance()->getGanttConfig())->toMatchArray(['bars' => [], 'groups' => [], 'readOnly' => false])
         ->and($component->instance()->getGanttConfig(withState: true)['bars'][0]['label'])->toBe('Final docs');
@@ -104,11 +106,11 @@ it('hands the browser everything it needs in the config', function () {
         'height' => null,
         'barAction' => 'edit',
     ])
-        ->and($config['key'])->toBe('gantt:'.TaskGantt::class.':guest')
+        ->and($config['key'])->toBe('gantt:'.TaskGantt::class.':'.auth()->id())
         ->and($config['window'])->toBe(['start' => '2026-09-28', 'end' => '2026-10-25'])
         ->and($config['groups'][0])->toMatchArray(['key' => (string) $acme->id, 'label' => 'Acme', 'count' => 1])
         ->and($config['bars'][0]['label'])->toBe('A')
-        ->and($config['pxPerDay'])->toBe(['day' => 48, 'week' => 18, 'month' => 5])
+        ->and($config['pxPerDay'])->toBe(['hour' => 960, 'day' => 48, 'week' => 18, 'month' => 5])
         ->and(array_column($config['filters'], 'type'))->toBe(['select', 'dateRange'])
         ->and($config['filters'][0]['options'])->toBe([['value' => (string) $acme->id, 'label' => 'Acme']])
         ->and(array_column($config['barActions'], 'name'))->toBe(['edit', 'delete', 'bump'])
@@ -194,10 +196,10 @@ it('refreshes with filters and loads another window', function () {
     Livewire::test(TaskGantt::class)
         ->call('ganttRefresh', ['project_id' => (string) $acme->id])
         ->assertReturned(fn ($result) => array_column($result['bars'], 'label') === ['A'] && $result['groups'][0]['count'] === 1)
-        ->call('ganttWindow', '2026-11-01', '2026-11-30')
-        ->assertReturned(fn ($result) => $result['window'] === ['start' => '2026-11-01', 'end' => '2026-11-30'] && array_column($result['bars'], 'label') === ['B'])
-        ->call('ganttWindow', null, null)
-        ->assertReturned(fn ($result) => $result['window']['start'] === '2026-09-28');
+        ->call('ganttRefresh', [], '2026-11-01', '2026-11-30')
+        ->assertReturned(fn ($result) => $result['window'] === ['start' => '2026-11-01', 'end' => '2026-11-30'] && array_column($result['bars'], 'label') === ['B'] && ! isset($result['filters']))
+        ->call('ganttRefresh', [], null, null, true)
+        ->assertReturned(fn ($result) => $result['window']['start'] === '2026-09-28' && array_column($result['filters'], 'name') === ['project_id', 'starts_on']);
 });
 
 it('ignores a date-range filter value that is no calendar date (a hand-edited URL)', function () {

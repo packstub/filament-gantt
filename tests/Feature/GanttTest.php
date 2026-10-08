@@ -17,28 +17,13 @@ use Packstub\Gantt\Group;
 use Packstub\Gantt\Tests\Fixtures\Project;
 use Packstub\Gantt\Tests\Fixtures\Shift;
 use Packstub\Gantt\Tests\Fixtures\Task;
+use Packstub\Gantt\Tests\Fixtures\UncastTask;
 
-function gantt(): Gantt
-{
-    return Gantt::make()
-        ->query(fn () => Task::query()->with('project'))
-        ->start('starts_on')->end('ends_on')
-        ->label('title')
-        ->progress('progress')
-        ->groupBy('project', label: 'project.name');
-}
-
-function shifts(): Gantt
-{
-    return Gantt::make()
-        ->query(fn () => Shift::query())
-        ->start('starts_at')->end('ends_at')
-        ->label('title')
-        ->groupBy('room')
-        ->snapTo(Unit::Hour);
-}
-
-beforeEach(fn () => CarbonImmutable::setTestNow('2026-10-14 10:00:00'));
+beforeEach(function () {
+    CarbonImmutable::setTestNow('2026-10-14 10:00:00');
+    // Task has a policy: a move asks it, so the tests move as a signed-in user.
+    $this->actingAs(user());
+});
 
 afterEach(function () {
     CarbonImmutable::setTestNow();
@@ -233,7 +218,11 @@ it('takes the definition\'s dates, then the browser\'s, and clamps both', functi
         ->and($window['end']->toDateString())->toBe('2026-10-28') // stretched to the minimum
         ->and($gantt->getWindow('2027-01-01', '2029-06-01')['end']->toDateString())->toBe('2028-12-30') // 730 days at most
         ->and($gantt->getWindow('garbage', '2026-12-31')['start']->toDateString())->toBe('2026-10-01')
-        ->and($gantt->getWindow('2026-12-31', '2026-01-01')['start']->toDateString())->toBe('2026-12-31');
+        // "until" before "from": swapped, not collapsed
+        ->and($gantt->getWindow('2026-12-31', '2026-01-01'))->sequence(
+            fn ($start) => $start->toDateString()->toBe('2026-01-01'),
+            fn ($end) => $end->toDateString()->toBe('2026-12-31'),
+        );
 });
 
 it('loads only the bars overlapping the window, milestones by their start', function () {
@@ -257,12 +246,12 @@ it('asks for the window with plain ranges on the columns, so their indexes stay 
 
     DB::enableQueryLog();
     $bars = shifts()->getBars(from: CarbonImmutable::parse('2026-10-01'), until: CarbonImmutable::parse('2026-10-31'));
-    $sql = collect(DB::getQueryLog())->pluck('query')->implode(' ');
+    $sql = str_replace(['"', '`'], '', collect(DB::getQueryLog())->pluck('query')->implode(' ')); // quotes differ per database
     DB::disableQueryLog();
 
     expect(array_column($bars, 'label'))->toBe(['Ends as the window opens', 'Starts as the window closes'])
         ->and($sql)->not->toContain('strftime', 'date(')
-        ->and($sql)->toContain('"starts_at" < ?', '"ends_at" >= ?');
+        ->and($sql)->toContain('starts_at < ?', 'ends_at >= ?');
 });
 
 /* ------------------------------------------------------------------ filters */
@@ -299,12 +288,12 @@ it('narrows a date range with plain ranges on the column, the last day included 
 
     DB::enableQueryLog();
     $bars = $gantt->getBars(['starts_at' => ['from' => '2026-10-10', 'until' => '2026-10-12']]);
-    $sql = collect(DB::getQueryLog())->pluck('query')->implode(' ');
+    $sql = str_replace(['"', '`'], '', collect(DB::getQueryLog())->pluck('query')->implode(' ')); // quotes differ per database
     DB::disableQueryLog();
 
     expect(array_column($bars, 'label'))->toBe(['First thing', 'Late on the last day'])
         ->and($sql)->not->toContain('strftime', 'date(')
-        ->and($sql)->toContain('"starts_at" >= ?', '"starts_at" < ?')
+        ->and($sql)->toContain('starts_at >= ?', 'starts_at < ?')
         ->and(array_column($gantt->getBars(['starts_at' => ['until' => '2026-10-09']]), 'label'))->toBe(['The day before']);
 });
 
@@ -723,4 +712,35 @@ it('knows which groups a click may create in: the rows on the chart, never a rel
         ->and(gantt()->createAction(CreateAction::make())->creatableIn(fn (string $group) => $group === (string) $beta->id)->canCreateIn((string) $beta->id))->toBeTrue()
         ->and(gantt()->createAction(CreateAction::make())->groupBy('status')->canCreateIn('todo'))->toBeTrue() // the stray task's status
         ->and(gantt()->createAction(CreateAction::make())->groupBy('status')->canCreateIn('done'))->toBeFalse();
+});
+
+it('prefills whole days for a date-only record on a chart that snaps to hours', function () {
+    $gantt = gantt()->snapTo(Unit::Hour)->createAction(CreateAction::make());
+
+    // the browser's hour-wide click on a whole-day chart
+    expect($gantt->prefill('2026-10-14 00:00', '2026-10-14 01:00'))->toBe(['starts_on' => '2026-10-14', 'ends_on' => '2026-10-14'])
+        ->and($gantt->prefill('2026-10-14 09:00', null))->toBe(['starts_on' => '2026-10-14', 'ends_on' => '2026-10-14']);
+});
+
+it('samples an uncast column whatever the query selects and orders by', function () {
+    UncastTask::query()->create(['title' => 'Stored', 'starts_on' => '2026-10-01', 'ends_on' => '2026-10-02']);
+
+    $gantt = Gantt::make()
+        ->query(fn () => UncastTask::query()->selectRaw('tasks.*, length(title) as title_length')->orderBy('title_length'))
+        ->start('starts_on')->end('ends_on')
+        ->createAction(CreateAction::make());
+
+    expect($gantt->prefill('2026-10-06 00:00', '2026-10-09 00:00'))->toBe(['starts_on' => '2026-10-06', 'ends_on' => '2026-10-08']);
+});
+
+it('keeps a group colour read from a model only when it is one', function () {
+    $acme = project('Acme', 'sky');
+
+    $groups = Group::fromModels(Project::query()->get(), color: 'color');
+    $ids = Group::fromModels(Project::query()->get(), color: 'id');
+
+    expect($groups[0]->toArray()['color'])->toBe('sky')
+        ->and($ids[0]->toArray()['color'])->toBeNull()
+        ->and(Group::make('x')->color($acme->id)->toArray()['color'])->toBeNull()
+        ->and(Group::make('x')->color(0x336699)->toArray()['color'])->toBeNull();
 });

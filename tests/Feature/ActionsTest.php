@@ -14,8 +14,10 @@ use Packstub\Gantt\Tests\Fixtures\TaskGantt;
 
 beforeEach(function () {
     CarbonImmutable::setTestNow('2026-10-14 10:00:00');
+    $this->actingAs(user());
     TaskGantt::$movable = null;
     TaskGantt::$readOnly = false;
+    TaskGantt::$bar = null;
 });
 
 afterEach(fn () => CarbonImmutable::setTestNow());
@@ -93,8 +95,8 @@ it('runs a listed groups() closure once per request, whatever a create from a cl
         }
     };
 
-    // The closure's own query, not the eager load of the bars' projects.
-    $projects = fn () => collect(DB::getQueryLog())->pluck('query')->filter(fn (string $sql) => $sql === 'select * from "projects"')->count();
+    // The closure's own query, not the eager load of the bars' projects (quotes differ per database).
+    $projects = fn () => collect(DB::getQueryLog())->pluck('query')->filter(fn (string $sql) => str_replace(['"', '`'], '', $sql) === 'select * from projects')->count();
 
     DB::enableQueryLog();
     $test = Livewire::test($component::class);

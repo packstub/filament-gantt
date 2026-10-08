@@ -16,7 +16,7 @@
     --ps-gantt-weekend: color-mix(in oklab, var(--gray-100) 70%, transparent);
     --ps-gantt-group: color-mix(in oklab, var(--gray-100) 80%, transparent);
     --ps-gantt-ring: var(--primary-500);
-    --ps-gantt-today: var(--danger-500);
+    --ps-gantt-today: var(--primary-500);
     --ps-gantt-bar-text: var(--gray-950);
     --ps-gantt-radius: 0.5rem;
     --ps-gantt-bar-radius: 0.3rem;
@@ -95,14 +95,20 @@
 .ps-gantt-dash { color: var(--ps-gantt-muted); }
 .ps-gantt-filter-on { border-color: var(--ps-gantt-ring); }
 .ps-gantt-count { font-size: 0.75rem; font-variant-numeric: tabular-nums; color: var(--ps-gantt-muted); }
+.ps-gantt-count-truncated { color: var(--warning-600); cursor: help; }
+.dark .ps-gantt-count-truncated { color: var(--warning-400); }
 
 /* ------------------------------------------------------------------ the scrolling chart */
 
 .ps-gantt-scroll {
     position: relative;
-    height: var(--ps-gantt-height);
+    /* as tall as its rows, up to the room below the chart's top (or the widget's height) */
+    max-height: var(--ps-gantt-height);
     min-height: 16rem;
     overflow: auto;
+    /* a focused bar is never scrolled under the sticky label column or header */
+    scroll-padding-inline-start: var(--ps-gantt-label-width);
+    scroll-padding-top: 3.25rem;
     border: 1px solid var(--ps-gantt-border);
     border-radius: var(--ps-gantt-radius);
     background: var(--ps-gantt-bg);
@@ -247,8 +253,8 @@
     cursor: grab;
     user-select: none;
     -webkit-user-select: none;
-    /* A horizontal drag is ours; a vertical pan that starts on a bar still scrolls (the browser then cancels our pointer). */
-    touch-action: pan-y;
+    /* A swipe that starts on a bar scrolls the chart either way: a bar is picked up by holding it (see gantt.js). */
+    touch-action: manipulation;
     transition: box-shadow 0.12s, opacity 0.15s;
 }
 
@@ -272,8 +278,21 @@
 
 .ps-gantt-bar-label { position: relative; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
 
-/* a bar too narrow for its text shows it to the side */
-.ps-gantt-bar[style*="width:4px"] .ps-gantt-bar-label, .ps-gantt-bar[style*="width:5px"] .ps-gantt-bar-label { display: none; }
+/* a label that does not fit is drawn after the bar (one bar per row, so nothing is there) */
+.ps-gantt-bar-outside .ps-gantt-bar-label {
+    position: absolute;
+    inset-inline-start: calc(100% + 0.4rem);
+    top: 50%;
+    transform: translateY(-50%);
+    overflow: visible;
+    color: var(--ps-gantt-text);
+}
+
+/* in the compact layout the next bar of the lane may sit there: a narrow bar keeps its text hidden */
+.ps-gantt-is-compact .ps-gantt-bar-narrow .ps-gantt-bar-label { display: none; }
+
+/* picked up on touch (held), ready to follow the finger */
+.ps-gantt-bar-picked { z-index: 3; box-shadow: 0 8px 18px -6px rgb(0 0 0 / 0.45), 0 0 0 2px var(--ps-bar); }
 
 .ps-gantt-handle {
     position: absolute;
@@ -333,6 +352,9 @@
     pointer-events: none;
 }
 
+/* the live region: read out, never seen */
+.ps-gantt-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
 .ps-gantt-menu {
     position: fixed;
     z-index: 60;
@@ -372,6 +394,10 @@
 @media (max-width: 40rem) {
     .ps-gantt { --ps-gantt-label-width: 9rem; }
     .ps-gantt-count { display: none; }
+}
+
+@media (max-width: 30rem) {
+    .ps-gantt { --ps-gantt-label-width: 7rem; }
 }
 
 .ps-gantt-page .fi-header { gap: 0.75rem; }

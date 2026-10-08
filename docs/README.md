@@ -2,7 +2,7 @@
 
 ![Filament Gantt](https://raw.githubusercontent.com/packstub/art/main/filament-gantt/banner.jpg)
 
-A Gantt chart and resource timeline for Filament v4 (4.13+) and v5. Any Eloquent query with a start and an end becomes draggable bars on a day, week or month axis, grouped by whatever you like; the browser owns the chart, so a drag lands at once, and the server checks every rule again in the background. Free and open source (MIT). The sibling of [Filament Kanban](https://packstub.dev/docs/filament-kanban).
+A Gantt chart and resource timeline for Filament v4 (4.13+) and v5. Any Eloquent query with a start and an end becomes draggable bars on an hour, day, week or month axis, grouped by whatever you like; the browser owns the chart, so a drag lands at once, and the server checks every rule again in the background. Free and open source (MIT). The sibling of [Filament Kanban](https://packstub.dev/docs/filament-kanban).
 
 - Repository: [github.com/packstub/filament-gantt](https://github.com/packstub/filament-gantt)
 - Packagist: [packstub/filament-gantt](https://packagist.org/packages/packstub/filament-gantt)
@@ -12,11 +12,12 @@ A Gantt chart and resource timeline for Filament v4 (4.13+) and v5. Any Eloquent
 
 | Feature | What it means for you |
 | --- | --- |
-| **Drag to move, drag an edge to resize** | The bar moves at once, snapped to the day or the hour, and the server is asked afterwards. Refused? It slides back with the reason. |
-| **Rules on the server** | `movable()`, `resizable()`, min and max durations, a locked past and your own `canMove()` closure, all re-checked in `Gantt::move()`. |
+| **Drag to move, drag an edge to resize** | The bar moves at once, snapped to the day or the hour, and the server is asked afterwards. Refused? It slides back with the reason. The chart scrolls when a bar nears its edge; on touch, hold a bar to pick it up. |
+| **Keyboard too** | Arrow keys move a focused bar, Shift or Alt with an arrow resizes it, announced to screen readers: dragging is never the only way. |
+| **Rules on the server** | Who may move (the model policy, the resource's `canEdit()`), `movable()`, `resizable()`, min and max durations, a locked past and your own `canMove()` closure, all re-checked in `Gantt::move()`. |
 | **Groups and swimlanes** | Rows by project, assignee, room or machine, collapsible with a count; or the compact resource-timeline layout where a room's bookings share one row. |
-| **Filament actions** | Click a bar to edit it in a modal, right-click for more, click an empty spot to create a record on that date. |
-| **Three scales** | Day, week and month, a two-row axis, a today line, weekend shading, a date-range picker and filters, all kept in the URL. |
+| **Filament actions** | Click a bar to edit it in a modal, right-click for more, click an empty spot to create a record on that date. Each bar offers only the actions the user may run on its record. |
+| **Four scales** | Hour, day, week and month, a two-row axis, a today line, weekend shading, a date-range picker and filters, all kept in the URL. |
 | **Page, resource page or widget** | `GanttPage`, `GanttResourcePage` (follows the resource policy) and a read-only `GanttWidget` for the dashboard. |
 | **Light** | No Gantt library, no build step: one hand-written script and a stylesheet on your panel's palette. Dark mode, RTL, four languages. |
 

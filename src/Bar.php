@@ -5,6 +5,7 @@ namespace Packstub\Gantt;
 use BackedEnum;
 use Filament\Support\Contracts\HasColor;
 use Illuminate\Contracts\Support\Arrayable;
+use UnitEnum;
 
 /**
  * What a bar shows. Plain data drawn by the browser: a chart of a few hundred bars is
@@ -40,8 +41,13 @@ class Bar implements Arrayable
         return $this;
     }
 
-    /** A Tailwind-ish name (sky, amber, emerald…), a panel colour (primary, danger…), a Filament palette or any CSS colour. */
-    public function color(string|array|BackedEnum|null $color): static
+    /**
+     * A Tailwind-ish name (sky, amber, emerald…), a panel colour (primary, danger, or
+     * one your panel registers), a Filament palette, an enum implementing HasColor, or a
+     * CSS colour (`#0ea5e9`, `rgb(…)`, `oklch(…)`, `var(--brand)`). Anything else is
+     * dropped: the bar is drawn in the primary colour.
+     */
+    public function color(string|array|UnitEnum|null $color): static
     {
         $this->color = static::colorName($color);
 
@@ -95,6 +101,12 @@ class Bar implements Arrayable
         return $this->label;
     }
 
+    /** @return list<string>|null the action names set by actions(); null when every action is offered */
+    public function getActions(): ?array
+    {
+        return $this->actions;
+    }
+
     /** @return array<string, mixed> */
     public function toArray(): array
     {
@@ -137,7 +149,11 @@ class Bar implements Arrayable
         return $scheme === null || in_array($scheme, ['http', 'https', 'mailto', 'tel'], true) ? $url : null;
     }
 
-    /** Filament colours are palettes (shade => value); the chart draws one tone, the 500 shade. */
+    /**
+     * A colour the chart can draw, or null. Filament colours are palettes (shade =>
+     * value): the chart draws one tone, the 500 shade. Only colour shapes are kept
+     * (see safeColor()): the value ends up in a style attribute.
+     */
     public static function colorName(mixed $color): ?string
     {
         if ($color instanceof HasColor) {
@@ -147,9 +163,29 @@ class Bar implements Arrayable
         }
 
         if (is_array($color)) {
-            return $color[500] ?? (array_values($color)[0] ?? null);
+            $color = $color[500] ?? (array_values($color)[0] ?? null);
         }
 
-        return $color === null ? null : (string) $color;
+        return is_string($color) || is_int($color) ? static::safeColor((string) $color) : null;
+    }
+
+    /**
+     * The colour if it is one, otherwise null: a name (`sky`, `primary`, a panel's
+     * own `brand`), `#hex`, a colour function (`rgb()`, `hsl()`, `hwb()`, `lab()`,
+     * `lch()`, `oklab()`, `oklch()`, `color()`, with or without an `a`) holding
+     * plain values, or `var(--name)`. A `;`, a brace, `url(…)` or a nested
+     * function never gets through: a colour taken from user data cannot add its own
+     * declarations to the bar's style.
+     */
+    public static function safeColor(?string $color): ?string
+    {
+        $color = trim((string) $color);
+
+        $safe = preg_match('/^[a-z][a-z0-9-]*$/i', $color) === 1
+            || preg_match('/^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i', $color) === 1
+            || preg_match('/^(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\([a-z0-9.,%\/+\- ]*\)$/i', $color) === 1
+            || preg_match('/^var\(--[a-z0-9_-]+\)$/i', $color) === 1;
+
+        return $safe ? $color : null;
     }
 }

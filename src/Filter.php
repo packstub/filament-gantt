@@ -156,6 +156,7 @@ class Filter
     {
         return is_string($value)
             && preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $value, $m) === 1
+            && (int) $m[1] >= 1000
             && checkdate((int) $m[2], (int) $m[3], (int) $m[1])
                 ? $value
                 : null;
