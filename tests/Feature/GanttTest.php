@@ -4,6 +4,7 @@ use Carbon\CarbonImmutable;
 use Filament\Actions\CreateAction;
 use Filament\Actions\EditAction;
 use Filament\Support\Colors\Color;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Packstub\Gantt\Bar;
@@ -828,4 +829,42 @@ it('offers a change of row only on a chart grouped by something it can write, to
         ->and(gantt()->authorizeMoves(false)->presentBar($task)['regroupable'])->toBeFalse()
         ->and(Gantt::make()->query(fn () => Task::query())->start('starts_on')->end('ends_on')->presentBar($task)['regroupable'])->toBeFalse()
         ->and(fn () => Gantt::make()->query(fn () => Task::query())->start('starts_on')->end('ends_on')->move((string) $task->id, '2026-10-05 00:00', null, '7'))->toThrow('This bar cannot be moved to another row.');
+});
+
+/* ------------------------------------------------------------------ dependencies */
+
+it('tells the browser which bars a bar waits for, from a JSON column, a relation or a closure', function () {
+    $a = task('Design', '2026-10-01', '2026-10-05');
+    $b = task('Build', '2026-10-06', '2026-10-10', ['depends_on' => [$a->id]]);
+    $c = task('Ship', '2026-10-08', '2026-10-12', ['depends_on' => [$a->id, (string) $b->id, $b->id, null, '']]);
+    $c->predecessors()->attach([$b->id]);
+
+    expect(gantt()->presentBar($a))->not->toHaveKey('deps')
+        ->and(gantt()->dependencies('depends_on')->presentBar($a)['deps'])->toBe([])
+        ->and(gantt()->dependencies('depends_on')->presentBar($b)['deps'])->toBe([(string) $a->id])
+        ->and(gantt()->dependencies('depends_on')->presentBar($c)['deps'])->toBe([(string) $a->id, (string) $b->id])
+        ->and(gantt()->dependencies('predecessors')->presentBar($c->fresh())['deps'])->toBe([(string) $b->id])
+        ->and(gantt()->dependencies(fn (Task $task) => $task->title === 'Ship' ? [$a, $b->id] : [])->presentBar($c)['deps'])->toBe([(string) $a->id, (string) $b->id])
+        ->and(gantt()->dependencies(fn (Task $task) => $a)->presentBar($c)['deps'])->toBe([(string) $a->id]);
+
+    // an uncast column holding JSON text
+    UncastTask::query()->whereKey($b->id)->update(['depends_on' => json_encode([$a->id])]);
+    $plain = Gantt::make()->query(fn () => UncastTask::query())->start('starts_on')->end('ends_on')->dependencies('depends_on');
+    expect($plain->presentBar(UncastTask::query()->find($b->id))['deps'])->toBe([(string) $a->id]);
+});
+
+it('loads the predecessors relation with the bars, never lazily', function () {
+    $a = task('Design', '2026-10-01', '2026-10-05');
+    $b = task('Build', '2026-10-06', '2026-10-10');
+    $b->predecessors()->attach([$a->id]);
+    Model::preventLazyLoading();
+
+    try {
+        $bars = collect(gantt()->dependencies('predecessors')->getBars())->keyBy('label');
+
+        expect($bars['Build']['deps'])->toBe([(string) $a->id])
+            ->and($bars['Design']['deps'])->toBe([]);
+    } finally {
+        Model::preventLazyLoading(false);
+    }
 });

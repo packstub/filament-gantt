@@ -16,6 +16,8 @@
     --ps-gantt-weekend: color-mix(in oklab, var(--gray-100) 70%, transparent);
     --ps-gantt-group: color-mix(in oklab, var(--gray-100) 80%, transparent);
     --ps-gantt-ring: var(--primary-500);
+    --ps-gantt-arrow: var(--gray-400);
+    --ps-gantt-arrow-late: var(--danger-500);
     --ps-gantt-today: var(--primary-500);
     --ps-gantt-bar-text: var(--gray-950);
     --ps-gantt-radius: 0.5rem;
@@ -32,6 +34,7 @@
 }
 
 .dark .ps-gantt {
+    --ps-gantt-arrow: var(--gray-500);
     --ps-gantt-bg: var(--gray-900);
     --ps-gantt-surface: rgb(255 255 255 / 0.03);
     --ps-gantt-border: rgb(255 255 255 / 0.09);
@@ -177,6 +180,12 @@
 }
 
 .ps-gantt-shade { position: absolute; top: 0; bottom: 0; background: var(--ps-gantt-weekend); }
+
+/* dependency arrows: over the rows, under nothing clickable (pointer-events off) */
+.ps-gantt-arrows { position: absolute; top: 0; inset-inline-start: var(--ps-gantt-label-width); z-index: 2; overflow: visible; pointer-events: none; }
+.ps-gantt-arrows path { fill: none; stroke: var(--ps-gantt-arrow); stroke-width: 1.5; stroke-linejoin: round; }
+.ps-gantt-arrow-late { stroke: var(--ps-gantt-arrow-late) !important; stroke-dasharray: 4 3; }
+[dir="rtl"] .ps-gantt-arrows { transform: scaleX(-1); }
 .ps-gantt-line { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--ps-gantt-line); }
 .ps-gantt-today-line { position: absolute; top: 0; bottom: 0; width: 2px; margin-inline-start: -1px; background: var(--ps-gantt-today); opacity: 0.7; }
 

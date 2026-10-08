@@ -73,6 +73,8 @@ class Gantt
 
     protected ?Closure $bar = null;
 
+    protected string|Closure|null $dependencies = null;
+
     protected ?string $groupAttribute = null;
 
     protected string|Closure|null $groupLabel = null;
@@ -258,6 +260,22 @@ class Gantt
     {
         $this->groupAttribute = $attribute;
         $this->groupLabel = $label;
+
+        return $this;
+    }
+
+    /**
+     * Which bars a bar waits for (finish-to-start), drawn as arrows from each
+     * predecessor's end to this bar's start: a JSON/array column of keys
+     * (`depends_on`), a relation to the predecessors (`predecessors`, a BelongsToMany
+     * or HasMany), or `fn (Model $record): iterable` returning keys or models. Drawn
+     * only, never enforced: a successor that starts before its predecessor ends gets a
+     * dashed arrow, and nothing is rescheduled or refused (add that in canMove() if
+     * you want it). An arrow is drawn when both bars are on the chart.
+     */
+    public function dependencies(string|Closure|null $source): static
+    {
+        $this->dependencies = $source;
 
         return $this;
     }
@@ -1031,9 +1049,13 @@ class Gantt
         }
 
         // The group's label reads the relation on every bar: loaded once, not per bar
-        // (and never lazily, which strict mode forbids).
+        // (and never lazily, which strict mode forbids). The predecessors relation too.
         if ($this->groupRelation() !== null && ! $this->groupLabel instanceof Closure && ! array_key_exists($this->groupAttribute, $query->getEagerLoads())) {
             $query->with($this->groupAttribute);
+        }
+
+        if (is_string($this->dependencies) && $query->getModel()->isRelation($this->dependencies) && ! array_key_exists($this->dependencies, $query->getEagerLoads())) {
+            $query->with($this->dependencies);
         }
 
         [$column, $direction] = $this->sort ?? [$this->startAttribute, 'asc'];
@@ -1116,7 +1138,7 @@ class Gantt
             $this->groupLabels[$group] = $this->groupLabelFor($record, $group);
         }
 
-        return [
+        $bar = [
             'id' => (string) $record->getKey(),
             'group' => $group ?? '',
             'start' => $start->format('Y-m-d H:i'),
@@ -1128,6 +1150,42 @@ class Gantt
             'regroupable' => $this->isRegroupable($record),
             ...$shape,
         ];
+
+        if ($this->dependencies !== null) {
+            $bar['deps'] = $this->dependenciesOf($record);
+        }
+
+        return $bar;
+    }
+
+    /**
+     * The keys of the bars this record waits for, as strings (see dependencies()).
+     *
+     * @return list<string>
+     */
+    protected function dependenciesOf(Model $record): array
+    {
+        $source = $this->dependencies;
+
+        if ($source instanceof Closure) {
+            $value = $source($record);
+        } elseif ($record->isRelation($source)) {
+            $value = $record->getRelationValue($source);
+        } else {
+            $value = $record->getAttribute($source);
+
+            if (is_string($value) && str_starts_with(trim($value), '[')) {
+                $value = json_decode($value, true);
+            }
+        }
+
+        return collect($value instanceof Model ? [$value] : ($value ?? []))
+            ->map(fn ($item) => $item instanceof Model ? $item->getKey() : ($item instanceof BackedEnum ? $item->value : $item))
+            ->filter(fn ($key) => (is_string($key) && $key !== '') || is_int($key))
+            ->map(fn ($key) => (string) $key)
+            ->unique()
+            ->values()
+            ->all();
     }
 
     /* ------------------------------------------------------------------ writing */

@@ -62,6 +62,18 @@ use Packstub\Gantt\Bar;
 
 Bars are plain data drawn in the browser, so a chart of a few hundred bars is a few kilobytes of JSON rather than a few hundred Blade components. Eager-load what the closures touch (`->query(fn () => Task::query()->with('assignee'))`).
 
+## Dependencies
+
+Tell the chart which bars a bar waits for and it draws an arrow from each predecessor's end to the bar's start (finish-to-start):
+
+```php
+->dependencies('depends_on')     // a JSON or array column holding the predecessors' keys
+->dependencies('predecessors')   // a relation to them (BelongsToMany, HasMany), eager-loaded with the bars
+->dependencies(fn (Task $task) => $task->blockers->pluck('id'))   // or a closure returning keys or models
+```
+
+The arrows are drawn, not enforced: a successor that starts before its predecessor ends gets a dashed arrow in the danger colour, and nothing is rescheduled or refused. To refuse such a move, say so in `canMove()`. An arrow needs both bars on the chart: a predecessor outside the window, filtered out or in a folded group draws none. The arrows follow a bar while it is dragged. Their colours are `--ps-gantt-arrow` and `--ps-gantt-arrow-late` ([Styling](styling.md)).
+
 ## Order
 
 Bars inside a group are ordered by their start; `sortBy('priority', 'desc')` orders them by another attribute. Records without a start are left out.

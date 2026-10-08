@@ -8,6 +8,8 @@ The stylesheet is plain CSS on Filament's colour variables (`--gray-*`, `--prima
     --ps-gantt-radius: 0.75rem;
     --ps-gantt-bar-radius: 0.5rem;
     --ps-gantt-today: var(--danger-500);  /* the today line; the panel's primary colour by default */
+    --ps-gantt-arrow: var(--gray-500);    /* dependency arrows, and the dashed late ones: */
+    --ps-gantt-arrow-late: var(--warning-500);
     --ps-gantt-weekend: rgb(0 0 0 / 0.03);
     --ps-gantt-height: 40rem;        /* the most the chart grows to; pages fit it to the window by default */
 }

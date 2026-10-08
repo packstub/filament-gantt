@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { layout, parse, format, phpDate, pack, isoWeekday, DAY } from './harness.mjs'
+import { layout, arrows, parse, format, phpDate, pack, isoWeekday, DAY } from './harness.mjs'
 
 const window = {
     start: '2026-10-05', end: '2026-11-01', today: '2026-10-14',
@@ -121,4 +121,37 @@ test('day scale at the default zoom keeps every day label; a cell too narrow sho
     // 2px a day: no room for a day number either
     assert.equal(layout([], { ...window, pxPerDay: 2 }, 'day').columns[9].label, '')
     assert.equal('short' in layout([], window, 'day').columns[0], false)
+})
+
+test('arrows(): finish-to-start paths between bars on the chart, dashed when the successor starts too early', () => {
+    const deps = [
+        { id: 'a', group: '1', start: '2026-10-05', end: '2026-10-08', label: 'A', movable: true, resizable: true },
+        { id: 'b', group: '1', start: '2026-10-10', end: '2026-10-12', label: 'B', movable: true, resizable: true, deps: ['a'] },
+        { id: 'c', group: '1', start: '2026-10-07', end: '2026-10-09', label: 'C', movable: true, resizable: true, deps: ['a', 'zzz', 'c'] },
+    ]
+    const v = layout(deps, window, 'week')
+    const out = arrows(v)
+    // rows: group (0), a (36), b (72), c (108); a bar's centre is 4 + 28 / 2 into its row
+    assert.deepEqual(out.map((a) => a.key), ['a>b', 'a>c'])
+    assert.equal(out[0].d, 'M54,54 h8 V90 H90 m-6,-4 l6,4 l-6,4')
+    assert.equal(out[0].late, false)
+    // c starts before a ends: around through the gap, and late
+    assert.equal(out[1].d, 'M54,54 h8 V90 H28 V126 H36 m-6,-4 l6,4 l-6,4')
+    assert.equal(out[1].late, true)
+
+    // a predecessor in a folded group, or outside the window, draws nothing
+    const folded = layout(deps, { ...window, collapsed: { 1: true } }, 'week')
+    assert.deepEqual(arrows(folded), [])
+    // (the server sends only the bars in the window: a predecessor it left out draws nothing)
+    assert.deepEqual(arrows(layout(deps.slice(1), window, 'week')), [])
+
+    // compact: lanes stack inside one row, the arrow's y follows the lane
+    const compact = layout(deps, { ...window, compact: true }, 'week')
+    const lanes = arrows(compact)
+    assert.equal(lanes.find((a) => a.key === 'a>c').d.startsWith('M54,18 '), true)
+    assert.equal(lanes.find((a) => a.key === 'a>c').d.includes('V54'), true, 'c is in the second lane')
+
+    // a bar carried to another row takes its arrows along
+    const carried = arrows(v, { id: 'b', dy: 36 })
+    assert.equal(carried[0].d, 'M54,54 h8 V126 H90 m-6,-4 l6,4 l-6,4')
 })

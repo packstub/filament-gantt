@@ -38,6 +38,8 @@ const EDGE_PX = 48
 const EDGE_MAX_STEP = 18
 // Above this many columns (hours over months) only the ones in view are drawn.
 const COLUMNS_IN_DOM = 400
+// How far an arrow leaves a bar before it turns
+const ARROW_GAP = 8
 
 /** A URL safe to navigate to: a path, or http(s), mailto, tel. Never javascript:, data:, vbscript:, nor a protocol-relative //host. */
 export function safeUrl(url) {
@@ -149,7 +151,7 @@ function fits(label, width) {
  * }
  * scale:  'hour' | 'day' | 'week' | 'month'
  *
- * Returns { start, days, width, pxPerDay, columns, top, shades, todayX, rows } where
+ * Returns { start, days, width, pxPerDay, rowHeight, columns, top, shades, todayX, rows } where
  * rows are { type: 'group' | 'bar' | 'lanes', key, group, label, height, collapsed, bars }
  * and each row bar is the source bar plus { s, e, x, w, lane, src }. An axis label
  * that does not fit its cell is empty.
@@ -286,7 +288,50 @@ export function layout(bars, window, scale) {
         }
     }
 
-    return { start, days, width, pxPerDay: ppd, columns, top, shades, todayX, rows }
+    return { start, days, width, pxPerDay: ppd, rowHeight, columns, top, shades, todayX, rows }
+}
+
+/**
+ * The dependency arrows of a laid-out chart (see Gantt::dependencies()): one path per
+ * (predecessor, successor) pair whose both bars are on the chart, from the predecessor's
+ * end to the successor's start, finish-to-start. Pure, like layout(). `carried` is a bar
+ * drawn over another row while it is dragged there ({ id, dy }): its arrows follow.
+ *
+ * Returns [{ key, d, late }], `late` when the successor starts before its predecessor ends.
+ */
+export function arrows(view, carried = null) {
+    const rowHeight = view.rowHeight ?? 36
+    const at = new Map()
+    let y = 0
+    for (const row of view.rows) {
+        for (const bar of row.bars) {
+            const inner = (row.type === 'lanes' ? rowHeight : row.height) - 8
+            at.set(String(bar.id), { bar, y: y + 4 + (bar.lane || 0) * rowHeight + inner / 2 })
+        }
+        y += row.height
+    }
+
+    const out = []
+    for (const { bar, y: y2 } of at.values()) {
+        for (const dep of bar.deps || []) {
+            const from = at.get(String(dep))
+            if (! from || from.bar === bar) continue
+            const shift = (b) => carried && String(b.id) === String(carried.id) ? carried.dy : 0
+            const x1 = from.bar.x + from.bar.w
+            const y1 = from.y + shift(from.bar)
+            const x2 = bar.x
+            const yb = y2 + shift(bar)
+            const tip = 'm-6,-4 l6,4 l-6,4'
+            // Room for the elbow: straight through when the successor starts after the
+            // predecessor ends, otherwise out, around through the gap between the rows, and in.
+            const d = x2 - x1 >= ARROW_GAP * 2
+                ? `M${x1},${y1} h${ARROW_GAP} V${yb} H${x2} ${tip}`
+                : `M${x1},${y1} h${ARROW_GAP} V${(y1 + yb) / 2} H${x2 - ARROW_GAP} V${yb} H${x2} ${tip}`
+            out.push({ key: `${dep}>${bar.id}`, d, late: bar.s < from.bar.e })
+        }
+    }
+
+    return out
 }
 
 /** Stack overlapping bars into lanes (greedy, by start); sets bar.lane and returns the lane count. */
@@ -451,6 +496,16 @@ export default function packstubGantt(config) {
 
         get visibleColumns() {
             return this.inView(this.view.columns)
+        },
+
+        /** The dependency arrows, following a bar in the air (its x, or the row it is carried to). */
+        get arrowPaths() {
+            const p = this.pointer
+            return arrows(this.view, p && p.dy ? { id: p.bar.id, dy: p.dy } : null)
+        },
+
+        get bodyHeight() {
+            return this.view.rows.reduce((h, row) => h + row.height, 0)
         },
 
         get visibleTop() {
