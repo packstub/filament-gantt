@@ -12,9 +12,10 @@ A Gantt chart and resource timeline for Filament v4 (4.13+) and v5. Any Eloquent
 
 | Feature | What it means for you |
 | --- | --- |
-| **Drag to move, drag an edge to resize** | The bar moves at once, snapped to the day or the hour, and the server is asked afterwards. Refused? It slides back with the reason. The chart scrolls when a bar nears its edge; on touch, hold a bar to pick it up. |
-| **Keyboard too** | Arrow keys move a focused bar, Shift or Alt with an arrow resizes it, announced to screen readers: dragging is never the only way. |
-| **Rules on the server** | Who may move (the model policy, the resource's `canEdit()`), `movable()`, `resizable()`, min and max durations, a locked past and your own `canMove()` closure, all re-checked in `Gantt::move()`. |
+| **Drag to move, drag an edge to resize, drag to another row** | The bar moves at once, snapped to the day or the hour, and the server is asked afterwards. Refused? It slides back with the reason. Dragged up or down, it lands in another group: a booking in another room, a task on another person. The chart scrolls when a bar nears its edge; on touch, hold a bar to pick it up. |
+| **Keyboard too** | Arrow keys move a focused bar, ↑/↓ carry it to another row, Shift or Alt with an arrow resizes it, announced to screen readers: dragging is never the only way. |
+| **Rules on the server** | Who may move (the model policy, the resource's `canEdit()`), `movable()`, `resizable()`, `regroupable()`, min and max durations, a locked past and your own `canMove()`/`canRegroup()` closures, all re-checked in `Gantt::move()`. |
+| **Dependencies** | `dependencies('depends_on')` draws finish-to-start arrows between bars, dashed where a successor starts before its predecessor ends: drawn, never enforced. |
 | **Groups and swimlanes** | Rows by project, assignee, room or machine, collapsible with a count; or the compact resource-timeline layout where a room's bookings share one row. |
 | **Filament actions** | Click a bar to edit it in a modal, right-click for more, click an empty spot to create a record on that date. Each bar offers only the actions the user may run on its record. |
 | **Five scales** | Hour, day, week, month and year, a two-row axis, a today line, weekend shading, a date-range picker and filters, all kept in the URL. |
