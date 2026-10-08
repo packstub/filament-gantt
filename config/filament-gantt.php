@@ -36,6 +36,7 @@ return [
         'day' => 48,
         'week' => 18,
         'month' => 5,
+        'year' => 1.5,
     ],
 
     /*

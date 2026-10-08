@@ -215,8 +215,8 @@ it('reads an enum label as its label', function () {
 /* ------------------------------------------------------------------ zoom levels */
 
 it('offers the hour zoom to a chart that snaps to hours, and keeps the opening scale among those offered', function () {
-    expect(gantt()->getScales())->toBe([Scale::Day, Scale::Week, Scale::Month])
-        ->and(shifts()->getScales())->toBe([Scale::Hour, Scale::Day, Scale::Week, Scale::Month])
+    expect(gantt()->getScales())->toBe([Scale::Day, Scale::Week, Scale::Month, Scale::Year])
+        ->and(shifts()->getScales())->toBe([Scale::Hour, Scale::Day, Scale::Week, Scale::Month, Scale::Year])
         ->and(gantt()->scales(['week', 'month'])->scale('day')->getScale())->toBe(Scale::Week)
         ->and(gantt()->scales([Scale::Hour, 'day'])->getScales())->toBe([Scale::Hour, Scale::Day]);
 });

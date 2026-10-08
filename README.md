@@ -22,7 +22,7 @@ A Gantt chart and resource timeline for Filament: any Eloquent query with a star
 - **[Groups and swimlanes](#groups-and-resource-timelines)**: rows grouped by a column or a relation, collapsible, with a count; or the compact layout where a room's bookings share one row and overlapping ones stack.
 - **[Milestones, progress and dependencies](#defining-bars)**: a null end is a diamond; `progress('progress')` fills the bar; `dependencies('depends_on')` draws finish-to-start arrows between bars, dashed where a successor starts too early (drawn, never enforced).
 - **[Filament actions on bars](#actions)**: click a bar to edit it in a modal or slide-over, right-click for more; click an empty spot to create a record with that date and group already filled in. Each bar offers only the actions the user may run on its record.
-- **[Four scales, today line, weekends](#the-time-window)**: hour, day, week and month, a two-row axis, a date-range picker and select or date-range filters, all kept in the URL.
+- **[Five scales, today line, weekends](#the-time-window)**: hour, day, week, month and year, a two-row axis, a date-range picker and select or date-range filters, all kept in the URL.
 - **[Resource page, standalone page or dashboard widget](#installation)**: `GanttResourcePage` (`/tasks/gantt`, follows the resource policy), `GanttPage`, and `GanttWidget` (read-only by default).
 - **Events**: a `BarMoved` Laravel event, an `afterMove()` hook, a browser event, `refreshOn([...])` for Livewire events and optional polling.
 - **No Gantt library, no build step**: one hand-written ES module and a stylesheet on your panel's palette. **Dark mode**, **RTL** and **translatable** (English, Romanian, Russian, German). MIT.
@@ -128,7 +128,7 @@ Read more: [Moving and resizing](https://packstub.dev/docs/filament-gantt/moves)
 
 ## The time window
 
-Hour, day, week and month scales, a today line, weekend shading, a date-range picker and filters in the toolbar. The window defaults to a week before the earliest bar and two weeks after the latest (around today for a history longer than two years), or set it with `startDate()`/`endDate()`. Filters are applied on the server:
+Hour, day, week, month and year scales, a today line, weekend shading, a date-range picker and filters in the toolbar. The window defaults to a week before the earliest bar and two weeks after the latest (around today for a history longer than two years), or set it with `startDate()`/`endDate()`. Filters are applied on the server:
 
 ```php
 ->scale(Scale::Week)

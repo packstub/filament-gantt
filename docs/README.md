@@ -17,7 +17,7 @@ A Gantt chart and resource timeline for Filament v4 (4.13+) and v5. Any Eloquent
 | **Rules on the server** | Who may move (the model policy, the resource's `canEdit()`), `movable()`, `resizable()`, min and max durations, a locked past and your own `canMove()` closure, all re-checked in `Gantt::move()`. |
 | **Groups and swimlanes** | Rows by project, assignee, room or machine, collapsible with a count; or the compact resource-timeline layout where a room's bookings share one row. |
 | **Filament actions** | Click a bar to edit it in a modal, right-click for more, click an empty spot to create a record on that date. Each bar offers only the actions the user may run on its record. |
-| **Four scales** | Hour, day, week and month, a two-row axis, a today line, weekend shading, a date-range picker and filters, all kept in the URL. |
+| **Five scales** | Hour, day, week, month and year, a two-row axis, a today line, weekend shading, a date-range picker and filters, all kept in the URL. |
 | **Page, resource page or widget** | `GanttPage`, `GanttResourcePage` (follows the resource policy) and a read-only `GanttWidget` for the dashboard. |
 | **Light** | No Gantt library, no build step: one hand-written script and a stylesheet on your panel's palette. Dark mode, RTL, four languages. |
 

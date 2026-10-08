@@ -14,6 +14,9 @@ enum Scale: string
 
     case Month = 'month';
 
+    /** Months over quarters, about a year and a half on a wide screen: roadmaps and plans. */
+    case Year = 'year';
+
     public static function fromName(?string $value, self $default = self::Week): self
     {
         return $value === null ? $default : (self::tryFrom(strtolower($value)) ?? $default);

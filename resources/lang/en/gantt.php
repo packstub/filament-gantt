@@ -5,6 +5,7 @@ return [
     'day' => 'Day',
     'week' => 'Week',
     'month' => 'Month',
+    'year' => 'Year',
     'today' => 'Today',
     'from' => 'From',
     'until' => 'Until',

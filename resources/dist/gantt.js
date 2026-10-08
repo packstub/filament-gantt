@@ -149,7 +149,7 @@ function fits(label, width) {
  *   compact               one row per group, overlapping bars stacked in lanes
  *   collapsed             { [group key]: bool } overriding the groups' own flag
  * }
- * scale:  'hour' | 'day' | 'week' | 'month'
+ * scale:  'hour' | 'day' | 'week' | 'month' | 'year'
  *
  * Returns { start, days, width, pxPerDay, rowHeight, columns, top, shades, todayX, rows } where
  * rows are { type: 'group' | 'bar' | 'lanes', key, group, label, height, collapsed, bars }
@@ -217,6 +217,14 @@ export function layout(bars, window, scale) {
             i += len
         }
         top = months.map((m) => ({ key: m.key, x: m.x, w: m.w, label: monthLabel(m) }))
+    } else if (scale === 'year') {
+        // Months over quarters: a plan of a year or two in one screen.
+        columns = months.map((m) => ({ key: m.key, x: m.x, w: m.w, label: monthName(m.ts), weekend: false, today: false }))
+        for (let d = new Date(start); d.getTime() < end; d = new Date(Date.UTC(d.getUTCFullYear(), Math.floor(d.getUTCMonth() / 3) * 3 + 3, 1))) {
+            const from = Math.max(d.getTime(), start)
+            const to = Math.min(Date.UTC(d.getUTCFullYear(), Math.floor(d.getUTCMonth() / 3) * 3 + 3, 1), end)
+            top.push({ key: 'q' + from, x: x(from), w: x(to) - x(from), label: `Q${Math.floor(d.getUTCMonth() / 3) + 1} ${d.getUTCFullYear()}`, short: `Q${Math.floor(d.getUTCMonth() / 3) + 1}` })
+        }
     } else {
         columns = months.map((m) => ({ key: m.key, x: m.x, w: m.w, label: monthName(m.ts), weekend: false, today: false }))
         top = years
@@ -225,7 +233,7 @@ export function layout(bars, window, scale) {
     columns = columns.map(cell)
     top = top.map(cell)
 
-    if (scale !== 'month') {
+    if (scale !== 'month' && scale !== 'year') {
         for (let i = 0; i < days; i++) {
             const ts = start + i * DAY
             if (weekend.has(isoWeekday(ts))) {
@@ -372,7 +380,7 @@ export default function packstubGantt(config) {
         readOnly: config.readOnly,
         compact: config.compact,
         height: config.height,
-        scales: config.scales || ['day', 'week', 'month'],
+        scales: config.scales || ['day', 'week', 'month', 'year'],
         t: config.i18n,
         scale: config.scale,
         active: {},

@@ -10,11 +10,12 @@ The toolbar switches between the zoom levels; `scale()` picks the one the chart 
 | `Scale::Day` | 48 | months over weekdays, weekends shaded |
 | `Scale::Week` | 18 | months over weeks starting on `firstDayOfWeek()`, weekends shaded |
 | `Scale::Month` | 5 | years over months |
+| `Scale::Year` | 1.5 | quarters over months: a year or two in one screen, for roadmaps |
 
 ```php
 use Packstub\Gantt\Enums\Scale;
 
-->scales([Scale::Hour, Scale::Day, Scale::Week])   // default: day, week, month; hour first when the chart snaps to hours
+->scales([Scale::Hour, Scale::Day, Scale::Week])   // default: day, week, month, year; hour first when the chart snaps to hours
 ->scale(Scale::Hour)
 ```
 

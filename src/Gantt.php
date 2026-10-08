@@ -697,8 +697,8 @@ class Gantt
         }
 
         return $this->unit === Unit::Hour
-            ? [Scale::Hour, Scale::Day, Scale::Week, Scale::Month]
-            : [Scale::Day, Scale::Week, Scale::Month];
+            ? [Scale::Hour, Scale::Day, Scale::Week, Scale::Month, Scale::Year]
+            : [Scale::Day, Scale::Week, Scale::Month, Scale::Year];
     }
 
     public function getUnit(): Unit

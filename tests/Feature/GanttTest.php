@@ -628,6 +628,10 @@ it('reads scale, unit, first day of week and poll settings', function () {
 
     expect($gantt->getScale())->toBe(Scale::Week)
         ->and($gantt->scale('month')->getScale())->toBe(Scale::Month)
+        ->and($gantt->scale('year')->getScale())->toBe(Scale::Year)
+        ->and(gantt()->getScales())->toBe([Scale::Day, Scale::Week, Scale::Month, Scale::Year])
+        ->and(gantt()->snapTo('hour')->getScales())->toBe([Scale::Hour, Scale::Day, Scale::Week, Scale::Month, Scale::Year])
+        ->and(gantt()->scales([Scale::Month])->getScales())->toBe([Scale::Month])
         ->and($gantt->scale('nope')->getScale())->toBe(Scale::Week)
         ->and($gantt->getUnit())->toBe(Unit::Day)
         ->and($gantt->snapTo('hour')->getUnit())->toBe(Unit::Hour)
