@@ -900,7 +900,8 @@ it('searches a searchable select on the server, over the labels or through a clo
         ->and($plain->getSearchResults(''))->toBe([$acme->id => 'Acme', $beta->id => 'Beta'])
         ->and($plain->toArray())->toMatchArray(['searchable' => true, 'options' => [['value' => (string) $acme->id, 'label' => 'Acme'], ['value' => (string) $beta->id, 'label' => 'Beta']]])
         ->and($closure->toArray()['options'])->toBe([])
-        ->and($closure->getSearchResults('a'))->toBe([$acme->id => 'Acme'])
+        // 'e' is in both names in every case: the limit keeps the first (LIKE is case-sensitive on PostgreSQL)
+        ->and($closure->getSearchResults('e'))->toBe([$acme->id => 'Acme'])
         ->and($closure->getOptionLabel((string) $beta->id))->toBe('Beta')
         ->and($closure->getOptionLabel('999'))->toBeNull()
         ->and(Filter::select('project_id')->options([1 => 'One'])->toArray())->toMatchArray(['searchable' => false]);
