@@ -12,6 +12,8 @@ Read-only charts (`->readOnly()`, the widget's default) show no handles, and the
 
 ### To another row
 
+![A bar carried onto another project's rows: the target group lit, the hint naming it](https://raw.githubusercontent.com/packstub/art/main/filament-gantt/docs/row-drag.png)
+
 On a grouped chart a bar dragged up or down is carried to another group: the rows of the group under the pointer light up, the hint names it, and on release the bar lands there (and on its new dates, when it moved sideways too). The server writes the group column, or the `BelongsTo`'s foreign key, in the same transaction as the dates. Only a row that is on the chart is a target: a group listed by `groups()`, a group that has a bar in the chart's query, or the ungrouped row when there is one; a related record that merely exists is refused. Dragging between rows is what a resource timeline is for: a booking to another room, a job to another machine, a task to another person.
 
 ```php
@@ -39,6 +41,8 @@ A bar is a focusable button. On a focused bar:
 | Escape | Before the move is sent: put the bar back. |
 
 The bar moves at once; keys pressed in a row become one move, sent once they rest, through the same server checks as a drag. The new dates, or the reason a move was refused, are announced to screen readers, and the bar's accessible name ends with these keys. This is the keyboard and single-pointer alternative to dragging that WCAG 2.2 asks for (2.5.7 Dragging Movements).
+
+![Dragging a bar: the date hint under the pointer, the dependency arrows following it](https://raw.githubusercontent.com/packstub/art/main/filament-gantt/docs/drag.png)
 
 ## Snapping
 

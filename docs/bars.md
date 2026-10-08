@@ -64,6 +64,8 @@ Bars are plain data drawn in the browser, so a chart of a few hundred bars is a 
 
 ## Dependencies
 
+![Finish-to-start arrows between tasks, dashed where a task starts before its predecessor ends](https://raw.githubusercontent.com/packstub/art/main/filament-gantt/docs/gantt.png)
+
 Tell the chart which bars a bar waits for and it draws an arrow from each predecessor's end to the bar's start (finish-to-start):
 
 ```php

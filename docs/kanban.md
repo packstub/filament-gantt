@@ -2,6 +2,8 @@
 
 [Filament Kanban](https://packstub.dev/docs/filament-kanban) and Filament Gantt share one design: the browser owns the view, Livewire answers renderless calls, and every rule is re-checked on the server. They also share the same inputs, so the same resource can offer a board for the flow and a timeline for the schedule.
 
+![The same tasks on a Kanban board, one page next to the timeline](https://raw.githubusercontent.com/packstub/art/main/filament-gantt/docs/kanban.png)
+
 ## Two pages on one resource
 
 ```php

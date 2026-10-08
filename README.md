@@ -77,7 +77,7 @@ Read more: [Installation](https://packstub.dev/docs/filament-gantt/installation)
 
 ## Defining bars
 
-![TODO screenshot: a project timeline at week scale with groups, a milestone and progress fills](https://raw.githubusercontent.com/packstub/art/main/filament-gantt/docs/gantt.png)
+![A project timeline at week scale: two project groups, progress fills, dependency arrows and the today line](https://raw.githubusercontent.com/packstub/art/main/filament-gantt/docs/gantt.png)
 
 `start()` and `end()` name the attributes; `label()`, `color()` and `progress()` take an attribute name or a closure. Whole-day records (a `date` cast) include their end day in the bar; datetime records end at the moment they say. A null end is a milestone. For anything else, shape the bar in one closure:
 
@@ -102,11 +102,15 @@ Group rows by a column or a `BelongsTo` relation; each group is a collapsible ro
 ->compact()
 ```
 
+A bar dragged up or down lands in the group under the pointer (a booking in another room), within `regroupable()` and `canRegroup()`:
+
+![A bar carried onto another project's rows: the target group lit, the hint naming it](https://raw.githubusercontent.com/packstub/art/main/filament-gantt/docs/row-drag.png)
+
 Read more: [Groups](https://packstub.dev/docs/filament-gantt/groups).
 
 ## Moving and resizing
 
-![TODO screenshot: dragging a bar, the date hint under the pointer](https://raw.githubusercontent.com/packstub/art/main/filament-gantt/docs/drag.png)
+![Dragging a bar: the date hint under the pointer, the arrows following it](https://raw.githubusercontent.com/packstub/art/main/filament-gantt/docs/drag.png)
 
 A drag changes the bar in the browser and sends `ganttMove(id, start, end, group)`, a renderless Livewire call (the group only when the bar was dragged to another row). The server loads the record through the chart's `query()`, snaps the dates, checks every rule and saves; the bar flashes when it is saved or slides back with the reason when it is refused.
 
@@ -138,11 +142,15 @@ Hour, day, week, month and year scales, a today line, weekend shading, a date-ra
 ])
 ```
 
+The year scale fits a plan of two years in one screen, quarters over months:
+
+![The year scale: quarters over months](https://raw.githubusercontent.com/packstub/art/main/filament-gantt/docs/year.png)
+
 Read more: [Filters and the time window](https://packstub.dev/docs/filament-gantt/filters).
 
 ## Actions
 
-![TODO screenshot: editing a task in a slide-over opened by clicking its bar](https://raw.githubusercontent.com/packstub/art/main/filament-gantt/docs/edit.png)
+![Editing a task in a modal opened by clicking its bar](https://raw.githubusercontent.com/packstub/art/main/filament-gantt/docs/edit.png)
 
 Your Filament actions work on bars: `barAction(EditAction::make()->schema([...]))` opens on click, `barActions([...])` fills the right-click menu, and `createAction(CreateAction::make()->schema([...]))` opens the create form with the clicked spot's start, end and group filled in. Records are resolved through the chart's query, so an action can never reach a record the user cannot see, and each bar offers only the actions the user may run on its record (on a resource page, the resource's policy).
 
@@ -157,6 +165,8 @@ Read more: [Widget and read-only mode](https://packstub.dev/docs/filament-gantt/
 ## Kanban + Gantt on the same records
 
 Both plugins take the same `query()` and the same Filament actions, so a `TaskBoard` and a `TasksGantt` page can sit next to each other in one resource, one for the flow, one for the schedule. A `BarMoved` listener can update the status and a `CardMoved` listener the dates.
+
+![The same tasks on a Kanban board](https://raw.githubusercontent.com/packstub/art/main/filament-gantt/docs/kanban.png)
 
 Read more: [Kanban + Gantt](https://packstub.dev/docs/filament-gantt/kanban).
 
@@ -176,7 +186,7 @@ $gantt
 
 `config/filament-gantt.php` holds the defaults: scale, first day of week, weekend days, row height, pixels per day per scale, window padding and bounds, `max_bars`, polling and the date formats of tooltips (the locale's by default).
 
-![TODO screenshot: the chart in dark mode](https://raw.githubusercontent.com/packstub/art/main/filament-gantt/docs/dark.png)
+![The chart in dark mode](https://raw.githubusercontent.com/packstub/art/main/filament-gantt/docs/dark.png)
 
 The stylesheet is plain CSS on Filament's colour variables and follows dark mode; it uses logical properties, so it reads right-to-left with the panel. Restyle it with the `--ps-gantt-*` variables on `.ps-gantt` from your theme.
 

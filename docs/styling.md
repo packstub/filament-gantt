@@ -30,6 +30,8 @@ Each bar carries its colour as `--ps-bar`; the stylesheet draws a tinted backgro
 
 ## Dark mode
 
+![The chart in dark mode](https://raw.githubusercontent.com/packstub/art/main/filament-gantt/docs/dark.png)
+
 Handled: the variables are redefined under `.dark .ps-gantt`. Override them there for your own dark palette.
 
 ## Right-to-left
