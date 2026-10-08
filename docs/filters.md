@@ -65,7 +65,7 @@ use Packstub\Gantt\Filter;
 
 Filters live in the URL too (`?f.assignee_id=3&f.starts_on.from=2026-10-01`).
 
-The toolbar is built from Filament's own Blade components (tabs, button, input wrapper with a native `<select>` or `<input type="date">`), so it follows the panel's theme, but it is not a Filament form: the chart is drawn by the browser and a filter change is a renderless call, so nothing on the page re-renders. A form-based filter (`Filter::form()`) is on the roadmap; until then, put a real Filament form in the page's header actions and dispatch `packstub-gantt-refresh` from it.
+The toolbar is built from Filament's own Blade components (tabs, button, input wrapper, Filament's date picker, a native `<select>`), so it follows the panel's theme, but it is not a Filament form: the chart is drawn by the browser and a filter change is a renderless call, so nothing on the page re-renders. A form-based filter (`Filter::form()`) is on the roadmap; until then, put a real Filament form in the page's header actions and dispatch `packstub-gantt-refresh` from it.
 
 ## Refreshing
 

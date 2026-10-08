@@ -589,3 +589,24 @@ test('a keyboard move of row and dates keeps both on the source bar while pendin
     assert.equal(rowBar(c, '1').s, Date.UTC(2026, 9, 6))
     assert.equal(rowBar(c, '1').group, '2')
 }))
+
+/* ------------------------------------------------------------------ the date pickers */
+
+test('a day picked in the date picker sets the window edge as a date and loads it; a filter pick refreshes', () => {
+    const c = chart({ filters: [{ name: 'starts_on', type: 'dateRange' }], bars: [] })
+    c.init = () => {}
+    c.active = { starts_on: { from: '', until: '' } }
+
+    c.pickRange('start', '2026-10-05 00:00:00')
+    assert.deepEqual(c.range, { start: '2026-10-05', end: '2026-10-31' })
+    assert.equal(c.userRange, true)
+    assert.deepEqual(c.wire.refreshes.at(-1), [{}, '2026-10-05', '2026-10-31', false])
+
+    c.pickRange('end', null)
+    assert.equal(c.range.end, '')
+
+    c.pickFilter('starts_on', 'from', '2026-10-07 00:00:00')
+    c.pickFilter('starts_on', 'until', null)
+    assert.deepEqual(c.active.starts_on, { from: '2026-10-07', until: '' })
+    assert.equal(c.wire.refreshes.at(-1)[0].starts_on.from, '2026-10-07')
+})
