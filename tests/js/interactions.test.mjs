@@ -692,10 +692,10 @@ test('Fit loads the span of the filtered bars and draws it at the width of the c
 
     await c.fitAll()
     assert.deepEqual(c.wire.spans, [{}])
-    assert.deepEqual(c.period, { start: '2026-07-01', end: '2026-12-31' })
-    // 184 days in 900px: 4.9px a day, the month level at nearly 1×
+    // 184 days plus 8% of room after the last bar (15 days): 199 days in 900px, the month level at nearly 1×
+    assert.deepEqual(c.period, { start: '2026-07-01', end: '2027-01-15' })
     assert.equal(c.scale, 'month')
-    assert.ok(Math.abs(c.view.pxPerDay - 900 / 184) < 0.01, String(c.view.pxPerDay))
+    assert.ok(Math.abs(c.view.pxPerDay - 900 / 199) < 0.01, String(c.view.pxPerDay))
     assert.equal(c.userRange, true, 'not widened afterwards')
 
     // nothing to fit: nothing changes

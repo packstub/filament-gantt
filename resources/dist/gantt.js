@@ -865,7 +865,9 @@ export default function packstubGantt(config) {
         fitAll() {
             return this.$wire.ganttSpan(this.activeFilters()).then((span) => {
                 if (! span?.start) return
-                this.range = { start: span.start, end: span.end }
+                // A little room after the last bar, so a label drawn beside it is not cut
+                const days = Math.max(1, Math.round((parse(span.end) - parse(span.start)) / DAY) + 1)
+                this.range = { start: span.start, end: format(parse(span.end) + Math.ceil(days * 0.08) * DAY, false) }
 
                 // As a typed range: kept as asked (never widened), and a span the server cut short says so.
                 return this.applyWindow(() => {
