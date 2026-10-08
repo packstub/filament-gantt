@@ -91,7 +91,7 @@ Every rule takes a boolean or a closure that receives the record, and is checked
 | `resizable()` | A change of duration, from either edge. Milestones are never resizable. |
 | `regroupable()` | A change of row (group). A row that is not on the chart is refused whatever this says. |
 | `minDuration()` / `maxDuration()` | A resize that makes the bar shorter or longer than that. The browser knows the bounds too and stops the handle there. |
-| `lockedBefore($moment)` | A start moved to before the moment, a start that was already before it (the past stays as it happened), or an end moved to before it. A bar that started in the past may still change its end. The message names the moment: a date for a midnight lock (`today()`), date and time otherwise (`now()`). |
+| `lockedBefore($moment)` | A start moved to before the moment, a start that was already before it (the past stays as it happened), an end moved to before it, or a change of row for a bar that ended before it. A bar that started in the past may still change its end, and its row. The message names the moment: a date for a midnight lock (`today()`), date and time otherwise (`now()`). |
 | `canMove()` | Whatever the closure says: `false` refuses with a generic message, a string refuses with that message. Its last two arguments are the new and the previous group key (null when ungrouped, or not grouped). |
 | `canRegroup()` | The same, for a change of row only, with the record, the new and the previous group key. |
 

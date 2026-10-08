@@ -841,7 +841,9 @@ export default function packstubGantt(config) {
             this.flushNudge()
             // A bar too narrow for its handles is moved, whatever part of it was grabbed.
             const edge = this.narrow(bar) ? null : (event.target.dataset?.edge || null)
-            const allowed = edge ? bar.resizable : bar.movable
+            // A whole bar on a grouped chart may be carried to another row, even one whose dates are fixed.
+            const rows = ! edge && !! bar.regroupable && !! config.grouped
+            const allowed = edge ? bar.resizable : (bar.movable || rows)
             const touch = event.pointerType === 'touch' || event.pointerType === 'pen'
 
             this.menu = null
@@ -849,8 +851,7 @@ export default function packstubGantt(config) {
                 id: event.pointerId, bar, edge, allowed, touch, picked: false, moved: false, press: null,
                 x0: event.clientX, y0: event.clientY, cx: event.clientX, cy: event.clientY,
                 s: bar.s, e: bar.e, sl0: this.$refs.scroll?.scrollLeft || 0,
-                // A whole bar on a grouped chart may be carried to another row.
-                rows: ! edge && !! bar.regroupable && !! config.grouped, g0: String(bar.group ?? ''), g: String(bar.group ?? ''), dy: 0,
+                rows, g0: String(bar.group ?? ''), g: String(bar.group ?? ''), dy: 0,
                 dir: this.rtl() ? -1 : 1, el: event.currentTarget,
             }
             // From here on the reactive copy: it is what this.pointer returns (an
@@ -905,7 +906,8 @@ export default function packstubGantt(config) {
             const dx = (sx + scrolled) * p.dir
             const unit = this.unitFor(p.bar)
             const { min, max } = this.limitsFor(p.bar)
-            const delta = Math.round(dx / this.view.pxPerDay * DAY / unit) * unit
+            // Fixed dates: the bar only changes rows.
+            const delta = p.bar.movable ? Math.round(dx / this.view.pxPerDay * DAY / unit) * unit : 0
             const bar = p.bar
 
             if (p.edge === 'start') {
@@ -1065,6 +1067,11 @@ export default function packstubGantt(config) {
                 const next = keys[keys.indexOf(k.g) + (event.key === 'ArrowDown' ? 1 : -1)]
                 if (next === undefined) return
                 k.g = next
+                // A folded group is unfolded: the bar stays in view, and keeps the focus.
+                if (this.collapsed[next]) {
+                    this.collapsed[next] = false
+                    this.persist()
+                }
                 this.regroup(bar.src, next)
             } else {
                 const forward = (event.key === 'ArrowRight') !== this.rtl()
@@ -1116,7 +1123,9 @@ export default function packstubGantt(config) {
             this.keyboard = null
             this.hint = null
 
-            const bar = this.rowBar(k.id)
+            // The row bar, or the source bar when its row is not drawn (a group folded meanwhile).
+            const src = this.bars.find((b) => b.id === k.id)
+            const bar = this.rowBar(k.id) ?? (src && { ...src, src, s: k.s, e: k.e })
             if (! bar || (k.s === k.s0 && k.e === k.e0 && k.g === k.g0)) return
             bar.s = k.s
             bar.e = k.e
@@ -1128,13 +1137,13 @@ export default function packstubGantt(config) {
             const src = bar.src
             src._pending = true
             this.pending++
-            if (group !== null && String(src.group ?? '') !== group) {
-                // The chart is rebuilt from the source bars for the new row: the new
-                // dates go on the source too, or the bar would jump back in time until
-                // the server answers.
+            if (group !== null) {
+                // The chart is rebuilt from the source bars for the new row (now, or on
+                // a rebuild while the move is pending): the new dates go on the source
+                // too, or the bar would jump back in time until the server answers.
                 src.start = format(bar.s)
                 src.end = format(bar.e)
-                this.regroup(src, group)
+                if (String(src.group ?? '') !== group) this.regroup(src, group)
             }
 
             const undo = (message) => {

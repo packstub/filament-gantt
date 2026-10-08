@@ -535,3 +535,57 @@ test('the arrows follow a bar while it is dragged, and the one carried to anothe
     assert.equal(c.arrowD(false), 'M384,90 H392 V126 H432 m-6,-4 l6,4 l-6,4')
     assert.equal(c.arrowD(true), '')
 })
+
+test('↑/↓ into a folded group unfolds it, keeps the focus and sends the move', () => fakeTimers((timers) => {
+    const c = groupedChart({ groups: [{ key: '1', label: 'Acme', color: null, collapsed: false, count: 1 }, { key: '2', label: 'Beta', color: null, collapsed: true, count: 1 }] })
+    c.persist = () => {}
+    c.init = () => {}
+    c.collapsed = { 1: false, 2: true }
+    c.rebuild()
+    assert.equal(rowBar(c, '2'), null, 'Beta is folded')
+
+    key(c, rowBar(c, '1'), 'ArrowDown')
+    assert.equal(c.collapsed[2], false)
+    assert.equal(c.view.rows.find((r) => r.key === 'b:1').group.key, '2')
+    timers.filter((t) => t.fn).at(-1).fn()
+    assert.deepEqual(c.wire.moves, [['1', '2026-10-05 00:00', '2026-10-08 00:00', '2']])
+
+    // folded again while the keys rest: the move is still sent, from the source bar
+    const d = groupedChart()
+    d.persist = () => {}
+    key(d, rowBar(d, '1'), 'ArrowDown')
+    d.collapsed[2] = true
+    d.rebuild()
+    assert.equal(rowBar(d, '1'), null)
+    timers.filter((t) => t.fn).at(-1).fn()
+    assert.deepEqual(d.wire.moves, [['1', '2026-10-05 00:00', '2026-10-08 00:00', '2']])
+}))
+
+test('a bar with fixed dates can still be carried to another row with the pointer: only its row changes', () => {
+    const c = groupedChart({ bars: [bar({ id: '1', group: '1', movable: false, regroupable: true }), bar({ id: '2', group: '2', movable: false, regroupable: true })] })
+    const p = press(c, rowBar(c, '1'), { y: 50 })
+    c.drag({ pointerId: 7, clientX: 196, clientY: 125 })
+    assert.equal(c.target, '2')
+    assert.equal(rowBar(c, '1').s, Date.UTC(2026, 9, 5), 'the dates stay')
+    p.up(96)
+    assert.deepEqual(c.wire.moves, [['1', '2026-10-05 00:00', '2026-10-08 00:00', '2']])
+
+    // released on its own row: nothing to send, and no click either
+    const q = press(c, rowBar(c, '2'), { y: 125 })
+    c.drag({ pointerId: 7, clientX: 196, clientY: 125 })
+    q.up(96)
+    assert.equal(c.wire.moves.length, 1)
+    assert.deepEqual(c.wire.mounted, [])
+})
+
+test('a keyboard move of row and dates keeps both on the source bar while pending, so a rebuild mid-flight changes nothing', () => fakeTimers((timers) => {
+    const c = groupedChart()
+    key(c, rowBar(c, '1'), 'ArrowRight')
+    key(c, rowBar(c, '1'), 'ArrowDown')
+    timers.filter((t) => t.fn).at(-1).fn()
+    assert.deepEqual(c.wire.moves, [['1', '2026-10-06 00:00', '2026-10-09 00:00', '2']])
+
+    c.rebuild()
+    assert.equal(rowBar(c, '1').s, Date.UTC(2026, 9, 6))
+    assert.equal(rowBar(c, '1').group, '2')
+}))
