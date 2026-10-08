@@ -10,6 +10,7 @@ use Illuminate\Support\Str;
 use Livewire\Attributes\Locked;
 use Livewire\Attributes\Renderless;
 use Packstub\Gantt\Exceptions\MoveRejected;
+use Packstub\Gantt\Filter;
 use Packstub\Gantt\Gantt;
 
 /**
@@ -68,6 +69,48 @@ trait InteractsWithGantt
         }
 
         return $state;
+    }
+
+    /**
+     * The options of a select filter: its list, or the ones matching a search (a
+     * searchable filter's live search), as the browser's select expects them.
+     *
+     * @return list<array{value: string, label: string}>
+     */
+    #[Renderless]
+    public function ganttFilterOptions(string $name, ?string $search = null): array
+    {
+        $filter = $this->ganttFilter($name);
+
+        if ($filter === null || $filter->isDateRange()) {
+            return [];
+        }
+
+        $options = $search === null || $search === ''
+            ? array_slice($filter->getOptions(), 0, $filter->getOptionsLimit(), preserve_keys: true)
+            : $filter->getSearchResults($search);
+
+        return collect($options)->map(fn ($label, $value) => ['value' => (string) $value, 'label' => (string) $label])->values()->all();
+    }
+
+    /** The label of a select filter's value (one restored from the URL that the listed options do not hold). */
+    #[Renderless]
+    public function ganttFilterOptionLabel(string $name, ?string $value = null): ?string
+    {
+        $filter = $this->ganttFilter($name);
+
+        return $filter === null || $filter->isDateRange() || $value === null || $value === '' ? null : $filter->getOptionLabel($value);
+    }
+
+    protected function ganttFilter(string $name): ?Filter
+    {
+        foreach ($this->getGantt()->getFilters() as $filter) {
+            if ($filter->getName() === $name) {
+                return $filter;
+            }
+        }
+
+        return null;
     }
 
     /**

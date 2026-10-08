@@ -884,3 +884,29 @@ it('keeps the row of a bar that ended before the lock, and lets an ongoing one c
     expect(fn () => $gantt->move((string) $past->id, '2026-10-01 00:00', '2026-10-06 00:00', (string) $beta->id))->toThrow(MoveRejected::class)
         ->and($gantt->move((string) $ongoing->id, '2026-10-10 00:00', '2026-10-21 00:00', (string) $beta->id)['group'])->toBe((string) $beta->id);
 });
+
+it('searches a searchable select on the server, over the labels or through a closure, and takes any value it is given', function () {
+    $acme = project('Acme');
+    $beta = project('Beta');
+    task('A', '2026-10-05', '2026-10-06', ['project_id' => $acme->id]);
+    task('B', '2026-10-20', '2026-10-21', ['project_id' => $beta->id]);
+
+    $plain = Filter::select('project_id')->searchable()->options(fn () => Project::query()->pluck('name', 'id')->all());
+    $closure = Filter::select('project_id')->searchable()->preload(false)->optionsLimit(1)
+        ->getSearchResultsUsing(fn (string $search) => Project::query()->where('name', 'like', "%{$search}%")->pluck('name', 'id')->all())
+        ->getOptionLabelUsing(fn (string $value) => Project::query()->find($value)?->name);
+
+    expect($plain->getSearchResults('bet'))->toBe([$beta->id => 'Beta'])
+        ->and($plain->getSearchResults(''))->toBe([$acme->id => 'Acme', $beta->id => 'Beta'])
+        ->and($plain->toArray())->toMatchArray(['searchable' => true, 'options' => [['value' => (string) $acme->id, 'label' => 'Acme'], ['value' => (string) $beta->id, 'label' => 'Beta']]])
+        ->and($closure->toArray()['options'])->toBe([])
+        ->and($closure->getSearchResults('a'))->toBe([$acme->id => 'Acme'])
+        ->and($closure->getOptionLabel((string) $beta->id))->toBe('Beta')
+        ->and($closure->getOptionLabel('999'))->toBeNull()
+        ->and(Filter::select('project_id')->options([1 => 'One'])->toArray())->toMatchArray(['searchable' => false]);
+
+    // a searchable filter takes a value the preloaded list does not hold; a plain one still ignores it
+    $gantt = gantt()->filters([$closure]);
+    expect(array_column($gantt->getBars(['project_id' => (string) $beta->id]), 'label'))->toBe(['B'])
+        ->and(array_column(gantt()->filters([Filter::select('project_id')->options([$acme->id => 'Acme'])])->getBars(['project_id' => (string) $beta->id]), 'label'))->toBe(['A', 'B']);
+});

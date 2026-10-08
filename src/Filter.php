@@ -7,9 +7,10 @@ use Closure;
 use Illuminate\Database\Eloquent\Builder;
 
 /**
- * A filter in the chart's toolbar: a small select (`Filter::select()`, the default)
- * or a pair of date inputs (`Filter::dateRange()`). Applied on the server; values
- * the filter did not offer are ignored.
+ * A filter in the chart's toolbar: a select (`Filter::select()`, the default) or a
+ * pair of date pickers (`Filter::dateRange()`). Applied on the server; a select
+ * ignores values it did not offer, unless it is searchable (its values come from a
+ * search, so any key is a candidate: the query decides what it matches).
  */
 class Filter
 {
@@ -23,6 +24,16 @@ class Filter
     protected array|Closure $options = [];
 
     protected ?Closure $query = null;
+
+    protected bool|Closure $searchable = false;
+
+    protected bool $preload = true;
+
+    protected ?Closure $searchResults = null;
+
+    protected ?Closure $optionLabel = null;
+
+    protected int $optionsLimit = 50;
 
     final public function __construct(protected string $name, protected string $type = self::SELECT) {}
 
@@ -69,6 +80,97 @@ class Filter
         return $this;
     }
 
+    /**
+     * Let the user type to find an option (many users, many rooms). With preload()
+     * (the default) the options are sent with the chart and the search runs on the
+     * server through getSearchResultsUsing(), or over the options' labels; without
+     * preload nothing is listed until the user types.
+     */
+    public function searchable(bool|Closure $condition = true): static
+    {
+        $this->searchable = $condition;
+
+        return $this;
+    }
+
+    /** Whether a searchable select sends its options with the chart (default) or waits for a search. */
+    public function preload(bool $condition = true): static
+    {
+        $this->preload = $condition;
+
+        return $this;
+    }
+
+    /** `fn (string $search): array<string|int, string>`, the options matching a search; default: the options whose label contains it. */
+    public function getSearchResultsUsing(?Closure $callback): static
+    {
+        $this->searchResults = $callback;
+
+        return $this;
+    }
+
+    /** `fn (string $value): ?string`, the label of a value that is not among the listed options (one restored from the URL). */
+    public function getOptionLabelUsing(?Closure $callback): static
+    {
+        $this->optionLabel = $callback;
+
+        return $this;
+    }
+
+    /** How many options a list or a search shows at most (default 50). */
+    public function optionsLimit(int $limit): static
+    {
+        $this->optionsLimit = max(1, $limit);
+
+        return $this;
+    }
+
+    public function isSearchable(): bool
+    {
+        return (bool) ($this->searchable instanceof Closure ? app()->call($this->searchable) : $this->searchable);
+    }
+
+    public function isPreloaded(): bool
+    {
+        return $this->preload;
+    }
+
+    public function getOptionsLimit(): int
+    {
+        return $this->optionsLimit;
+    }
+
+    /**
+     * The options matching what the user typed, at most optionsLimit() of them.
+     *
+     * @return array<string|int, string>
+     */
+    public function getSearchResults(string $search): array
+    {
+        if ($this->searchResults) {
+            $results = ($this->searchResults)($search);
+        } else {
+            $needle = mb_strtolower(trim($search));
+            $results = array_filter($this->getOptions(), fn ($label) => $needle === '' || str_contains(mb_strtolower((string) $label), $needle));
+        }
+
+        return array_slice($results, 0, $this->optionsLimit, preserve_keys: true);
+    }
+
+    /** The label of a value: from the options, else from getOptionLabelUsing(), else null. */
+    public function getOptionLabel(string|int $value): ?string
+    {
+        $options = $this->getOptions();
+
+        if (array_key_exists($value, $options)) {
+            return (string) $options[$value];
+        }
+
+        $label = $this->optionLabel ? ($this->optionLabel)((string) $value) : null;
+
+        return $label === null ? null : (string) $label;
+    }
+
     public function getName(): string
     {
         return $this->name;
@@ -105,7 +207,13 @@ class Filter
             return;
         }
 
-        if (blank($value) || (! is_string($value) && ! is_int($value)) || ! array_key_exists($value, $this->getOptions())) {
+        if (blank($value) || (! is_string($value) && ! is_int($value))) {
+            return;
+        }
+
+        // A plain select offers a fixed list and takes nothing else; a searchable one
+        // takes any key, the way a search box would, and the query decides.
+        if (! $this->isSearchable() && ! array_key_exists($value, $this->getOptions())) {
             return;
         }
 
@@ -165,13 +273,16 @@ class Filter
     /** @return array<string, mixed> */
     public function toArray(): array
     {
+        $searchable = ! $this->isDateRange() && $this->isSearchable();
+        $options = $this->isDateRange() || ($searchable && ! $this->preload) ? [] : $this->getOptions();
+
         return [
             'name' => $this->name,
             'label' => $this->getLabel(),
             'type' => $this->type,
-            'options' => $this->isDateRange()
-                ? []
-                : collect($this->getOptions())->map(fn ($label, $value) => ['value' => (string) $value, 'label' => (string) $label])->values()->all(),
+            'searchable' => $searchable,
+            'optionsLimit' => $this->optionsLimit,
+            'options' => collect($options)->take($this->optionsLimit)->map(fn ($label, $value) => ['value' => (string) $value, 'label' => (string) $label])->values()->all(),
         ];
     }
 }

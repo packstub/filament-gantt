@@ -235,3 +235,22 @@ it('moves a bar to another row renderless, and answers a refused row with its re
 
     expect($task->fresh()->project_id)->toBe($beta->id);
 });
+
+it('answers a select filter\'s options, a search and a value\'s label renderless', function () {
+    $acme = project('Acme');
+    $beta = project('Beta');
+
+    Livewire::test(TaskGantt::class)
+        ->call('ganttFilterOptions', 'project_id')
+        ->assertReturned([['value' => (string) $acme->id, 'label' => 'Acme'], ['value' => (string) $beta->id, 'label' => 'Beta']])
+        ->call('ganttFilterOptions', 'project_id', 'bet')
+        ->assertReturned([['value' => (string) $beta->id, 'label' => 'Beta']])
+        ->call('ganttFilterOptions', 'starts_on')
+        ->assertReturned([])
+        ->call('ganttFilterOptions', 'nope')
+        ->assertReturned([])
+        ->call('ganttFilterOptionLabel', 'project_id', (string) $acme->id)
+        ->assertReturned('Acme')
+        ->call('ganttFilterOptionLabel', 'project_id', '999')
+        ->assertReturned(null);
+});

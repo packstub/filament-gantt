@@ -63,9 +63,23 @@ use Packstub\Gantt\Filter;
 - `Filter::select()` (or `Filter::make()`): by default `where(<name>, <value>)`.
 - `Filter::dateRange()`: two date inputs; by default `where(<name>, '>=', from)` and `where(<name>, '<', until + 1 day)`, either side optional: plain ranges that keep the column's index in use and include the whole last day of a datetime column too. A `query()` closure receives `['from' => ?string, 'until' => ?string]`.
 
+### Searchable selects
+
+A select with many options (users, rooms, customers) can be searched. With `preload()` (the default) the options still come with the chart and the search runs on the server through `getSearchResultsUsing()`, or over the options' labels when there is none; with `preload(false)` nothing is listed until the user types. A searchable select accepts any value, so a value from a shared link that the list does not hold is looked up with `getOptionLabelUsing()` and applied; the query decides what it matches.
+
+```php
+Filter::select('assignee_id')->label('Assignee')->searchable()
+    ->options(fn () => ['me' => 'Assigned to me'] + User::query()->orderBy('name')->limit(50)->pluck('name', 'id')->all())
+    ->getSearchResultsUsing(fn (string $search) => User::query()->where('name', 'like', "%{$search}%")->limit(50)->pluck('name', 'id')->all())
+    ->getOptionLabelUsing(fn (string $value) => $value === 'me' ? 'Assigned to me' : User::find($value)?->name)
+    ->query(fn (Builder $query, string $value) => $query->where('assignee_id', $value === 'me' ? auth()->id() : $value)),
+```
+
+`optionsLimit()` caps a list or a search (default 50). The select is Filament's own (the component behind the `Select` field), so it looks and behaves like one in a form; the search is a renderless call, nothing on the page re-renders.
+
 Filters live in the URL too (`?f.assignee_id=3&f.starts_on.from=2026-10-01`).
 
-The toolbar is built from Filament's own Blade components (tabs, button, input wrapper, Filament's date picker, a native `<select>`), so it follows the panel's theme, but it is not a Filament form: the chart is drawn by the browser and a filter change is a renderless call, so nothing on the page re-renders. A form-based filter (`Filter::form()`) is on the roadmap; until then, put a real Filament form in the page's header actions and dispatch `packstub-gantt-refresh` from it.
+The toolbar is built from Filament's own Blade components (tabs, button, input wrapper, Filament's date picker and select), so it follows the panel's theme, but it is not a Filament form: the chart is drawn by the browser and a filter change is a renderless call, so nothing on the page re-renders. A form-based filter (`Filter::form()`) is on the roadmap; until then, put a real Filament form in the page's header actions and dispatch `packstub-gantt-refresh` from it.
 
 ## Refreshing
 
