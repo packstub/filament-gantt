@@ -859,25 +859,52 @@ export default function packstubGantt(config) {
 
         /**
          * Everything the filters leave, in one screen: the span of those bars is
-         * loaded (the server caps it like any window), then drawn at the pixels per
-         * day that fill the chart's width.
+         * loaded (the server caps it like any window, and says so), then drawn at the
+         * pixels per day that fill the chart's width with every label beside a bar
+         * still inside it; the window then grows to the width (fill()).
          */
         fitAll() {
             return this.$wire.ganttSpan(this.activeFilters()).then((span) => {
                 if (! span?.start) return
-                // A little room after the last bar, so a label drawn beside it is not cut
-                const days = Math.max(1, Math.round((parse(span.end) - parse(span.start)) / DAY) + 1)
-                this.range = { start: span.start, end: format(parse(span.end) + Math.ceil(days * 0.08) * DAY, false) }
+                this.range = { start: span.start, end: span.end }
 
-                // As a typed range: kept as asked (never widened), and a span the server cut short says so.
                 return this.applyWindow(() => {
                     const el = this.$refs.scroll
                     const room = Math.max(120, (el?.clientWidth || 1200) - this.labelWidth())
                     // from the window's start: the zoom anchors on the day under the pointer, here the first
                     if (el) el.scrollLeft = 0
-                    this.zoomTo(room / Math.max(1, this.view.days))
+                    // Loaded as a typed range so the cut is announced; from here the window may grow to the width.
+                    this.userRange = false
+                    this.zoomTo(this.fitPxPerDay(room))
                 }, { user: true, keepScroll: true })
             })
+        },
+
+        /**
+         * The pixels per day at which the loaded window fills `room`, lowered until every
+         * label drawn beside its bar (a milestone's, a bar's too narrow for it) ends
+         * inside: labels keep their width while the bars shrink, so a few passes settle it.
+         */
+        fitPxPerDay(room) {
+            const bars = this.view.rows.flatMap((row) => row.bars)
+            let ppd = room / Math.max(1, this.view.days)
+
+            for (let pass = 0; pass < 4; pass++) {
+                let next = ppd
+                for (const bar of bars) {
+                    if (! bar.label) continue
+                    const labelPx = this.textWidth(bar.label) + 18
+                    const outside = bar.milestone || (! this.compact && ((bar.e - bar.s) / DAY) * ppd < labelPx)
+                    if (! outside) continue
+                    const endDay = Math.max(0.5, (bar.e - this.view.start) / DAY)
+                    const limit = (room - labelPx) / endDay
+                    if (limit > 0 && limit < next) next = limit
+                }
+                if (Math.abs(next - ppd) < 0.01) break
+                ppd = next
+            }
+
+            return ppd
         },
 
         /** Width of the sticky label column, in px. */

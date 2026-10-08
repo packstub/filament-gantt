@@ -25,7 +25,7 @@ The hour level is for shifts, bookings and anything measured in hours: with `sna
 
 ### Zoom and Fit
 
-Between the levels the chart zooms continuously: **Ctrl/⌘ + mouse wheel** (a pinch on touch) stretches or squeezes the current level around the pointer, from half to twice its width, and hands over to the next level beyond that; a level picked in the toolbar is shown as designed again. The factor lives in the URL (`zoom=1.5`). **Fit** shows everything the filters leave in one screen: it loads the span of those bars (capped like any window by `max_window_days`) and draws it at the pixels per day that fill the chart's width.
+Between the levels the chart zooms continuously: **Ctrl/⌘ + mouse wheel** (a pinch on touch) stretches or squeezes the current level around the pointer, from half to twice its width, and hands over to the next level beyond that; a level picked in the toolbar is shown as designed again. The factor lives in the URL (`zoom=1.5`). **Fit** shows everything the filters leave in one screen: it loads the span of those bars (capped like any window by `max_window_days`) and draws it at the pixels per day that fill the chart's width, with every label drawn beside a bar still inside it.
 
 A line in the panel's primary colour marks today (now, at the hour level); the Today button scrolls to it, and loads a window around today when the current one does not hold it. `firstDayOfWeek(7)` starts the week columns on Sunday; the config's `weekend_days` (ISO weekdays, `[6, 7]` by default) decides the shading. An axis label that does not fit its cell (a month cut to one day at the window's edge) is left out rather than drawn over the next one.
 
