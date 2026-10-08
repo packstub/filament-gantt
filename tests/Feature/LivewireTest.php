@@ -110,7 +110,7 @@ it('hands the browser everything it needs in the config', function () {
         ->and($config['window'])->toBe(['start' => '2026-09-28', 'end' => '2026-10-25'])
         ->and($config['groups'][0])->toMatchArray(['key' => (string) $acme->id, 'label' => 'Acme', 'count' => 1])
         ->and($config['bars'][0]['label'])->toBe('A')
-        ->and($config['pxPerDay'])->toBe(['hour' => 960, 'day' => 48, 'week' => 18, 'month' => 5])
+        ->and($config['pxPerDay'])->toBe(['hour' => 960.0, 'day' => 48.0, 'week' => 18.0, 'month' => 5.0, 'year' => 1.5])
         ->and(array_column($config['filters'], 'type'))->toBe(['select', 'dateRange'])
         ->and($config['filters'][0]['options'])->toBe([['value' => (string) $acme->id, 'label' => 'Acme']])
         ->and(array_column($config['barActions'], 'name'))->toBe(['edit', 'delete', 'bump'])

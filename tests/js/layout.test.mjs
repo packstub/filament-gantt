@@ -155,3 +155,15 @@ test('arrows(): finish-to-start paths between bars on the chart, dashed when the
     const carried = arrows(v, { id: 'b', dy: 36 })
     assert.equal(carried[0].d, 'M54,54 h8 V126 H90 m-6,-4 l6,4 l-6,4')
 })
+
+test('year scale: month columns over quarters, no shades, the today line', () => {
+    const v = layout(bars, { ...window, start: '2026-10-01', end: '2027-12-31', pxPerDay: 1.5 }, 'year')
+    assert.equal(v.columns.length, 15)
+    assert.equal(v.columns[0].label, 'Oct')
+    assert.deepEqual(v.top.map((q) => q.label), ['Q4 2026', 'Q1 2027', 'Q2 2027', 'Q3 2027', 'Q4 2027'])
+    assert.equal(Math.round(v.top[1].x), Math.round(92 * 1.5))
+    assert.equal(v.shades.length, 0)
+    assert.equal(v.todayX, 13 * 1.5)
+    // a quarter cut short by the window's edge keeps its short label
+    assert.equal(layout([], { ...window, start: '2026-12-15', end: '2027-03-31', pxPerDay: 1.5 }, 'year').top[0].label, 'Q4')
+})

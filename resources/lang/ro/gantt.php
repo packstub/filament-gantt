@@ -5,6 +5,7 @@ return [
     'day' => 'Zi',
     'week' => 'Săptămână',
     'month' => 'Lună',
+    'year' => 'An',
     'today' => 'Azi',
     'from' => 'De la',
     'until' => 'Până la',

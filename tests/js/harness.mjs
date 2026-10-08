@@ -16,7 +16,7 @@ export { layout, arrows, parse, format, phpDate, pack, isoWeekday, safeUrl, tone
 export const config = {
     window: { start: '2026-10-01', end: '2026-10-31' }, groups: [], bars: [], filters: [], barActions: [], barAction: null, createAction: null,
     readOnly: false, compact: false, height: null, i18n: { milestone: 'Milestone', progress: ':percent% done', failed: 'Failed', offline: 'Offline', bar_menu: 'Bar actions' },
-    scale: 'day', scales: ['day', 'week', 'month'], unit: 'day', minMinutes: 1440, maxMinutes: null, today: '2026-10-14', pxPerDay: { hour: 960, day: 48, week: 18, month: 5 }, rowHeight: 36,
+    scale: 'day', scales: ['day', 'week', 'month', 'year'], unit: 'day', minMinutes: 1440, maxMinutes: null, today: '2026-10-14', pxPerDay: { hour: 960, day: 48, week: 18, month: 5, year: 1.5 }, rowHeight: 36,
     firstDayOfWeek: 1, weekendDays: [6, 7], locale: 'en', dateFormat: 'M j, Y', dateTimeFormat: 'M j, Y H:i', grouped: false, key: 'k', poll: null,
 }
 
