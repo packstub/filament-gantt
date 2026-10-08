@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { chart, bar, rowBar, press, element, layout, tone, DAY, HOUR } from './harness.mjs'
+import { chart, bar, rowBar, press, element, layout, tone, parse, DAY, HOUR } from './harness.mjs'
 
 /** setTimeout/clearTimeout recorded instead of run: `timers.at(-1).fn()` fires the last one. */
 function fakeTimers(run) {
@@ -688,15 +688,27 @@ test('Fit loads the span of the filtered bars and draws it at the width of the c
     c.persist = () => {}
     c.$refs.scroll = { scrollLeft: 0, clientWidth: 1100, querySelector: () => ({ offsetWidth: 200 }), getBoundingClientRect: () => ({ left: 0, right: 1100, top: 0, bottom: 600 }) }
     c.$wire.ganttSpan = async (filters) => { c.wire.spans = [filters]; return { start: '2026-07-01', end: '2026-12-31' } }
-    c.$wire.ganttRefresh = async (filters, from, until) => ({ window: { start: from, end: until }, groups: [], bars: [], total: 0 })
+    c.$wire.ganttRefresh = async (filters, from, until) => { c.wire.refreshes.push([filters, from, until]); return { window: { start: from, end: until }, groups: [], bars: [], total: 0 } }
 
     await c.fitAll()
     assert.deepEqual(c.wire.spans, [{}])
-    // 184 days plus 8% of room after the last bar (15 days): 199 days in 900px, the month level at nearly 1×
-    assert.deepEqual(c.period, { start: '2026-07-01', end: '2027-01-15' })
+    // 184 days in 900px: 4.9px a day, the month level at nearly 1×
+    assert.deepEqual(c.period, { start: '2026-07-01', end: '2026-12-31' })
     assert.equal(c.scale, 'month')
-    assert.ok(Math.abs(c.view.pxPerDay - 900 / 199) < 0.01, String(c.view.pxPerDay))
-    assert.equal(c.userRange, true, 'not widened afterwards')
+    assert.ok(Math.abs(c.view.pxPerDay - 900 / 184) < 0.01, String(c.view.pxPerDay))
+
+    // a long label beside a short bar at the very end: fewer pixels a day, so the label ends inside the chart,
+    // and the window then grows to the width (one more load)
+    const label = 'Beta release to TestFlight, then the App Store'
+    c.$wire.ganttRefresh = async (filters, from, until) => { c.wire.refreshes.push([filters, from, until]); return { window: { start: from, end: until }, groups: [], bars: [bar({ id: '9', start: '2026-12-30', end: '2026-12-31', label })], total: 1 } }
+    const loads = c.wire.refreshes.length
+    await c.fitAll()
+    const labelPx = c.textWidth(label) + 18
+    // the bar's chart end is Dec 31 00:00, 183 days from the start
+    assert.ok(Math.abs(c.view.pxPerDay - (900 - labelPx) / 183) < 0.01, String(c.view.pxPerDay))
+    assert.equal(c.userRange, false)
+    assert.ok(c.wire.refreshes.length > loads + 1, 'the fill loads the wider window')
+    assert.ok(parse(c.range.end) > parse('2026-12-31'))
 
     // nothing to fit: nothing changes
     c.$wire.ganttSpan = async () => null
