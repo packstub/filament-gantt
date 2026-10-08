@@ -504,6 +504,11 @@ export default function packstubGantt(config) {
             return arrows(this.view, p && p.dy ? { id: p.bar.id, dy: p.dy } : null)
         },
 
+        /** Every arrow of one kind as a single path (the SVG holds two: on time, and late). */
+        arrowD(late) {
+            return this.arrowPaths.filter((a) => a.late === late).map((a) => a.d).join(' ')
+        },
+
         get bodyHeight() {
             return this.view.rows.reduce((h, row) => h + row.height, 0)
         },
@@ -1112,11 +1117,22 @@ export default function packstubGantt(config) {
             const src = bar.src
             src._pending = true
             this.pending++
-            if (group !== null && String(src.group ?? '') !== group) this.regroup(src, group)
+            if (group !== null && String(src.group ?? '') !== group) {
+                // The chart is rebuilt from the source bars for the new row: the new
+                // dates go on the source too, or the bar would jump back in time until
+                // the server answers.
+                src.start = format(bar.s)
+                src.end = format(bar.e)
+                this.regroup(src, group)
+            }
 
             const undo = (message) => {
                 src._pending = false
-                if (group !== null) src.group = g0
+                if (group !== null) {
+                    src.group = g0
+                    src.start = format(s0)
+                    src.end = format(e0)
+                }
                 this.groups = this.recount()
                 this.rebuild()
                 this.notify(message, 'danger')

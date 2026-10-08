@@ -198,7 +198,7 @@
 .ps-gantt-label {
     position: sticky;
     inset-inline-start: 0;
-    z-index: 2;
+    z-index: 3; /* over the arrows overlay */
     display: flex;
     align-items: center;
     gap: 0.4rem;

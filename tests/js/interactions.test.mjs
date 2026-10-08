@@ -529,4 +529,9 @@ test('the arrows follow a bar while it is dragged, and the one carried to anothe
     assert.equal(c.arrowPaths[0].d, 'M384,126 h8 V126 H432 m-6,-4 l6,4 l-6,4')
     p.up(48)
     assert.equal(c.arrowPaths[0].key, '1>2')
+    // dropped in Beta a day later: while pending the bar keeps both its new row and its new dates
+    // (rows: Acme (0), Beta (36), bar 1 (72), bar 2 (108)); the two SVG paths hold every arrow of their kind
+    assert.deepEqual(c.wire.moves, [['1', '2026-10-06 00:00', '2026-10-09 00:00', '2']])
+    assert.equal(c.arrowD(false), 'M384,90 h8 V126 H432 m-6,-4 l6,4 l-6,4')
+    assert.equal(c.arrowD(true), '')
 })
