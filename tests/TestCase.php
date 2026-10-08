@@ -66,6 +66,12 @@ abstract class TestCase extends Orchestra
             $table->date('starts_on')->nullable();
             $table->date('ends_on')->nullable();
             $table->unsignedInteger('progress')->default(0);
+            $table->json('depends_on')->nullable();
+        });
+
+        Schema::create('task_dependencies', function (Blueprint $table): void {
+            $table->foreignId('task_id');
+            $table->foreignId('predecessor_id');
         });
 
         Schema::create('shifts', function (Blueprint $table): void {

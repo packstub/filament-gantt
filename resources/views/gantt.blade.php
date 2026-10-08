@@ -103,6 +103,13 @@
                 <div class="ps-gantt-today-line" x-show="view.todayX !== null" :style="{ 'inset-inline-start': view.todayX + 'px' }"></div>
             </div>
 
+            {{-- Dependency arrows, one SVG over the whole body, mirrored by CSS in RTL. Two paths holding every
+                 arrow of their kind: an x-for cannot run inside an svg (its <template> is not one there). --}}
+            <svg class="ps-gantt-arrows" aria-hidden="true" x-show="arrowPaths.length" :style="{ width: view.width + 'px', height: bodyHeight + 'px' }" :viewBox="'0 0 ' + view.width + ' ' + bodyHeight">
+                <path :d="arrowD(false)"></path>
+                <path class="ps-gantt-arrow-late" :d="arrowD(true)"></path>
+            </svg>
+
             <div class="ps-gantt-pad" :style="'height:' + slice.top + 'px'"></div>
 
             <template x-for="row in visibleRows" :key="row.key">

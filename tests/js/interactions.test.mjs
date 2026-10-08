@@ -510,3 +510,28 @@ test('in the compact layout the target is the group\'s one row', () => {
     p.up()
     assert.deepEqual(c.wire.moves, [['1', '2026-10-05 00:00', '2026-10-08 00:00', '2']])
 })
+
+/* ------------------------------------------------------------------ dependency arrows */
+
+test('the arrows follow a bar while it is dragged, and the one carried to another row', () => {
+    const c = groupedChart({ bars: [bar({ id: '1', group: '1', regroupable: true }), bar({ id: '2', group: '2', start: '2026-10-10', end: '2026-10-12', regroupable: true, deps: ['1'] })] })
+    // rows: Acme (0), bar 1 (36), Beta (72), bar 2 (108); 48px a day from Oct 1
+    assert.equal(c.arrowPaths[0].d, 'M336,54 h8 V126 H432 m-6,-4 l6,4 l-6,4')
+    assert.equal(c.bodyHeight, 144)
+
+    const p = press(c, rowBar(c, '1'), { y: 50 })
+    p.move(48)
+    assert.equal(c.arrowPaths[0].d, 'M384,54 h8 V126 H432 m-6,-4 l6,4 l-6,4')
+    // up to Acme's own group row: the bar is drawn 36px higher, its arrow starts there
+    c.drag({ pointerId: 7, clientX: 148, clientY: 10 })
+    assert.equal(c.target, null, 'its own group')
+    c.drag({ pointerId: 7, clientX: 148, clientY: 125 })
+    assert.equal(c.arrowPaths[0].d, 'M384,126 h8 V126 H432 m-6,-4 l6,4 l-6,4')
+    p.up(48)
+    assert.equal(c.arrowPaths[0].key, '1>2')
+    // dropped in Beta a day later: while pending the bar keeps both its new row and its new dates
+    // (rows: Acme (0), Beta (36), bar 1 (72), bar 2 (108)); the two SVG paths hold every arrow of their kind
+    assert.deepEqual(c.wire.moves, [['1', '2026-10-06 00:00', '2026-10-09 00:00', '2']])
+    assert.equal(c.arrowD(false), 'M384,90 h8 V126 H432 m-6,-4 l6,4 l-6,4')
+    assert.equal(c.arrowD(true), '')
+})
