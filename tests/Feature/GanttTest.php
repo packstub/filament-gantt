@@ -17,6 +17,7 @@ use Packstub\Gantt\Group;
 use Packstub\Gantt\Tests\Fixtures\Project;
 use Packstub\Gantt\Tests\Fixtures\Shift;
 use Packstub\Gantt\Tests\Fixtures\Task;
+use Packstub\Gantt\Tests\Fixtures\UncastTask;
 
 beforeEach(function () {
     CarbonImmutable::setTestNow('2026-10-14 10:00:00');
@@ -711,4 +712,35 @@ it('knows which groups a click may create in: the rows on the chart, never a rel
         ->and(gantt()->createAction(CreateAction::make())->creatableIn(fn (string $group) => $group === (string) $beta->id)->canCreateIn((string) $beta->id))->toBeTrue()
         ->and(gantt()->createAction(CreateAction::make())->groupBy('status')->canCreateIn('todo'))->toBeTrue() // the stray task's status
         ->and(gantt()->createAction(CreateAction::make())->groupBy('status')->canCreateIn('done'))->toBeFalse();
+});
+
+it('prefills whole days for a date-only record on a chart that snaps to hours', function () {
+    $gantt = gantt()->snapTo(Unit::Hour)->createAction(CreateAction::make());
+
+    // the browser's hour-wide click on a whole-day chart
+    expect($gantt->prefill('2026-10-14 00:00', '2026-10-14 01:00'))->toBe(['starts_on' => '2026-10-14', 'ends_on' => '2026-10-14'])
+        ->and($gantt->prefill('2026-10-14 09:00', null))->toBe(['starts_on' => '2026-10-14', 'ends_on' => '2026-10-14']);
+});
+
+it('samples an uncast column whatever the query selects and orders by', function () {
+    UncastTask::query()->create(['title' => 'Stored', 'starts_on' => '2026-10-01', 'ends_on' => '2026-10-02']);
+
+    $gantt = Gantt::make()
+        ->query(fn () => UncastTask::query()->selectRaw('tasks.*, length(title) as title_length')->orderBy('title_length'))
+        ->start('starts_on')->end('ends_on')
+        ->createAction(CreateAction::make());
+
+    expect($gantt->prefill('2026-10-06 00:00', '2026-10-09 00:00'))->toBe(['starts_on' => '2026-10-06', 'ends_on' => '2026-10-08']);
+});
+
+it('keeps a group colour read from a model only when it is one', function () {
+    $acme = project('Acme', 'sky');
+
+    $groups = Group::fromModels(Project::query()->get(), color: 'color');
+    $ids = Group::fromModels(Project::query()->get(), color: 'id');
+
+    expect($groups[0]->toArray()['color'])->toBe('sky')
+        ->and($ids[0]->toArray()['color'])->toBeNull()
+        ->and(Group::make('x')->color($acme->id)->toArray()['color'])->toBeNull()
+        ->and(Group::make('x')->color(0x336699)->toArray()['color'])->toBeNull();
 });

@@ -64,9 +64,12 @@ class Group implements Arrayable
      * panel colour (primary, success…), a Filament palette, an enum implementing
      * HasColor or a CSS colour; or a closure returning one.
      *
+     * Anything else (an integer column read by fromModels(), say) is kept only if it
+     * reads as a colour.
+     *
      * @param  string|array<int|string, string>|UnitEnum|Closure|null  $color
      */
-    public function color(string|array|UnitEnum|Closure|null $color): static
+    public function color(mixed $color): static
     {
         $this->color = $color;
 

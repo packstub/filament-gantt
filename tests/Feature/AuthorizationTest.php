@@ -1,12 +1,15 @@
 <?php
 
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\Gate;
 use Livewire\Livewire;
 use Packstub\Gantt\Bar;
+use Packstub\Gantt\Tests\Fixtures\Shift;
 use Packstub\Gantt\Tests\Fixtures\Task;
 use Packstub\Gantt\Tests\Fixtures\TaskGantt;
 use Packstub\Gantt\Tests\Fixtures\TaskPolicy;
 use Packstub\Gantt\Tests\Fixtures\TaskResource\Pages\TasksGantt;
+use Packstub\Gantt\Tests\Fixtures\User;
 
 beforeEach(function () {
     CarbonImmutable::setTestNow('2026-10-14 10:00:00');
@@ -100,4 +103,43 @@ it('falls back to the action name when a menu label needs a record', function ()
     $config = Livewire::test(TaskGantt::class)->instance()->getGanttConfig();
 
     expect(array_column($config['barActions'], 'name'))->toBe(['edit', 'delete', 'bump']);
+});
+
+/** A policy with no update() rule, whose before() may still say no. */
+class SuspendedUsersPolicy
+{
+    public function before(User $user, string $ability): ?bool
+    {
+        return $user->name === 'Suspended' ? false : null;
+    }
+}
+
+it('honours a policy that answers through before() alone', function () {
+    Gate::policy(Shift::class, SuspendedUsersPolicy::class);
+    $shift = shift('Early', '2026-10-05 08:00:00', '2026-10-05 12:00:00');
+
+    expect(shifts()->move((string) $shift->id, '2026-10-06 08:00')['start'])->toBe('2026-10-06 08:00');
+
+    $this->actingAs(User::query()->create(['name' => 'Suspended', 'email' => 's@example.test', 'password' => 'secret']));
+
+    expect(fn () => shifts()->move((string) $shift->id, '2026-10-07 08:00'))->toThrow('You cannot move this bar.')
+        ->and(shifts()->presentBar($shift->fresh())['movable'])->toBeFalse();
+});
+
+it('runs the bar() closure once per bar while the chart is presented, whatever the number of actions', function () {
+    task('One', '2026-10-05', '2026-10-07');
+    task('Two', '2026-10-06', '2026-10-08');
+    $calls = 0;
+    TaskGantt::$bar = function (Task $task) use (&$calls) {
+        $calls++;
+
+        return Bar::make()->actions(['edit']);
+    };
+
+    $component = Livewire::test(TaskGantt::class)->instance();
+    $calls = 0;
+    $bars = collect($component->getGanttConfig(withState: true)['bars']);
+
+    expect($calls)->toBe(2)
+        ->and($bars->pluck('actions')->all())->toBe([['edit'], ['edit']]);
 });

@@ -7,6 +7,7 @@ use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Closure;
 use Filament\Actions\Action;
+use Filament\Facades\Filament;
 use Filament\Support\Contracts\HasLabel;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -678,7 +679,19 @@ class Gantt
 
         if ($this->authorizeMoves === null) {
             $policy = Gate::getPolicyFor($record);
-            $allowed = $policy === null || ! method_exists($policy, 'update') || Gate::allows('update', $record);
+
+            if ($policy === null) {
+                $allowed = true;
+            } elseif (method_exists($policy, 'update')) {
+                $allowed = Gate::allows('update', $record);
+            } elseif (method_exists($policy, 'before')) {
+                // No update() rule, but a before() that may still say no (a suspended
+                // user): the Gate alone would refuse everyone for the missing method.
+                $user = (Filament::getCurrentPanel() ? Filament::auth() : auth())->user();
+                $allowed = $user === null || ($policy->before($user, 'update') ?? true) !== false;
+            } else {
+                $allowed = true;
+            }
         } else {
             $allowed = (bool) $this->evaluate($this->authorizeMoves, $record);
         }
@@ -1220,13 +1233,17 @@ class Gantt
     public function prefill(?string $start, ?string $end, ?string $group = null): array
     {
         $data = [];
-        $dateOnly = $this->isDateOnly($this->newModel());
+        $model = $this->newModel();
+        $dateOnly = $this->isDateOnly($model);
+        // Whole days for a date-only record, whatever snapTo() says (as move() does):
+        // an hour's click on such a chart would otherwise end the day before it starts.
+        $unit = $this->unitFor($model);
 
         try {
             if ($start !== null) {
-                $from = $this->unit->snap($this->parse($start));
-                $to = $end === null ? $from->addMinutes($this->unit->minutes()) : $this->unit->snap($this->parse($end));
-                $to = $to > $from ? $to : $from->addMinutes($this->unit->minutes());
+                $from = $unit->snap($this->parse($start));
+                $to = $end === null ? $from->addMinutes($unit->minutes()) : $unit->snap($this->parse($end));
+                $to = $to > $from ? $to : $from->addMinutes($unit->minutes());
 
                 $data[$this->startAttribute] = $dateOnly ? $from->toDateString() : $from->format('Y-m-d H:i:s');
                 $data[$this->endAttribute] = $dateOnly ? $to->subDay()->toDateString() : $to->format('Y-m-d H:i:s');
@@ -1372,7 +1389,9 @@ class Gantt
         $query = $this->baseQuery();
         $column = $query->qualifyColumn($this->startAttribute);
 
-        $raw = $query->toBase()->cloneWithout(['columns'])->cloneWithoutBindings(['select'])->whereNotNull($column)->value($column);
+        // Any one row will do: the query's own columns and order go (an ORDER BY on an
+        // alias the dropped select defined, a withCount() say, would otherwise fail).
+        $raw = $query->toBase()->cloneWithout(['columns', 'orders'])->cloneWithoutBindings(['select', 'order'])->whereNotNull($column)->value($column);
 
         return static::isDateString($raw);
     }

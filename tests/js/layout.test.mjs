@@ -57,8 +57,8 @@ test('day scale: one column per day with weekend and today flags', () => {
     const v = layout(bars, { ...window, pxPerDay: 48 }, 'day')
     assert.equal(v.columns.length, 28)
     assert.equal(v.columns[0].label, 'Mon 5')
-    // a label wider than its cell is left out
-    assert.equal(layout(bars, window, 'day').columns[0].label, '')
+    // a label wider than its cell falls back to the day number
+    assert.equal(layout(bars, window, 'day').columns[0].label, '5')
     assert.equal(v.columns[5].weekend, true)
     assert.equal(v.columns[9].today, true)
 })
@@ -109,4 +109,16 @@ test('edge windows: today outside, a single day, a leap February', () => {
     assert.equal(one.days, 1)
     assert.equal(one.columns.length, 1)
     assert.equal(layout([], { ...window, start: '2028-02-01', end: '2028-03-01' }, 'day').columns.length, 30)
+})
+
+test('day scale at the default zoom keeps every day label; a cell too narrow shows the day number, then nothing', () => {
+    const days = layout([], { ...window, start: '2026-10-01', end: '2026-10-31', pxPerDay: 48 }, 'day').columns.map((c) => c.label)
+    assert.equal(days.filter((l) => l === '').length, 0)
+    assert.equal(days[0], 'Thu 1')
+    assert.equal(days[13], 'Wed 14')
+    // 24px a day: "Wed 14" does not fit, "14" does
+    assert.equal(layout([], { ...window, pxPerDay: 24 }, 'day').columns[9].label, '14')
+    // 2px a day: no room for a day number either
+    assert.equal(layout([], { ...window, pxPerDay: 2 }, 'day').columns[9].label, '')
+    assert.equal('short' in layout([], window, 'day').columns[0], false)
 })

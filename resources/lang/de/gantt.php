@@ -15,7 +15,10 @@ return [
     'collapse' => 'Gruppe einklappen',
     'expand' => 'Gruppe ausklappen',
     'empty' => 'Nichts in diesem Zeitraum',
-    'bars' => ':count Balken',
+    'bars' => [
+        'one' => ':count Balken',
+        'other' => ':count Balken',
+    ],
     'truncated' => ':count von :total Balken',
     'truncated_hint' => 'Zu viele Balken für einen Zeitraum: Daten eingrenzen oder filtern, um alle zu sehen.',
     'window_limited' => 'Ein Zeitraum zeigt höchstens :days Tage: :from – :until.',

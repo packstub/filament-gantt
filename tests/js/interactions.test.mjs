@@ -329,3 +329,49 @@ test('the zoom levels offered come from the server, and a remembered one not off
     c.setScale('hour')
     assert.equal(c.scale, 'hour')
 })
+
+/* ------------------------------------------------------------------ filters and windows */
+
+test('the URL\'s filters apply to a chart whose filters arrived with its state, then the chart reloads once with them', () => {
+    const location = globalThis.window.location
+    globalThis.window.location = { href: '', search: '?f.status=open' }
+    try {
+        const c = chart({ filters: null, window: { start: null, end: null }, bars: [] })
+        Object.assign(c.view, { days: 0, rows: [] })
+        c.init()
+        assert.deepEqual(c.wire.refreshes, [[{}, null, null, true]])
+
+        c.apply({ window: { start: '2026-10-01', end: '2026-10-31' }, groups: [], bars: [], total: 0, filters: [{ name: 'status', type: 'select', options: [{ value: 'open', label: 'Open' }] }] })
+        assert.equal(c.active.status, 'open')
+        assert.deepEqual(c.wire.refreshes.at(-1), [{ status: 'open' }, '2026-10-01', '2026-10-31', false])
+
+        // a later state with the filters again (a refresh asked with them) reads the URL no more
+        c.apply({ window: { start: '2026-10-01', end: '2026-10-31' }, groups: [], bars: [], total: 0, filters: [{ name: 'status', type: 'select', options: [{ value: 'open', label: 'Open' }] }] })
+        assert.equal(c.wire.refreshes.length, 2)
+    } finally {
+        globalThis.window.location = location
+    }
+})
+
+test('a range the user typed is shown as typed, never widened to the chart\'s width; Today may fill again', () => {
+    const c = chart({ scale: 'month', bars: [bar()] })
+    c.$refs.scroll = { clientWidth: 840, querySelector: () => ({ offsetWidth: 240 }) }
+
+    c.range = { start: '2026-10-01', end: '2026-10-28' }
+    c.applyWindow(null, { user: true })
+    c.apply({ window: { start: '2026-10-01', end: '2026-10-28' }, groups: [], bars: [], total: 0 })
+    assert.equal(c.wire.refreshes.length, 1)
+    assert.equal(c.view.days, 28)
+
+    c.applyWindow()
+    c.apply({ window: { start: '2026-10-01', end: '2026-10-28' }, groups: [], bars: [], total: 0 })
+    assert.equal(c.wire.refreshes.length, 3)
+})
+
+test('a keyboard move works on the reactive copy of its state, like a drag', () => fakeTimers(() => {
+    const c = chart({ bars: [bar()] })
+    key(c, rowBar(c), 'ArrowRight')
+    // the timer and the dates were written to what this.keyboard returns, not to the object assigned
+    assert.ok(c.keyboard.timer)
+    assert.equal(c.keyboard.s, Date.UTC(2026, 9, 6))
+}))

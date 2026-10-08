@@ -121,9 +121,9 @@ export function phpDate(ts, pattern, locale = 'en') {
     return out
 }
 
-/** About how wide a short label is drawn in the axis (11px text), so one that does not fit is left out. */
+/** About how wide a short label is drawn in the axis (11px text, 5.6px a character, the cell's padding), so one that does not fit is left out. */
 function fits(label, width) {
-    return String(label).length * 6.4 + 10 <= width
+    return String(label).length * 5.6 + 8 <= width
 }
 
 /* ------------------------------------------------------------------ layout */
@@ -169,7 +169,8 @@ export function layout(bars, window, scale) {
     const x = (ts) => ((ts - start) / DAY) * ppd
     // A month cut short by the window edge gets a short label, so it never runs into the next one.
     const monthLabel = (m) => m.w >= 120 ? `${monthName(m.ts, true)} ${m.year}` : monthName(m.ts)
-    const cell = (c) => ({ ...c, label: fits(c.label, c.w) ? c.label : '' })
+    // A label that does not fit its cell falls back to its short form (the day number), then to nothing.
+    const cell = ({ short, ...c }) => ({ ...c, label: fits(c.label, c.w) ? c.label : (short !== undefined && fits(short, c.w) ? short : '') })
 
     // Segments of whole months and years clipped to the window.
     const months = []
@@ -202,7 +203,7 @@ export function layout(bars, window, scale) {
     } else if (scale === 'day') {
         for (let i = 0; i < days; i++) {
             const ts = start + i * DAY
-            columns.push({ key: 'c' + ts, x: i * ppd, w: ppd, label: `${weekdayName(ts)} ${new Date(ts).getUTCDate()}`, weekend: weekend.has(isoWeekday(ts)), today: ts === today })
+            columns.push({ key: 'c' + ts, x: i * ppd, w: ppd, label: `${weekdayName(ts)} ${new Date(ts).getUTCDate()}`, short: String(new Date(ts).getUTCDate()), weekend: weekend.has(isoWeekday(ts)), today: ts === today })
         }
         top = months.map((m) => ({ key: m.key, x: m.x, w: m.w, label: monthLabel(m) }))
     } else if (scale === 'week') {
@@ -210,7 +211,7 @@ export function layout(bars, window, scale) {
         while (i < days) {
             const ts = start + i * DAY
             const len = Math.min(((window.firstDayOfWeek || 1) - isoWeekday(ts) + 7) % 7 || 7, days - i)
-            columns.push({ key: 'c' + ts, x: i * ppd, w: len * ppd, label: `${new Date(ts).getUTCDate()} ${monthName(ts)}`, weekend: false, today: false })
+            columns.push({ key: 'c' + ts, x: i * ppd, w: len * ppd, label: `${new Date(ts).getUTCDate()} ${monthName(ts)}`, short: String(new Date(ts).getUTCDate()), weekend: false, today: false })
             i += len
         }
         top = months.map((m) => ({ key: m.key, x: m.x, w: m.w, label: monthLabel(m) }))
@@ -342,6 +343,7 @@ export default function packstubGantt(config) {
         swallowClick: false,
         autoScrolling: false,
         filling: false,
+        userRange: false,
         pending: 0,
         flash: null,
         hint: null,
@@ -733,7 +735,8 @@ export default function packstubGantt(config) {
          */
         fill() {
             const el = this.$refs.scroll
-            if (! el || ! this.period.start || this.filling || ! this.view.pxPerDay) return
+            // A range the user typed is theirs: it is shown as asked, not widened.
+            if (! el || ! this.period.start || this.filling || this.userRange || ! this.view.pxPerDay) return
             const room = (el.clientWidth || 0) - this.labelWidth()
             const need = Math.ceil(room / this.view.pxPerDay)
             // Once per width and zoom: a server that caps the window is not asked again.
@@ -935,7 +938,9 @@ export default function packstubGantt(config) {
             }
 
             if (this.keyboard && this.keyboard.id !== bar.id) this.flushNudge()
-            const k = this.keyboard ??= { id: bar.id, s0: bar.s, e0: bar.e, s: bar.s, e: bar.e, timer: null }
+            // The reactive copy, never the plain object just assigned (see down()).
+            this.keyboard ??= { id: bar.id, s0: bar.s, e0: bar.e, s: bar.s, e: bar.e, timer: null }
+            const k = this.keyboard
             const forward = (event.key === 'ArrowRight') !== this.rtl()
             const unit = this.unitFor(bar)
             const { min, max } = this.limitsFor(bar)
@@ -1158,6 +1163,7 @@ export default function packstubGantt(config) {
 
         apply(result) {
             if (! result) return
+            const first = this.needsFilters
             if (result.filters) {
                 this.filters = result.filters
                 this.needsFilters = false
@@ -1174,6 +1180,11 @@ export default function packstubGantt(config) {
                 if (! (group.key in this.collapsed)) this.collapsed[group.key] = !! group.collapsed
             }
             this.rebuild()
+            // The filters arrived after the page did: the URL's values for them could
+            // not be read at init(). Read now, and reload this window once with them.
+            if (result.filters && first && this.restoreFilters()) {
+                return this.refresh()
+            }
             this.$nextTick(() => this.fill())
         },
 
@@ -1184,6 +1195,8 @@ export default function packstubGantt(config) {
          */
         applyWindow(after = null, { user = false, keepScroll = false } = {}) {
             const seq = ++this.refreshSeq
+            // A range the user typed stays as typed (see fill()); Today or a link's window may fill.
+            this.userRange = user
             const asked = this.range.start && this.range.end ? Math.abs(parse(this.range.end) - parse(this.range.start)) / DAY + 1 : null
 
             return this.$wire.ganttRefresh(this.activeFilters(), this.range.start || null, this.range.end || null, this.needsFilters).then((result) => {
@@ -1250,19 +1263,31 @@ export default function packstubGantt(config) {
                     this.range = { start: from || this.period.start, end: until || this.period.end }
                     asked.window = true
                 }
+                asked.filters = this.restoreFilters(params)
+            } catch (e) {}
+
+            return asked
+        },
+
+        /** The filters' values from the URL, for the filters known so far; whether any was set. */
+        restoreFilters(params = null) {
+            let any = false
+
+            try {
+                params ??= new URLSearchParams(window.location.search)
                 for (const f of this.filters) {
                     if (f.type === 'dateRange') {
                         const a = params.get(`f.${f.name}.from`) || ''
                         const b = params.get(`f.${f.name}.until`) || ''
-                        if (a || b) { this.active[f.name] = { from: a, until: b }; asked.filters = true }
+                        if (a || b) { this.active[f.name] = { from: a, until: b }; any = true }
                     } else {
                         const v = params.get(`f.${f.name}`)
-                        if (v && f.options.some((o) => o.value === v)) { this.active[f.name] = v; asked.filters = true }
+                        if (v && f.options.some((o) => o.value === v)) { this.active[f.name] = v; any = true }
                     }
                 }
             } catch (e) {}
 
-            return asked
+            return any
         },
 
         persist() {

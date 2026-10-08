@@ -31,8 +31,11 @@ trait GanttActions
             $action->record($record);
 
             // Refused for a bar that is not on the chart, and for one whose
-            // Bar::actions() leaves this action out, whatever the browser asks.
-            static::ganttChainHidden($action, fn () => ($found = $record()) === null || ! $gantt->offersAction($found, $action->getName()));
+            // Bar::actions() leaves this action out, whatever the browser asks. While
+            // the bars are presented (ganttActionsFor()) only Filament's own visibility
+            // is asked: presentBar() has the Bar's list already, and asking here would
+            // run the app's bar() closure once more per action and bar.
+            static::ganttChainHidden($action, fn () => $this->ganttActionRecord === null && (($found = $record()) === null || ! $gantt->offersAction($found, $action->getName())));
             $this->ganttRefreshAfter($action);
 
             $this->cacheAction($action);
