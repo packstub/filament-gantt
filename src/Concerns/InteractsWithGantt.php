@@ -53,18 +53,19 @@ trait InteractsWithGantt
      * The bars and groups of a window (the current one, or the one the toolbar asks
      * for), with the current filters. The server clamps the window and answers with
      * the one it settled on; with $withFilters, the filters' definitions too (a
-     * config rendered without them).
+     * config rendered without them); with $exact, a range typed in full is shown as
+     * asked instead of stretched to `min_window_days`. Both flags count only as `true`.
      *
      * @param  array<string, mixed>  $filters
      * @return array<string, mixed>
      */
     #[Renderless]
-    public function ganttRefresh(array $filters = [], ?string $from = null, ?string $until = null, bool $withFilters = false): array
+    public function ganttRefresh(mixed $filters = [], mixed $from = null, mixed $until = null, mixed $withFilters = false, mixed $exact = false): array
     {
         $gantt = $this->getGantt();
-        $state = $gantt->getState($filters, $from, $until);
+        $state = $gantt->getState(is_array($filters) ? $filters : [], is_string($from) ? $from : null, is_string($until) ? $until : null, $exact === true);
 
-        if ($withFilters) {
+        if ($withFilters === true) {
             $state['filters'] = array_map(fn ($filter) => $filter->toArray(), $gantt->getFilters());
         }
 
@@ -79,9 +80,9 @@ trait InteractsWithGantt
      * @return array{start: string, end: string}|null
      */
     #[Renderless]
-    public function ganttSpan(array $filters = []): ?array
+    public function ganttSpan(mixed $filters = []): ?array
     {
-        return $this->getGantt()->getSpan($filters);
+        return $this->getGantt()->getSpan(is_array($filters) ? $filters : []);
     }
 
     /**
@@ -91,11 +92,11 @@ trait InteractsWithGantt
      * @return list<array{value: string, label: string}>
      */
     #[Renderless]
-    public function ganttFilterOptions(string $name, ?string $search = null): array
+    public function ganttFilterOptions(mixed $name, mixed $search = null): array
     {
-        $filter = $this->ganttFilter($name);
+        $filter = is_string($name) ? $this->ganttFilter($name) : null;
 
-        if ($filter === null || $filter->isDateRange()) {
+        if ($filter === null || $filter->isDateRange() || ($search !== null && ! is_string($search))) {
             return [];
         }
 
@@ -108,11 +109,11 @@ trait InteractsWithGantt
 
     /** The label of a select filter's value (one restored from the URL that the listed options do not hold). */
     #[Renderless]
-    public function ganttFilterOptionLabel(string $name, ?string $value = null): ?string
+    public function ganttFilterOptionLabel(mixed $name, mixed $value = null): ?string
     {
-        $filter = $this->ganttFilter($name);
+        $filter = is_string($name) ? $this->ganttFilter($name) : null;
 
-        return $filter === null || $filter->isDateRange() || $value === null || $value === '' ? null : $filter->getOptionLabel($value);
+        return $filter === null || $filter->isDateRange() || ! is_string($value) || $value === '' ? null : $filter->getOptionLabel($value);
     }
 
     protected function ganttFilter(string $name): ?Filter
@@ -135,8 +136,13 @@ trait InteractsWithGantt
      * @return array{ok: bool, bar?: array<string, mixed>, message?: string}
      */
     #[Renderless]
-    public function ganttMove(string $id, string $start, ?string $end = null, ?string $group = null): array
+    public function ganttMove(mixed $id, mixed $start, mixed $end = null, mixed $group = null): array
     {
+        // A crafted request with another shape is refused like any other, not a 500 in the log.
+        if (! is_string($id) || ! is_string($start) || ($end !== null && ! is_string($end)) || ($group !== null && ! is_string($group))) {
+            return ['ok' => false, 'message' => __('packstub-gantt::gantt.failed')];
+        }
+
         try {
             $bar = $this->getGantt()->move($id, $start, $end, $group);
         } catch (MoveRejected $e) {

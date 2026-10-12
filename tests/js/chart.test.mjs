@@ -10,7 +10,7 @@ test('a config without a window (a chart that appeared after the component\'s fi
     // the harness lays out on construction; the component itself starts with an empty view
     Object.assign(c.view, { days: 0, width: 0, columns: [], top: [], shades: [], rows: [] })
     c.init()
-    assert.deepEqual(c.wire.refreshes, [[{}, null, null, false]])
+    assert.deepEqual(c.wire.refreshes, [[{}, null, null, false, false]])
     // nothing is drawn for the round trip: no one-column, no-row chart before the answer
     assert.equal(c.view.columns.length, 0)
     assert.equal(c.view.rows.length, 0)
@@ -36,7 +36,7 @@ test('a whole-day bar reads as dates, its last day included; a bar with times re
     const c = chart({ bars: [bar(), bar({ id: '2', start: '2026-10-05 08:00', end: '2026-10-05 12:00', allDay: false, label: 'Shift' })] })
 
     assert.equal(c.tooltip(rowBar(c, '1')), 'Bar\nOct 5, 2026 – Oct 7, 2026')
-    assert.equal(c.tooltip(rowBar(c, '2')), 'Shift\nOct 5, 2026 08:00 – Oct 5, 2026 12:00')
+    assert.equal(c.tooltip(rowBar(c, '2')), 'Shift\nOct 5, 2026 08:00 – 12:00') // one day: the date once, then the time part of the format
 })
 
 test('a milestone reads as one date, a bar with progress says so', () => {
@@ -357,7 +357,7 @@ test('zooming keeps the same day centred, in RTL too', () => {
     for (const [direction, sign] of [['ltr', 1], ['rtl', -1]]) {
         globalThis.__direction = direction
         const c = chart({ scale: 'week', bars: [bar()] })
-        const el = { scrollLeft: sign * 180, clientWidth: 400 }
+        const el = { scrollLeft: sign * 180, clientWidth: 400, querySelector: () => ({ offsetWidth: 0 }) }
         c.$refs.scroll = el
         c.persist = () => {}
 
@@ -367,6 +367,24 @@ test('zooming keeps the same day centred, in RTL too', () => {
         assert.equal(el.scrollLeft, sign * (centre * 48 - 200))
     }
     globalThis.__direction = 'ltr'
+})
+
+test('a scale chosen from the tabs keeps the day in the middle of the chart, after the sticky label column', () => {
+    const c = chart({ scale: 'day', scales: ['hour', 'day', 'week'], bars: [bar()] })
+    const el = { scrollLeft: 480, clientWidth: 1000, querySelector: () => ({ offsetWidth: 200 }) }
+    c.$refs.scroll = el
+    c.persist = () => {}
+    // 800 px of chart are visible: the day at its middle is (480 + 400) / 48
+    const centre = (480 + 400) / 48
+
+    c.setScale('hour')
+    assert.equal(el.scrollLeft, centre * 960 - 400)
+    // forth and back lands where it started
+    c.setScale('day')
+    assert.equal(el.scrollLeft, 480)
+    // a level too coarse for the same middle starts at the window's start
+    c.setScale('week')
+    assert.equal(el.scrollLeft, 0)
 })
 
 /* ------------------------------------------------------------------ the layout's contract with the component */

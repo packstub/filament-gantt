@@ -131,13 +131,20 @@ function fits(label, width) {
     return String(label).length * 5.6 + 8 <= width
 }
 
+/** The time part of a PHP date format ("M j, Y H:i" → "H:i"), or null when no date part leads it. */
+export function timePattern(pattern) {
+    const m = /^(.*[dDjlNSwzWFmMntLoYy][^GgHhisuvaAeIOPpTZ]*?)\s+([GgHhisuvaAeIOPpTZ:.\s]+)$/.exec(pattern)
+
+    return m ? m[2] : null
+}
+
 /* ------------------------------------------------------------------ layout */
 
 /**
  * The whole chart as pixels, from the bars and the window. Pure: same input, same
  * output, nothing touched.
  *
- * bars:   [{ id, group, start, end, milestone, label, color, progress, movable, resizable, … }]
+ * bars:   [{ id, group, start, end, milestone, label, color, progress, movable, resizable, startFixed, … }]
  * window: {
  *   start, end            "YYYY-MM-DD", both days included
  *   today                 "YYYY-MM-DD"
@@ -370,6 +377,12 @@ export function pack(bars) {
 /* ------------------------------------------------------------------ Alpine component */
 
 export default function packstubGantt(config) {
+    // Alpine binds $root, $refs, $wire and $dispatch to the element an expression ran
+    // on. A bar's key or pointer handler keeps running after a rebuild destroyed that
+    // bar (a regroup in the compact layout, a carried bar), when those resolve to
+    // nothing: init() keeps the chart's own here, and ui() hands them back.
+    const dom = {}
+
     return {
         bars: config.bars,
         total: config.total ?? config.bars.length,
@@ -405,6 +418,7 @@ export default function packstubGantt(config) {
         // The group a dragged bar would land in, when it is not its own (its rows light up).
         target: null,
         swallowClick: false,
+        pressed: null,
         autoScrolling: false,
         filling: false,
         userRange: false,
@@ -416,6 +430,7 @@ export default function packstubGantt(config) {
         refreshSeq: 0,
 
         init() {
+            for (const name of ['root', 'refs', 'wire', 'dispatch']) dom[name] = this['$' + name]
             this.active = Object.fromEntries(this.filters.map((f) => [f.name, this.blank(f)]))
 
             for (const group of this.groups) {
@@ -432,10 +447,10 @@ export default function packstubGantt(config) {
 
             this.fit = () => {
                 if (this.height) return
-                const el = this.$refs.scroll
+                const el = this.ui('refs').scroll
                 if (! el) return
                 const top = el.getBoundingClientRect().top + window.scrollY
-                this.$root.style.setProperty('--ps-gantt-height', Math.max(320, window.innerHeight - top - 24) + 'px')
+                this.ui('root').style.setProperty('--ps-gantt-height', Math.max(320, window.innerHeight - top - 24) + 'px')
             }
             window.addEventListener('resize', this.fit)
             this.$nextTick(() => {
@@ -461,6 +476,11 @@ export default function packstubGantt(config) {
                     }
                 }, config.poll)
             }
+        },
+
+        /** The chart's $root, $refs, $wire or $dispatch, whatever element the running expression came from. */
+        ui(name) {
+            return dom[name] ?? this['$' + name]
         },
 
         destroy() {
@@ -601,7 +621,7 @@ export default function packstubGantt(config) {
                 return
             }
 
-            const el = this.$refs.scroll
+            const el = this.ui('refs').scroll
             const total = this.offsets.length ? this.offsets[this.offsets.length - 1] + this.view.rows[this.offsets.length - 1].height : 0
             const overscan = 400
             const y0 = Math.max(0, (el?.scrollTop || 0) - overscan)
@@ -629,7 +649,7 @@ export default function packstubGantt(config) {
                 return
             }
 
-            const el = this.$refs.scroll
+            const el = this.ui('refs').scroll
             const left = Math.abs(el?.scrollLeft || 0)
             const width = el?.clientWidth || 1600
             const r = this.xrange
@@ -705,7 +725,7 @@ export default function packstubGantt(config) {
             try {
                 this.ruler ??= typeof document.createElement === 'function' ? document.createElement('canvas').getContext('2d') : null
                 if (this.ruler) {
-                    this.ruler.font = `500 12px ${getComputedStyle(this.$root).fontFamily || 'sans-serif'}`
+                    this.ruler.font = `500 12px ${getComputedStyle(this.ui('root')).fontFamily || 'sans-serif'}`
                     width = this.ruler.measureText(String(text)).width
                 }
             } catch (e) {}
@@ -732,9 +752,13 @@ export default function packstubGantt(config) {
             const allDay = !! bar.allDay
             const pattern = allDay ? config.dateFormat : config.dateTimeFormat
 
-            return bar.milestone || (allDay && bar.e - bar.s === DAY)
-                ? phpDate(bar.s, pattern, config.locale)
-                : `${phpDate(bar.s, pattern, config.locale)} – ${phpDate(allDay ? bar.e - DAY : bar.e, pattern, config.locale)}`
+            if (bar.milestone || (allDay && bar.e - bar.s === DAY)) return phpDate(bar.s, pattern, config.locale)
+
+            const end = allDay ? bar.e - DAY : bar.e
+            // A range within one day says the date once: "Oct 9, 2026 08:00 – 12:00" (the time part of the format, when it ends with one).
+            const time = ! allDay && phpDate(bar.s, 'Y-m-d') === phpDate(end, 'Y-m-d') ? timePattern(pattern) : null
+
+            return `${phpDate(bar.s, pattern, config.locale)} – ${phpDate(end, time || pattern, config.locale)}`
         },
 
         /** The bar's accessible name: what it is, then how to work it from the keyboard. */
@@ -768,16 +792,18 @@ export default function packstubGantt(config) {
             if (! config.pxPerDay[scale] || ! this.scales.includes(scale)) return
             // A level chosen by hand is shown as designed.
             this.zoom = 1
-            const el = this.$refs.scroll
+            const el = this.ui('refs').scroll
             // scrollLeft counts from the start edge and is negative in RTL: work on its size, keep its sign.
             const dir = this.rtl() ? -1 : 1
-            const centre = el ? (Math.abs(el.scrollLeft) + el.clientWidth / 2) / (this.view.pxPerDay || 1) : null
+            // The day in the middle of the chart's visible part (after the sticky label column) stays there.
+            const half = el ? (el.clientWidth - this.labelWidth()) / 2 : 0
+            const centre = el ? (Math.abs(el.scrollLeft) + half) / (this.view.pxPerDay || 1) : null
             this.scale = scale
             this.rebuild()
             this.persist()
             if (el && centre !== null) {
                 this.$nextTick(() => {
-                    el.scrollLeft = dir * Math.max(0, centre * this.view.pxPerDay - el.clientWidth / 2)
+                    el.scrollLeft = dir * Math.max(0, centre * this.view.pxPerDay - half)
                     this.onScroll()
                     this.fill()
                 })
@@ -785,7 +811,7 @@ export default function packstubGantt(config) {
         },
 
         rtl() {
-            return getComputedStyle(this.$root).direction === 'rtl'
+            return getComputedStyle(this.ui('root')).direction === 'rtl'
         },
 
         /* ------------------------------------------------------------ zoom */
@@ -797,7 +823,7 @@ export default function packstubGantt(config) {
          * range. Levels not offered by the chart are skipped.
          */
         zoomTo(ppd, clientX = null) {
-            const el = this.$refs.scroll
+            const el = this.ui('refs').scroll
             const rect = el?.getBoundingClientRect?.()
             const label = this.labelWidth()
             const xIn = rect && clientX !== null
@@ -808,14 +834,19 @@ export default function packstubGantt(config) {
             const base = (s) => config.pxPerDay[s] || 18
             let scale = this.scale
             let zoom = ppd / base(scale)
-            // Finer levels come first in the list: step while the factor is out of range.
-            while (zoom > ZOOM_MAX && this.scales.indexOf(scale) > 0) {
-                scale = this.scales[this.scales.indexOf(scale) - 1]
-                zoom = ppd / base(scale)
-            }
-            while (zoom < ZOOM_MIN && this.scales.indexOf(scale) < this.scales.length - 1) {
-                scale = this.scales[this.scales.indexOf(scale) + 1]
-                zoom = ppd / base(scale)
+            // Finer levels come first in the list: step while the factor is out of range,
+            // in one direction only. Two levels further apart than the range covers (hour
+            // at 960 a day, day at 48) still meet: the step lands at the new level's edge.
+            if (zoom > ZOOM_MAX) {
+                while (zoom > ZOOM_MAX && this.scales.indexOf(scale) > 0) {
+                    scale = this.scales[this.scales.indexOf(scale) - 1]
+                    zoom = ppd / base(scale)
+                }
+            } else {
+                while (zoom < ZOOM_MIN && this.scales.indexOf(scale) < this.scales.length - 1) {
+                    scale = this.scales[this.scales.indexOf(scale) + 1]
+                    zoom = ppd / base(scale)
+                }
             }
             this.scale = scale
             this.zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoom))
@@ -867,12 +898,12 @@ export default function packstubGantt(config) {
          * still inside it; the window then grows to the width (fill()).
          */
         fitAll() {
-            return this.$wire.ganttSpan(this.activeFilters()).then((span) => {
+            return this.ui('wire').ganttSpan(this.activeFilters()).then((span) => {
                 if (! span?.start) return
                 this.range = { start: span.start, end: span.end }
 
                 return this.applyWindow(() => {
-                    const el = this.$refs.scroll
+                    const el = this.ui('refs').scroll
                     const room = Math.max(120, (el?.clientWidth || 1200) - this.labelWidth())
                     // from the window's start: the zoom anchors on the day under the pointer, here the first
                     if (el) el.scrollLeft = 0
@@ -912,7 +943,7 @@ export default function packstubGantt(config) {
 
         /** Width of the sticky label column, in px. */
         labelWidth() {
-            return this.$refs.scroll?.querySelector?.('.ps-gantt-corner')?.offsetWidth || 0
+            return this.ui('refs').scroll?.querySelector?.('.ps-gantt-corner')?.offsetWidth || 0
         },
 
         /**
@@ -920,7 +951,7 @@ export default function packstubGantt(config) {
          * `load` is false: the first draw never changes the window by itself).
          */
         scrollToToday(smooth = true, load = true) {
-            const el = this.$refs.scroll
+            const el = this.ui('refs').scroll
 
             if (this.view.todayX === null) {
                 if (! load || ! this.period.start) return
@@ -943,7 +974,7 @@ export default function packstubGantt(config) {
          * of the way.
          */
         fill() {
-            const el = this.$refs.scroll
+            const el = this.ui('refs').scroll
             // A range the user typed is theirs: it is shown as asked, not widened.
             if (! el || ! this.period.start || this.filling || this.userRange || ! this.view.pxPerDay) return
             const room = (el.clientWidth || 0) - this.labelWidth()
@@ -965,6 +996,11 @@ export default function packstubGantt(config) {
 
         /* ------------------------------------------------------------ moving and resizing */
 
+        /** Whether an edge of the bar may be dragged: a bar that started before the lock keeps its start. */
+        resizes(bar, edge) {
+            return !! bar.resizable && ! (edge === 'start' && bar.startFixed)
+        },
+
         down(event, bar) {
             // One pointer at a time: a second finger neither starts a drag nor ends the first.
             if (event.button !== 0 || bar.src._pending || this.pointer) return
@@ -973,14 +1009,14 @@ export default function packstubGantt(config) {
             const edge = this.narrow(bar) ? null : (event.target.dataset?.edge || null)
             // A whole bar on a grouped chart may be carried to another row, even one whose dates are fixed.
             const rows = ! edge && !! bar.regroupable && !! config.grouped
-            const allowed = edge ? bar.resizable : (bar.movable || rows)
+            const allowed = edge ? this.resizes(bar, edge) : (bar.movable || rows)
             const touch = event.pointerType === 'touch' || event.pointerType === 'pen'
 
             this.menu = null
             let p = {
                 id: event.pointerId, bar, edge, allowed, touch, picked: false, moved: false, press: null,
                 x0: event.clientX, y0: event.clientY, cx: event.clientX, cy: event.clientY,
-                s: bar.s, e: bar.e, sl0: this.$refs.scroll?.scrollLeft || 0,
+                s: bar.s, e: bar.e, sl0: this.ui('refs').scroll?.scrollLeft || 0,
                 rows, g0: String(bar.group ?? ''), g: String(bar.group ?? ''), dy: 0,
                 dir: this.rtl() ? -1 : 1, el: event.currentTarget,
             }
@@ -1032,12 +1068,12 @@ export default function packstubGantt(config) {
             if (! p.allowed) return
 
             this.dragging = true
-            const scrolled = (this.$refs.scroll?.scrollLeft || 0) - p.sl0
+            const scrolled = (this.ui('refs').scroll?.scrollLeft || 0) - p.sl0
             const dx = (sx + scrolled) * p.dir
             const unit = this.unitFor(p.bar)
             const { min, max } = this.limitsFor(p.bar)
-            // Fixed dates: the bar only changes rows.
-            const delta = p.bar.movable ? Math.round(dx / this.view.pxPerDay * DAY / unit) * unit : 0
+            // A whole bar with fixed dates only changes rows; an edge moves whenever it was allowed.
+            const delta = p.edge || p.bar.movable ? Math.round(dx / this.view.pxPerDay * DAY / unit) * unit : 0
             const bar = p.bar
 
             if (p.edge === 'start') {
@@ -1068,7 +1104,7 @@ export default function packstubGantt(config) {
 
         /** The index of the row under a point on screen, or null outside the rows. */
         rowAt(clientY) {
-            const body = this.$refs.body
+            const body = this.ui('refs').body
             if (! body?.getBoundingClientRect || ! this.offsets.length) return null
             const y = clientY - body.getBoundingClientRect().top
             if (y < 0) return null
@@ -1084,7 +1120,7 @@ export default function packstubGantt(config) {
 
         /** While a bar is dragged near the chart's start or end edge, the chart scrolls, faster the closer it gets. */
         autoScroll(p) {
-            const el = this.$refs.scroll
+            const el = this.ui('refs').scroll
             if (this.autoScrolling || ! el || typeof requestAnimationFrame !== 'function') return
             this.autoScrolling = true
 
@@ -1104,7 +1140,7 @@ export default function packstubGantt(config) {
                 // Carried to another row: the rows scroll too, under the sticky header.
                 let vy = 0
                 if (p.rows) {
-                    const top = r.top + (this.$refs.body?.getBoundingClientRect ? Math.max(0, this.$refs.body.getBoundingClientRect().top - r.top + (el.scrollTop || 0)) : 0)
+                    const top = r.top + (this.ui('refs').body?.getBoundingClientRect ? Math.max(0, this.ui('refs').body.getBoundingClientRect().top - r.top + (el.scrollTop || 0)) : 0)
                     if (p.cy < top + EDGE_PX) vy = -Math.min(EDGE_MAX_STEP, Math.ceil((top + EDGE_PX - p.cy) / 3))
                     else if (p.cy > r.bottom - EDGE_PX) vy = Math.min(EDGE_MAX_STEP, Math.ceil((p.cy - r.bottom + EDGE_PX) / 3))
                 }
@@ -1180,7 +1216,7 @@ export default function packstubGantt(config) {
             const vertical = event.key === 'ArrowUp' || event.key === 'ArrowDown'
             const edge = vertical ? null : event.shiftKey ? 'end' : event.altKey ? 'start' : null
             if (edge && bar.milestone) return
-            const allowed = vertical ? bar.regroupable && config.grouped : edge ? bar.resizable : bar.movable
+            const allowed = vertical ? bar.regroupable && config.grouped : edge ? this.resizes(bar, edge) : bar.movable
 
             if (! allowed) {
                 return this.say(this.t[vertical ? 'not_regroupable' : edge ? 'not_resizable' : 'not_movable'] || '')
@@ -1241,7 +1277,7 @@ export default function packstubGantt(config) {
             this.groups = this.recount()
             this.rebuild()
             if (focused) {
-                this.$nextTick(() => this.$root.querySelector?.(`.ps-gantt-bar[data-id="${src.id}"]`)?.focus())
+                this.$nextTick(() => this.ui('root').querySelector?.(`.ps-gantt-bar[data-id="${src.id}"]`)?.focus())
             }
         },
 
@@ -1292,7 +1328,7 @@ export default function packstubGantt(config) {
             const args = [bar.id, format(bar.s), bar.milestone ? null : format(bar.e)]
             if (group !== null) args.push(group)
 
-            this.$wire.ganttMove(...args)
+            this.ui('wire').ganttMove(...args)
                 .then((result) => {
                     if (! result?.ok) {
                         return undo(result?.message || this.t.failed)
@@ -1300,7 +1336,7 @@ export default function packstubGantt(config) {
 
                     src._pending = false
                     this.replace(result.bar)
-                    this.$dispatch('gantt-bar-moved', { id: bar.id, bar: result.bar })
+                    this.ui('dispatch')('gantt-bar-moved', { id: bar.id, bar: result.bar })
                     this.flash = bar.id
                     setTimeout(() => { if (this.flash === bar.id) this.flash = null }, 900)
                 })
@@ -1335,9 +1371,15 @@ export default function packstubGantt(config) {
             return this.barActions.filter((a) => ! bar.actions || bar.actions.includes(a.name))
         },
 
+        /** Whether a click on the bar runs the barAction(): it is one the bar offers. The bar's classes ask too. */
+        clicks(bar) {
+            const name = this.barAction
+            return !! name && (! bar.actions || bar.actions.includes(name)) && this.barActions.some((a) => a.name === name)
+        },
+
         runAction(name, bar) {
             this.closeMenu()
-            this.$wire.mountAction(name, { ganttRecord: bar.id })
+            this.ui('wire').mountAction(name, { ganttRecord: bar.id })
         },
 
         open(bar, event) {
@@ -1347,7 +1389,7 @@ export default function packstubGantt(config) {
             // link, say) cannot steer this one.
             const openAside = () => window.open(url, '_blank', 'noopener,noreferrer')
 
-            if (this.barAction && this.actionsFor(bar).some((a) => a.name === this.barAction)) {
+            if (this.clicks(bar)) {
                 if (url && aside) {
                     return openAside()
                 }
@@ -1371,7 +1413,7 @@ export default function packstubGantt(config) {
             this.menu = { bar, x, y, from: event.currentTarget ?? null }
 
             this.$nextTick(() => {
-                const el = this.$refs.menu
+                const el = this.ui('refs').menu
                 if (! el || ! this.menu) return
                 const w = el.offsetWidth || 0
                 const h = el.offsetHeight || 0
@@ -1388,7 +1430,7 @@ export default function packstubGantt(config) {
         },
 
         menuItems() {
-            return Array.from(this.$refs.menu?.querySelectorAll?.('[role="menuitem"]') ?? [])
+            return Array.from(this.ui('refs').menu?.querySelectorAll?.('[role="menuitem"]') ?? [])
         },
 
         /** Move the focus by `step` items, wrapping around; ±Infinity is the first or the last (Home, End). */
@@ -1423,12 +1465,25 @@ export default function packstubGantt(config) {
             return !! this.createAction && ! this.readOnly && !! row
         },
 
+        /** Where the pointer went down, for createAt(): a release elsewhere was a drag, not a click. */
+        pressAt(event) {
+            this.swallowClick = false
+            // A finger wobbles more than a mouse: the same slop as a drag's (track()).
+            this.pressed = { x: event.clientX, y: event.clientY, touch: event.pointerType === 'touch' || event.pointerType === 'pen' }
+        },
+
         createAt(event, row) {
             // The release of a drag abandoned with Escape lands on the row: not a click.
             if (this.swallowClick) {
                 this.swallowClick = false
                 return
             }
+            // Pressed somewhere else and released here (a drag across the canvas): not a click either.
+            // Used once: a click with no press before it (a keyboard, assistive technology) is a click.
+            const pressed = this.pressed
+            this.pressed = null
+            const travel = pressed ? Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) : 0
+            if (pressed && (pressed.touch ? travel > 8 : travel >= 3)) return
             if (! this.creatable(row) || event.target.closest('.ps-gantt-bar')) return
 
             const rect = event.currentTarget.getBoundingClientRect()
@@ -1437,7 +1492,7 @@ export default function packstubGantt(config) {
             const start = this.view.start + days * DAY
             const end = start + this.unitDays * DAY
 
-            this.$wire.mountAction(this.createAction.name, {
+            this.ui('wire').mountAction(this.createAction.name, {
                 ganttStart: format(start),
                 ganttEnd: format(end),
                 ganttGroup: row.group.key || null,
@@ -1521,7 +1576,8 @@ export default function packstubGantt(config) {
             this.userRange = user
             const asked = this.range.start && this.range.end ? Math.abs(parse(this.range.end) - parse(this.range.start)) / DAY + 1 : null
 
-            return this.$wire.ganttRefresh(this.activeFilters(), this.range.start || null, this.range.end || null, this.needsFilters).then((result) => {
+            // Only a range the user typed (or Fit's span) is shown as asked; any other is at least min_window_days.
+            return this.ui('wire').ganttRefresh(this.activeFilters(), this.range.start || null, this.range.end || null, this.needsFilters, user).then((result) => {
                 if (seq !== this.refreshSeq) {
                     if (after) this.filling = false
                     return
@@ -1540,7 +1596,7 @@ export default function packstubGantt(config) {
                 this.$nextTick(() => {
                     if (after) return after()
                     if (keepScroll) return
-                    const el = this.$refs.scroll
+                    const el = this.ui('refs').scroll
                     if (this.view.todayX !== null) this.scrollToToday(false, false)
                     else if (el) el.scrollLeft = 0
                 })
@@ -1551,7 +1607,8 @@ export default function packstubGantt(config) {
         // an action) gives way to a bar in the air.
         refresh(background = false) {
             const seq = ++this.refreshSeq
-            this.$wire.ganttRefresh(this.activeFilters(), this.period.start, this.period.end, this.needsFilters).then((result) => {
+            // The window stays what it is: a typed one stays exact while it is the user's (userRange).
+            this.ui('wire').ganttRefresh(this.activeFilters(), this.period.start, this.period.end, this.needsFilters, !! this.userRange).then((result) => {
                 if (seq !== this.refreshSeq || (background && (this.dragging || this.pending || this.keyboard))) return
                 this.apply(result)
                 if (! background) this.persist()

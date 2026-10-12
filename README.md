@@ -102,6 +102,8 @@ Group rows by a column or a `BelongsTo` relation; each group is a collapsible ro
 ->compact()
 ```
 
+![A resource timeline on the hour scale: one row per member, the shifts of a member side by side, a line at now](https://raw.githubusercontent.com/packstub/art/main/filament-gantt/docs/shifts.png)
+
 A bar dragged up or down lands in the group under the pointer (a booking in another room), within `regroupable()` and `canRegroup()`:
 
 ![A bar carried onto another project's rows: the target group lit, the hint naming it](https://raw.githubusercontent.com/packstub/art/main/filament-gantt/docs/row-drag.png)

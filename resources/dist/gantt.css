@@ -383,6 +383,7 @@
 @media (max-width: 40rem) {
     .ps-gantt { --ps-gantt-label-width: 9rem; }
     .ps-gantt-count { display: none; }
+    .ps-gantt-range { flex-wrap: wrap; } /* From and Until under each other instead of past the page's edge */
 }
 
 @media (max-width: 30rem) {

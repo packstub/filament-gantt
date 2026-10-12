@@ -47,9 +47,11 @@ return [
     | Without startDate()/endDate() a chart shows from `before` days ahead of
     | its earliest bar to `after` days past its latest one; when that is
     | longer than `max_window_days` (years of history), from `before` days
-    | ahead of today to `after` days past it. Whatever asks for it, a window
-    | is at least `min_window_days` and at most `max_window_days` long, and
-    | loads at most `max_bars` bars (the toolbar says when there are more).
+    | ahead of today to `after` days past it. A window the chart derives is
+    | at least `min_window_days` long (a range typed in full, or the span Fit
+    | loads, is shown as asked); every window is at most `max_window_days`
+    | long and loads at most `max_bars` bars (the toolbar says when there are
+    | more).
     |
     */
 

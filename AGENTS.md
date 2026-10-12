@@ -75,6 +75,9 @@ and the Pest suite again on MySQL 8.4 and PostgreSQL 17 (the `databases` job): S
   the Fit button's method is `fitAll()`.
 - Alpine hands back reactive proxies: after `this.pointer = p`, compare and mutate `this.pointer`, never `p` (the
   harness proxies `pointer`/`keyboard`/`menu` the same way, so such a bug fails `composer test:js`).
+- Never `this.$root`/`$refs`/`$wire`/`$dispatch` in `gantt.js`: Alpine binds them to the element the expression ran
+  on, and a bar's key or pointer handler keeps running after a rebuild destroyed that element (↑/↓ on a compact
+  row), when they resolve to nothing. `init()` keeps the chart's own; use `this.ui('root' | 'refs' | 'wire' | 'dispatch')`.
 - The toolbar is Filament's own components. The date picker and the select are Filament's form-field Alpine components
   driven by the chart (`resources/views/partials/{date-picker,select}.blade.php`, markup after `DateTimePicker::` and
   `Select::toEmbeddedHtml()`): the chart's value flows in (`x-effect`, or the initial `state`), a pick flows out as a

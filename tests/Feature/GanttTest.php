@@ -218,6 +218,14 @@ it('takes the definition\'s dates, then the browser\'s, and clamps both', functi
     expect($window['start']->toDateString())->toBe('2026-10-01')
         ->and($window['end']->toDateString())->toBe('2026-10-28') // stretched to the minimum
         ->and($gantt->getWindow('2027-01-01', '2029-06-01')['end']->toDateString())->toBe('2028-12-30') // 730 days at most
+        // a range the user typed in full (or Fit's span) is shown as asked, not stretched
+        ->and($gantt->getWindow('2026-10-08', '2026-10-12', exact: true)['end']->toDateString())->toBe('2026-10-12')
+        ->and($gantt->getWindow('2026-10-08', '2026-10-08', exact: true)['end']->toDateString())->toBe('2026-10-08')
+        // any other window from the browser (Today, a link, a refresh) is at least min_window_days
+        ->and($gantt->getWindow('2026-10-08', '2026-10-08')['end']->toDateString())->toBe('2026-11-04')
+        // exact needs both ends: half a range is still stretched
+        ->and($gantt->getWindow('2026-10-08', null, exact: true)['end']->toDateString())->toBe('2026-10-30')
+        ->and($gantt->getWindow('2026-10-08', null)['end']->toDateString())->toBe('2026-10-30') // half asked: the definition's end (before it, so swapped), then stretched
         ->and($gantt->getWindow('garbage', '2026-12-31')['start']->toDateString())->toBe('2026-10-01')
         // "until" before "from": swapped, not collapsed
         ->and($gantt->getWindow('2026-12-31', '2026-01-01'))->sequence(
@@ -560,6 +568,24 @@ it('names the lock with its time when it is not a midnight', function () {
         ->and($shift->fresh()->starts_at->format('Y-m-d H:i'))->toBe('2026-10-14 11:00');
 });
 
+it('keeps the dates of a bar that ended before the lock, its end included', function () {
+    $task = task('Past', '2026-10-01', '2026-10-05');
+
+    expect(fn () => gantt()->lockedBefore(today())->move((string) $task->id, '2026-10-01 00:00', '2026-10-20 00:00'))->toThrow(MoveRejected::class, 'before Oct 14, 2026')
+        ->and($task->fresh()->ends_on->toDateString())->toBe('2026-10-05');
+});
+
+it('lets a milestone on the lock itself move and change rows: it is not past', function () {
+    $acme = project('Acme');
+    $beta = project('Beta');
+    $due = task('Due', '2026-10-14', null, ['project_id' => $acme->id]);
+    task('Other', '2026-10-20', '2026-10-21', ['project_id' => $beta->id]);
+    $gantt = gantt()->lockedBefore(today());
+
+    expect(collect($gantt->getBars())->firstWhere('label', 'Due'))->toMatchArray(['movable' => true, 'regroupable' => true])
+        ->and($gantt->move((string) $due->id, '2026-10-15 00:00', null, (string) $beta->id))->toMatchArray(['start' => '2026-10-15 00:00', 'group' => (string) $beta->id]);
+});
+
 it('lets a bar that started before the lock change its end, after the lock', function () {
     $task = task('Ongoing', '2026-10-05', '2026-10-20');
 
@@ -883,6 +909,26 @@ it('keeps the row of a bar that ended before the lock, and lets an ongoing one c
 
     expect(fn () => $gantt->move((string) $past->id, '2026-10-01 00:00', '2026-10-06 00:00', (string) $beta->id))->toThrow(MoveRejected::class)
         ->and($gantt->move((string) $ongoing->id, '2026-10-10 00:00', '2026-10-21 00:00', (string) $beta->id)['group'])->toBe((string) $beta->id);
+});
+
+it('draws a bar the lock refuses as locked: one that ended before it fixed, one that started before it with a fixed start', function () {
+    $acme = project('Acme');
+    task('Past', '2026-10-01', '2026-10-05', ['project_id' => $acme->id]);
+    task('Ongoing', '2026-10-10', '2026-10-20', ['project_id' => $acme->id]);
+    task('Ahead', '2026-10-15', '2026-10-20', ['project_id' => $acme->id]);
+    $calls = 0;
+    $bars = collect(gantt()->lockedBefore(function () use (&$calls) {
+        $calls++;
+
+        return CarbonImmutable::parse('2026-10-14');
+    })->getBars())->keyBy('label');
+
+    expect($bars['Past'])->toMatchArray(['movable' => false, 'resizable' => false, 'regroupable' => false])
+        ->and($bars['Ongoing'])->toMatchArray(['movable' => false, 'resizable' => true, 'startFixed' => true, 'regroupable' => true])
+        ->and($bars['Ahead'])->toMatchArray(['movable' => true, 'resizable' => true, 'regroupable' => true])
+        ->and($bars['Ahead'])->not->toHaveKey('startFixed')
+        ->and($bars['Past'])->not->toHaveKey('startFixed')
+        ->and($calls)->toBe(1);
 });
 
 it('searches a searchable select on the server, over the labels or through a closure, and takes any value it is given', function () {

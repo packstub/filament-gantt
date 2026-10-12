@@ -37,7 +37,7 @@ The chart draws the days between two dates:
 2. otherwise `startDate()` and `endDate()` from the definition;
 3. otherwise a padded span around the bars: `window_padding_days.before` (7) before the earliest start to `window_padding_days.after` (14) after the latest end. When that span is longer than `max_window_days` (years of shifts or bookings), the chart opens around today instead: from `before` days before today to `after` days after it.
 
-A window is stretched to at least `min_window_days` (28) and cut to at most `max_window_days` (730); the server decides, whatever the browser asked for. A range the user typed that was cut says so in a notification, and an "Until" before the "From" is read the other way round. Only the bars overlapping the window are loaded (a milestone by its start), at most `max_bars` (2,000) of them: when the window holds more, the toolbar shows "2,000 of 5,312 bars" (narrow the dates or filter).
+A window the chart derives (from the bars, or from `startDate()`/`endDate()`) is stretched to at least `min_window_days` (28); a range the user typed in full, and the span Fit loads, is shown as asked, down to a single day. Every window is cut to at most `max_window_days` (730); the server decides, whatever the browser asked for. A range the user typed that was cut says so in a notification, and an "Until" before the "From" is read the other way round. Only the bars overlapping the window are loaded (a milestone by its start), at most `max_bars` (2,000) of them: when the window holds more, the toolbar shows "2,000 of 5,312 bars" (narrow the dates or filter).
 
 A window narrower than the chart (zoomed out to months, or on a wide screen) grows at its end to fill the chart's width, so the grid never stops a third of the way.
 
