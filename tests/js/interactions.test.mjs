@@ -52,6 +52,22 @@ test('the release of a drag abandoned with Escape creates nothing; the next clic
     assert.deepEqual(c.wire.mounted, [['create', { ganttStart: '2026-10-03 00:00', ganttEnd: '2026-10-04 00:00', ganttGroup: null }]])
 })
 
+test('a press on one spot released on another (a drag across the canvas) creates nothing; a click does', () => {
+    const c = chart({ createAction: { name: 'create' }, bars: [bar()] })
+    const row = c.view.rows[0]
+    const click = (x, y = 0) => ({ target: { closest: () => null }, currentTarget: { getBoundingClientRect: () => ({ left: 0, right: 1000 }) }, clientX: x, clientY: y })
+
+    c.pressAt({ clientX: 40, clientY: 0 })
+    c.createAt(click(100), row)
+    c.pressAt({ clientX: 100, clientY: 0 })
+    c.createAt(click(100, 60), row)
+    assert.deepEqual(c.wire.mounted, [])
+
+    c.pressAt({ clientX: 99, clientY: 1 })
+    c.createAt(click(100), row)
+    assert.deepEqual(c.wire.mounted, [['create', { ganttStart: '2026-10-03 00:00', ganttEnd: '2026-10-04 00:00', ganttGroup: null }]])
+})
+
 test('a bar narrower than its handles is moved wherever it is grabbed', () => {
     const c = chart({ scale: 'month', bars: [bar({ start: '2026-10-05', end: '2026-10-06' })] })
     assert.equal(rowBar(c).w, 5)
@@ -129,6 +145,63 @@ test('near the chart\'s end edge the drag scrolls it, until the pointer is relea
     } finally {
         delete globalThis.requestAnimationFrame
     }
+})
+
+test('a tap that wobbles like a finger creates; a mouse press that slid as far does not; a click with no press creates', () => {
+    const c = chart({ createAction: { name: 'create' }, bars: [bar()] })
+    const row = c.view.rows[0]
+    const click = (x, y = 0) => ({ target: { closest: () => null }, currentTarget: { getBoundingClientRect: () => ({ left: 0, right: 1000 }) }, clientX: x, clientY: y })
+
+    c.pressAt({ clientX: 94, clientY: 0, pointerType: 'mouse' })
+    c.createAt(click(100), row)
+    assert.deepEqual(c.wire.mounted, [])
+
+    c.pressAt({ clientX: 94, clientY: 0, pointerType: 'touch' })
+    c.createAt(click(100), row)
+    assert.equal(c.wire.mounted.length, 1)
+
+    c.pressAt({ clientX: 80, clientY: 0, pointerType: 'touch' })
+    c.createAt(click(100), row)
+    assert.equal(c.wire.mounted.length, 1)
+
+    // the press is used once: a later click with no pointerdown (a keyboard, assistive technology) is not measured against it
+    c.createAt(click(500), row)
+    assert.equal(c.wire.mounted.length, 2)
+})
+
+test('a bar that started before the lock keeps its start: its end handle drags, its start handle and Alt+arrows do not', () => fakeTimers((timers) => {
+    const c = chart({ bars: [bar({ movable: false, resizable: true, startFixed: true })] })
+    const b = rowBar(c)
+    assert.equal(c.resizes(b, 'end'), true)
+    assert.equal(c.resizes(b, 'start'), false)
+
+    const end = press(c, b, { edge: 'end' })
+    end.move(96)
+    end.up(96)
+    assert.deepEqual(c.wire.moves, [['1', '2026-10-05 00:00', '2026-10-10 00:00']])
+
+    c.wire.moves = []
+    rowBar(c).src._pending = false
+    const start = press(c, rowBar(c), { edge: 'start' })
+    start.move(-96)
+    start.up(-96)
+    assert.deepEqual(c.wire.moves, [])
+    assert.equal(rowBar(c).s, Date.UTC(2026, 9, 5))
+
+    key(c, rowBar(c), 'ArrowLeft', { altKey: true })
+    assert.equal(rowBar(c).s, Date.UTC(2026, 9, 5))
+    assert.equal(c.keyboard, null)
+}))
+
+test('only a click on a bar that offers the barAction runs it, and only such a bar is drawn clickable', () => {
+    const c = chart({ barAction: 'edit', barActions: [{ name: 'edit' }, { name: 'delete' }], bars: [bar(), bar({ id: '2', actions: ['delete'] })] })
+    assert.equal(c.clicks(rowBar(c)), true)
+    assert.equal(c.clicks(rowBar(c, '2')), false)
+
+    c.open(rowBar(c, '2'))
+    assert.deepEqual(c.wire.mounted, [])
+    c.open(rowBar(c))
+    assert.deepEqual(c.wire.mounted, [['edit', { ganttRecord: '1' }]])
 })
 
 /* ------------------------------------------------------------------ the keyboard */
@@ -230,7 +303,7 @@ test('Today outside the window loads a window around today; the first draw never
     assert.deepEqual(c.wire.refreshes, [])
 
     c.scrollToToday()
-    assert.deepEqual(c.wire.refreshes, [[{}, '2026-10-07', '2026-12-06', false]])
+    assert.deepEqual(c.wire.refreshes, [[{}, '2026-10-07', '2026-12-06', false, false]])
 })
 
 test('a window narrower than the chart grows to fill it, once per width and zoom', () => {
@@ -239,7 +312,7 @@ test('a window narrower than the chart grows to fill it, once per width and zoom
 
     c.fill()
     // 600px at 5px a day: 120 days from the window's start
-    assert.deepEqual(c.wire.refreshes, [[{}, '2026-10-01', '2027-01-28', false]])
+    assert.deepEqual(c.wire.refreshes, [[{}, '2026-10-01', '2027-01-28', false, false]])
 
     c.filling = false
     c.fill()
@@ -291,7 +364,7 @@ test('a config rendered without filters asks for them with the state, and applie
     const c = chart({ filters: null, window: { start: null, end: null }, bars: [] })
     Object.assign(c.view, { days: 0, rows: [] })
     c.init()
-    assert.deepEqual(c.wire.refreshes, [[{}, null, null, true]])
+    assert.deepEqual(c.wire.refreshes, [[{}, null, null, true, false]])
 
     c.apply({ window: { start: '2026-10-01', end: '2026-10-31' }, groups: [], bars: [], total: 0, filters: [{ name: 'status', type: 'select', options: [] }] })
     assert.deepEqual(c.filters.map((f) => f.name), ['status'])
@@ -339,11 +412,11 @@ test('the URL\'s filters apply to a chart whose filters arrived with its state, 
         const c = chart({ filters: null, window: { start: null, end: null }, bars: [] })
         Object.assign(c.view, { days: 0, rows: [] })
         c.init()
-        assert.deepEqual(c.wire.refreshes, [[{}, null, null, true]])
+        assert.deepEqual(c.wire.refreshes, [[{}, null, null, true, false]])
 
         c.apply({ window: { start: '2026-10-01', end: '2026-10-31' }, groups: [], bars: [], total: 0, filters: [{ name: 'status', type: 'select', options: [{ value: 'open', label: 'Open' }] }] })
         assert.equal(c.active.status, 'open')
-        assert.deepEqual(c.wire.refreshes.at(-1), [{ status: 'open' }, '2026-10-01', '2026-10-31', false])
+        assert.deepEqual(c.wire.refreshes.at(-1), [{ status: 'open' }, '2026-10-01', '2026-10-31', false, false])
 
         // a later state with the filters again (a refresh asked with them) reads the URL no more
         c.apply({ window: { start: '2026-10-01', end: '2026-10-31' }, groups: [], bars: [], total: 0, filters: [{ name: 'status', type: 'select', options: [{ value: 'open', label: 'Open' }] }] })
@@ -488,6 +561,34 @@ test('up and down arrows carry a focused bar to the previous or next group, keep
     document.activeElement = null
 }))
 
+test('a key handler whose bar was destroyed by its own regroup (compact rows) still finds the chart and sends the move', () => fakeTimers((timers) => {
+    const c = groupedChart({ compact: true })
+    const focused = []
+    const root = { style: { setProperty() {} }, querySelector: (selector) => ({ focus: () => focused.push(selector) }) }
+    const wire = c.$wire
+    c.$root = root
+    c.init() // keeps the chart's own $root, $refs, $wire and $dispatch
+    document.activeElement = { dataset: { id: '1' } }
+
+    // Alpine resolves the magics from the element the expression ran on: once the bar's
+    // element is gone (its row was rebuilt), they resolve to nothing.
+    c.$root = undefined
+    c.$wire = undefined
+    c.$refs = undefined
+    c.$dispatch = undefined
+
+    key(c, rowBar(c, '1'), 'ArrowDown')
+    assert.equal(c.view.rows.find((r) => r.key === 'b:1' || r.key === 'g:2')?.group.key ?? c.bars[0].group, '2')
+    assert.deepEqual(focused, ['.ps-gantt-bar[data-id="1"]'])
+
+    timers.filter((t) => t.fn).at(-1).fn()
+    assert.deepEqual(c.wire.moves, [['1', '2026-10-05 00:00', '2026-10-08 00:00', '2']])
+    assert.equal(c.bars[0]._pending, true, 'sent, waiting for the answer')
+    document.activeElement = null
+    c.$wire = wire
+    c.destroy()
+}))
+
 test('Escape before the keys rest puts the bar back in its row and sends nothing', () => fakeTimers(() => {
     const c = groupedChart()
     key(c, rowBar(c, '1'), 'ArrowDown')
@@ -592,6 +693,21 @@ test('a keyboard move of row and dates keeps both on the source bar while pendin
 
 /* ------------------------------------------------------------------ the date pickers */
 
+test('only a range the user typed is asked for exactly; a refresh keeps it exact while it is theirs', () => {
+    const c = chart({ bars: [] })
+    c.range = { start: '2026-10-08', end: '2026-10-08' }
+
+    c.applyWindow()
+    assert.equal(c.wire.refreshes.at(-1)[4], false)
+    c.refresh()
+    assert.equal(c.wire.refreshes.at(-1)[4], false)
+
+    c.applyWindow(null, { user: true })
+    assert.equal(c.wire.refreshes.at(-1)[4], true)
+    c.refresh()
+    assert.equal(c.wire.refreshes.at(-1)[4], true)
+})
+
 test('a day picked in the date picker sets the window edge as a date and loads it; a filter pick refreshes', () => {
     const c = chart({ filters: [{ name: 'starts_on', type: 'dateRange' }], bars: [] })
     c.init = () => {}
@@ -600,7 +716,7 @@ test('a day picked in the date picker sets the window edge as a date and loads i
     c.pickRange('start', '2026-10-05 00:00:00')
     assert.deepEqual(c.range, { start: '2026-10-05', end: '2026-10-31' })
     assert.equal(c.userRange, true)
-    assert.deepEqual(c.wire.refreshes.at(-1), [{}, '2026-10-05', '2026-10-31', false])
+    assert.deepEqual(c.wire.refreshes.at(-1), [{}, '2026-10-05', '2026-10-31', false, true])
 
     c.pickRange('end', null)
     assert.equal(c.range.end, '')
@@ -642,7 +758,7 @@ test('an option chosen in a select filter refreshes once; the URL restores any v
 /* ------------------------------------------------------------------ zoom */
 
 test('Ctrl + wheel zooms around the pointer: the day under it stays put, and the factor crosses levels at its bounds', () => {
-    const c = chart({ scale: 'week', bars: [bar()] })
+    const c = chart({ scales: ['hour', 'day', 'week', 'month', 'year'], scale: 'week', bars: [bar()] })
     c.persist = () => {}
     const el = { scrollLeft: 180, clientWidth: 600, scrollTop: 0, clientHeight: 600, getBoundingClientRect: () => ({ left: 100, right: 700, top: 0, bottom: 600 }), querySelector: () => ({ offsetWidth: 100 }) }
     c.$refs.scroll = el
@@ -656,6 +772,14 @@ test('Ctrl + wheel zooms around the pointer: the day under it stays put, and the
     c.zoomTo(40, 300)
     assert.equal(c.scale, 'day')
     assert.ok(Math.abs(c.zoom - 40 / 48) < 0.001)
+    // the hour level is 20× the day level, further than the factor's range reaches: past 2× day it is still reached, at its floor
+    c.zoomTo(100, 300)
+    assert.equal(c.scale, 'hour')
+    assert.equal(c.zoom, 0.5)
+    // and out from there lands on the day level at its ceiling
+    c.zoomTo(400, 300)
+    assert.equal(c.scale, 'day')
+    assert.equal(c.zoom, 2)
     // and out past 0.5× becomes the coarser level; below year's floor it clamps
     c.zoomTo(1, 300)
     assert.equal(c.scale, 'year')

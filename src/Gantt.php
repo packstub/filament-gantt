@@ -130,6 +130,9 @@ class Gantt
 
     protected CarbonInterface|Closure|null $lockedBefore = null;
 
+    /** The evaluated lock for this request; false until asked for. */
+    protected CarbonImmutable|null|false $lockedAt = false;
+
     protected ?Closure $canMove = null;
 
     protected ?Closure $moveUsing = null;
@@ -441,13 +444,15 @@ class Gantt
     }
 
     /**
-     * Nothing may be moved to before this moment, and a bar that started before it
-     * keeps its start (its end may still change, as long as it stays after it).
+     * Nothing may be moved to before this moment, a bar that ended before it keeps its
+     * dates and its row, and one that started before it keeps its start (its end may
+     * still change, as long as it stays after it).
      * `lockedBefore(today())` keeps the past as it happened.
      */
     public function lockedBefore(CarbonInterface|Closure|null $moment): static
     {
         $this->lockedBefore = $moment;
+        $this->lockedAt = false;
 
         return $this;
     }
@@ -779,11 +784,28 @@ class Gantt
         return $this->maxMinutes;
     }
 
+    /**
+     * A bar wholly before the lock: it ended by then (a half-open range ending on
+     * the lock is over) and started before it. A milestone on the lock is not past.
+     */
+    protected function endedBefore(CarbonInterface $start, CarbonInterface $end, CarbonInterface $lock): bool
+    {
+        return $end <= $lock && $start < $lock;
+    }
+
+    /** The lock, evaluated once per request (its closure is often `now()`). */
     public function getLockedBefore(): ?CarbonImmutable
     {
-        $moment = $this->lockedBefore instanceof Closure ? app()->call($this->lockedBefore) : $this->lockedBefore;
+        if ($this->lockedBefore === null) {
+            return null;
+        }
 
-        return $moment === null ? null : CarbonImmutable::instance(Date::parse($moment))->shiftTimezone('UTC');
+        if ($this->lockedAt === false) {
+            $moment = $this->lockedBefore instanceof Closure ? app()->call($this->lockedBefore) : $this->lockedBefore;
+            $this->lockedAt = $moment === null ? null : CarbonImmutable::instance(Date::parse($moment))->shiftTimezone('UTC');
+        }
+
+        return $this->lockedAt;
     }
 
     /** @return list<Filter> */
@@ -923,13 +945,15 @@ class Gantt
     /**
      * The days shown, as whole days [start, end] inclusive. The browser may ask for
      * its own window; the definition's startDate()/endDate() come next; otherwise a
-     * padded span around the bars. Always at least `min_window_days` and at most
-     * `max_window_days` long.
+     * padded span around the bars. At most `max_window_days` long; any other window
+     * is at least `min_window_days`, unless `$exact` (a range the user typed in full,
+     * or the span Fit loads: the browser says so) asks for it as it is, down to one day.
      *
      * @return array{start: CarbonImmutable, end: CarbonImmutable}
      */
-    public function getWindow(?string $from = null, ?string $until = null): array
+    public function getWindow(?string $from = null, ?string $until = null, bool $exact = false): array
     {
+        $typed = $exact && Filter::date($from) && Filter::date($until);
         $start = Filter::date($from) ? CarbonImmutable::parse($from, 'UTC')->startOfDay() : $this->windowStart;
         $end = Filter::date($until) ? CarbonImmutable::parse($until, 'UTC')->startOfDay() : $this->windowEnd;
 
@@ -963,7 +987,7 @@ class Gantt
 
         $days = (int) $start->diffInDays($end) + 1;
 
-        if ($days < $minDays) {
+        if ($days < $minDays && ! $typed) {
             $end = $start->addDays($minDays - 1);
         } elseif ($days > $maxDays) {
             $end = $start->addDays($maxDays - 1);
@@ -978,9 +1002,9 @@ class Gantt
      * @param  array<string, mixed>  $filters
      * @return array{window: array{start: string, end: string}, groups: list<array<string, mixed>>, bars: list<array<string, mixed>>}
      */
-    public function getState(array $filters = [], ?string $from = null, ?string $until = null): array
+    public function getState(array $filters = [], ?string $from = null, ?string $until = null, bool $exact = false): array
     {
-        $window = $this->getWindow($from, $until);
+        $window = $this->getWindow($from, $until, $exact);
         $query = $this->windowQuery($filters, $window['start'], $window['end']);
         $limit = max(1, (int) config('filament-gantt.max_bars', 2000));
 
@@ -1151,6 +1175,18 @@ class Gantt
             ...$shape,
         ];
 
+        // What the lock refuses (move()) is drawn locked, not tried: a bar that ended
+        // before the lock keeps its dates and its row, one that started before it keeps
+        // its start (its end may still move, so only its start handle goes).
+        if ($lock = $this->getLockedBefore()) {
+            if ($this->endedBefore($start, $end, $lock)) {
+                $bar['movable'] = $bar['resizable'] = $bar['regroupable'] = false;
+            } elseif ($start < $lock) {
+                $bar['movable'] = false;
+                $bar['startFixed'] = true;
+            }
+        }
+
         if ($this->dependencies !== null) {
             $bar['deps'] = $this->dependenciesOf($record);
         }
@@ -1281,8 +1317,11 @@ class Gantt
         }
 
         if ($lock = $this->getLockedBefore()) {
-            // A bar wholly before the lock keeps its row too: the past stays as it happened.
-            if (($startChanged && ($newStart < $lock || $previousStart < $lock)) || ($endChanged && $newEnd < $lock) || ($regroup && $previousEnd <= $lock)) {
+            // A bar wholly before the lock keeps its dates and its row: the past stays as
+            // it happened. One that started before it keeps its start.
+            $past = $this->endedBefore($previousStart, $previousEnd, $lock);
+
+            if (($past && ($startChanged || $endChanged || $regroup)) || ($startChanged && ($newStart < $lock || $previousStart < $lock)) || ($endChanged && $newEnd < $lock)) {
                 // A lock at midnight reads as a date; one during the day (now()) says the time too.
                 $format = $lock->isStartOfDay() ? static::dateFormat() : static::dateTimeFormat();
 

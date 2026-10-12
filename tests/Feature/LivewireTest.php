@@ -25,6 +25,22 @@ beforeEach(function () {
 
 afterEach(fn () => CarbonImmutable::setTestNow());
 
+it('refuses a renderless call whose arguments have another shape, instead of a type error', function () {
+    $task = task('A', '2026-10-05', '2026-10-09');
+
+    $component = Livewire::test(TaskGantt::class);
+
+    $component->call('ganttMove', [$task->id], '2026-10-12 00:00')->assertReturned(['ok' => false, 'message' => __('packstub-gantt::gantt.failed')]);
+    $component->call('ganttMove', (string) $task->id, null)->assertReturned(['ok' => false, 'message' => __('packstub-gantt::gantt.failed')]);
+    $component->call('ganttMove', (string) $task->id, '2026-10-12 00:00', ['x'])->assertReturned(['ok' => false, 'message' => __('packstub-gantt::gantt.failed')]);
+    $component->call('ganttFilterOptions', ['x'])->assertReturned([]);
+    $component->call('ganttFilterOptionLabel', 'project_id', ['x'])->assertReturned(null);
+    $component->call('ganttSpan', 'x')->assertReturned(fn ($span) => $span['start'] === '2026-10-05');
+    $component->call('ganttRefresh', 'x', ['y'], 7)->assertReturned(fn ($state) => count($state['bars']) === 1);
+
+    expect($task->fresh()->starts_on->toDateString())->toBe('2026-10-05');
+});
+
 it('renders the chart with its state as JSON for the browser', function () {
     task('Write docs', '2026-10-05', '2026-10-07');
 
@@ -200,6 +216,19 @@ it('refreshes with filters and loads another window', function () {
         ->assertReturned(fn ($result) => $result['window'] === ['start' => '2026-11-01', 'end' => '2026-11-30'] && array_column($result['bars'], 'label') === ['B'] && ! isset($result['filters']))
         ->call('ganttRefresh', [], null, null, true)
         ->assertReturned(fn ($result) => $result['window']['start'] === '2026-09-28' && array_column($result['filters'], 'name') === ['project_id', 'starts_on']);
+});
+
+it('shows a one-day window as asked only when the browser says it was typed, and reads both flags as true only', function () {
+    task('A', '2026-10-05', '2026-10-07');
+
+    Livewire::test(TaskGantt::class)
+        ->call('ganttRefresh', [], '2026-10-08', '2026-10-08', false, true)
+        ->assertReturned(fn ($result) => $result['window'] === ['start' => '2026-10-08', 'end' => '2026-10-08'])
+        // Today, a link or a refresh of a window that was not typed: at least min_window_days
+        ->call('ganttRefresh', [], '2026-10-08', '2026-10-08')
+        ->assertReturned(fn ($result) => $result['window'] === ['start' => '2026-10-08', 'end' => '2026-11-04'])
+        ->call('ganttRefresh', [], '2026-10-08', '2026-10-08', 'false', 'true')
+        ->assertReturned(fn ($result) => $result['window']['end'] === '2026-11-04' && ! isset($result['filters']));
 });
 
 it('ignores a date-range filter value that is no calendar date (a hand-edited URL)', function () {

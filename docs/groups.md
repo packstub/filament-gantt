@@ -43,6 +43,8 @@ Folding a group hides its bar rows; folds are remembered in the browser under th
 
 Rooms and their bookings, machines and their jobs, people and their shifts: every resource is a row and its bars sit side by side. That is the compact layout, `->compact()`: the bars of a group share one row, and overlapping ones stack into lanes, so the row grows as needed.
 
+![A resource timeline on the hour scale: one row per member, the shifts of a member side by side, a line at now](images/shifts.png)
+
 ```php
 use App\Models\Booking;
 use App\Models\Room;

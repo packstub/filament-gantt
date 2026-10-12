@@ -17,7 +17,7 @@
     x-load-css="[@js(FilamentAsset::getStyleHref('gantt', 'packstub/filament-gantt'))]"
     x-data="packstubGantt(@js($config))"
     x-on:keydown.escape.window="onEscape()"
-    x-on:pointerdown.capture="swallowClick = false"
+    x-on:pointerdown.capture="pressAt($event)"
     x-on:packstub-gantt-refresh.window="refresh(true)"
     @foreach ($config['refreshOn'] as $event)
         x-on:{{ $event }}.window="refresh(true)"
@@ -158,7 +158,7 @@
                                     'ps-gantt-bar-pending': bar.src._pending,
                                     'ps-gantt-bar-flash': flash === bar.id,
                                     'ps-gantt-bar-locked': ! bar.movable,
-                                    'ps-gantt-bar-clickable': !! (barAction || bar.url),
+                                    'ps-gantt-bar-clickable': !! bar.url || clicks(bar),
                                     'ps-gantt-bar-narrow': narrow(bar),
                                     'ps-gantt-bar-outside': labelOutside(bar),
                                     'ps-gantt-bar-picked': pointer?.picked && pointer.bar.id === bar.id,
@@ -187,8 +187,8 @@
                             >
                                 <span class="ps-gantt-progress" x-show="bar.progress !== null && bar.progress !== undefined && ! bar.milestone" :style="{ width: (bar.progress || 0) + '%' }"></span>
                                 <span class="ps-gantt-bar-label" x-text="bar.label"></span>
-                                <span class="ps-gantt-handle ps-gantt-handle-start" data-edge="start" x-show="bar.resizable && ! narrow(bar)"></span>
-                                <span class="ps-gantt-handle ps-gantt-handle-end" data-edge="end" x-show="bar.resizable && ! narrow(bar)"></span>
+                                <span class="ps-gantt-handle ps-gantt-handle-start" data-edge="start" x-show="resizes(bar, 'start') && ! narrow(bar)"></span>
+                                <span class="ps-gantt-handle ps-gantt-handle-end" data-edge="end" x-show="resizes(bar, 'end') && ! narrow(bar)"></span>
                             </div>
                         </template>
                     </div>
