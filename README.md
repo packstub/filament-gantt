@@ -16,16 +16,16 @@ A Gantt chart and resource timeline for Filament: any Eloquent query with a star
 
 ## Features
 
-- **[Drag to move, resize or reassign](#moving-and-resizing)**: a bar moves at once; drag an edge to resize, up or down to another row.
-- **[Rules on the server](#moving-and-resizing)**: the policy, durations, a locked past and your closures, checked again whatever the browser sent.
-- **[Groups and resource timelines](#groups-and-resource-timelines)**: rows by project, assignee or room, collapsible, or one compact row per resource.
-- **[Milestones, progress and dependencies](#defining-bars)**: diamonds, progress fills and finish-to-start arrows, dashed where a task starts too early.
-- **[Filament actions on bars](#actions)**: click to edit in a modal or slide-over, right-click for more, click an empty spot to create.
-- **[Hour to year, zoom and Fit](#the-time-window)**: five scales, Ctrl/⌘ + wheel or a pinch, Fit for the whole picture, a date range.
-- **[Search and filters](#the-time-window)**: select, multiple, Yes / No, toggle and date-range filters on Filament's own fields, kept in the URL.
-- **[Keyboard and touch](https://packstub.dev/docs/filament-gantt/moves)**: arrows move and resize a focused bar, announced to screen readers; a held bar drags on touch.
-- **[Resource page, standalone page or widget](#installation)**: `GanttResourcePage`, `GanttPage` and a read-only dashboard `GanttWidget`.
-- **[No Gantt library, no build step](#configuration)**: one ES module on your panel's palette; dark mode, RTL, English, Romanian, Russian and German.
+- **[Drag to move, resize or reassign](#moving-and-resizing)**: bars move at once, by an edge or to another row.
+- **[Rules on the server](#moving-and-resizing)**: policies, durations and a locked past, always checked.
+- **[Groups and resource timelines](#groups-and-resource-timelines)**: rows by project, assignee, room or machine.
+- **[Milestones, progress and dependencies](#defining-bars)**: diamonds, fills and finish-to-start arrows.
+- **[Filament actions on bars](#actions)**: click to edit, right-click for more, click to create.
+- **[Hour to year, zoom and Fit](#the-time-window)**: five scales, wheel or pinch zoom, the whole plan in one screen.
+- **[Search and filters](#the-time-window)**: Filament's filter fields, kept in the URL.
+- **[Keyboard and touch](https://packstub.dev/docs/filament-gantt/moves)**: move and resize with the arrows, drag on touch.
+- **[Resource page, standalone page or widget](#installation)**: wherever your panel needs a timeline.
+- **[No Gantt library, no build step](#configuration)**: dark mode, RTL and four languages.
 
 ## Compatibility
 

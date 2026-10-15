@@ -10,16 +10,16 @@ A Gantt chart and resource timeline for Filament v4 (4.13+) and v5. Any Eloquent
 
 ## Features
 
-- **[Drag to move, resize or reassign](moves.md)**: a bar moves at once; drag an edge to resize, up or down to another row.
-- **[Rules on the server](moves.md)**: the policy, durations, a locked past and your closures, checked again whatever the browser sent.
-- **[Groups and resource timelines](groups.md)**: rows by project, assignee or room, collapsible, or one compact row per resource.
-- **[Milestones, progress and dependencies](bars.md)**: diamonds, progress fills and finish-to-start arrows, dashed where a task starts too early.
-- **[Filament actions on bars](actions.md)**: click to edit in a modal or slide-over, right-click for more, click an empty spot to create.
-- **[Hour to year, zoom and Fit](filters.md)**: five scales, Ctrl/⌘ + wheel or a pinch, Fit for the whole picture, a date range.
-- **[Search and filters](filters.md)**: select, multiple, Yes / No, toggle and date-range filters on Filament's own fields, kept in the URL.
-- **[Keyboard and touch](moves.md)**: arrows move and resize a focused bar, announced to screen readers; a held bar drags on touch.
-- **[Resource page, standalone page or widget](widget.md)**: `GanttResourcePage`, `GanttPage` and a read-only dashboard `GanttWidget`.
-- **[No Gantt library, no build step](styling.md)**: one ES module on your panel's palette; dark mode, RTL, English, Romanian, Russian and German.
+- **[Drag to move, resize or reassign](moves.md)**: bars move at once, by an edge or to another row.
+- **[Rules on the server](moves.md)**: policies, durations and a locked past, always checked.
+- **[Groups and resource timelines](groups.md)**: rows by project, assignee, room or machine.
+- **[Milestones, progress and dependencies](bars.md)**: diamonds, fills and finish-to-start arrows.
+- **[Filament actions on bars](actions.md)**: click to edit, right-click for more, click to create.
+- **[Hour to year, zoom and Fit](filters.md)**: five scales, wheel or pinch zoom, the whole plan in one screen.
+- **[Search and filters](filters.md)**: Filament's filter fields, kept in the URL.
+- **[Keyboard and touch](moves.md)**: move and resize with the arrows, drag on touch.
+- **[Resource page, standalone page or widget](widget.md)**: wherever your panel needs a timeline.
+- **[No Gantt library, no build step](styling.md)**: dark mode, RTL and four languages.
 
 ## Guides
 
