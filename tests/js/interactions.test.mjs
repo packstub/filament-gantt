@@ -303,7 +303,7 @@ test('Today outside the window loads a window around today; the first draw never
     assert.deepEqual(c.wire.refreshes, [])
 
     c.scrollToToday()
-    assert.deepEqual(c.wire.refreshes, [[{}, '2026-10-07', '2026-12-06', false, false]])
+    assert.deepEqual(c.wire.refreshes, [[{}, '2026-10-07', '2026-12-06', false, false, '']])
 })
 
 test('a window narrower than the chart grows to fill it, once per width and zoom', () => {
@@ -312,7 +312,7 @@ test('a window narrower than the chart grows to fill it, once per width and zoom
 
     c.fill()
     // 600px at 5px a day: 120 days from the window's start
-    assert.deepEqual(c.wire.refreshes, [[{}, '2026-10-01', '2027-01-28', false, false]])
+    assert.deepEqual(c.wire.refreshes, [[{}, '2026-10-01', '2027-01-28', false, false, '']])
 
     c.filling = false
     c.fill()
@@ -364,7 +364,7 @@ test('a config rendered without filters asks for them with the state, and applie
     const c = chart({ filters: null, window: { start: null, end: null }, bars: [] })
     Object.assign(c.view, { days: 0, rows: [] })
     c.init()
-    assert.deepEqual(c.wire.refreshes, [[{}, null, null, true, false]])
+    assert.deepEqual(c.wire.refreshes, [[{}, null, null, true, false, '']])
 
     c.apply({ window: { start: '2026-10-01', end: '2026-10-31' }, groups: [], bars: [], total: 0, filters: [{ name: 'status', type: 'select', options: [] }] })
     assert.deepEqual(c.filters.map((f) => f.name), ['status'])
@@ -412,11 +412,11 @@ test('the URL\'s filters apply to a chart whose filters arrived with its state, 
         const c = chart({ filters: null, window: { start: null, end: null }, bars: [] })
         Object.assign(c.view, { days: 0, rows: [] })
         c.init()
-        assert.deepEqual(c.wire.refreshes, [[{}, null, null, true, false]])
+        assert.deepEqual(c.wire.refreshes, [[{}, null, null, true, false, '']])
 
         c.apply({ window: { start: '2026-10-01', end: '2026-10-31' }, groups: [], bars: [], total: 0, filters: [{ name: 'status', type: 'select', options: [{ value: 'open', label: 'Open' }] }] })
         assert.equal(c.active.status, 'open')
-        assert.deepEqual(c.wire.refreshes.at(-1), [{ status: 'open' }, '2026-10-01', '2026-10-31', false, false])
+        assert.deepEqual(c.wire.refreshes.at(-1), [{ status: 'open' }, '2026-10-01', '2026-10-31', false, false, ''])
 
         // a later state with the filters again (a refresh asked with them) reads the URL no more
         c.apply({ window: { start: '2026-10-01', end: '2026-10-31' }, groups: [], bars: [], total: 0, filters: [{ name: 'status', type: 'select', options: [{ value: 'open', label: 'Open' }] }] })
@@ -716,7 +716,7 @@ test('a day picked in the date picker sets the window edge as a date and loads i
     c.pickRange('start', '2026-10-05 00:00:00')
     assert.deepEqual(c.range, { start: '2026-10-05', end: '2026-10-31' })
     assert.equal(c.userRange, true)
-    assert.deepEqual(c.wire.refreshes.at(-1), [{}, '2026-10-05', '2026-10-31', false, true])
+    assert.deepEqual(c.wire.refreshes.at(-1), [{}, '2026-10-05', '2026-10-31', false, true, ''])
 
     c.pickRange('end', null)
     assert.equal(c.range.end, '')
@@ -869,4 +869,102 @@ test('the zoom factor lives in the URL and local storage, clamped', () => {
     } finally {
         globalThis.window.location = location
     }
+})
+
+/* ------------------------------------------------------------------ filter helpers and the search */
+
+test('every filter type has an empty state, a test for activity, a count and a reset, in the shapes the server reads', () => {
+    const c = chart({ bars: [], filters: [
+        { name: 'status', type: 'select', multiple: false, searchable: false, options: [{ value: 'done', label: 'Done' }] },
+        { name: 'tags', type: 'select', multiple: true, searchable: false, options: [{ value: 'a', label: 'A' }, { value: 'b', label: 'B' }] },
+        { name: 'is_done', type: 'boolean', multiple: false, searchable: false, options: [{ value: '1', label: 'Yes' }, { value: '0', label: 'No' }] },
+        { name: 'mine', type: 'toggle', multiple: false, searchable: false, options: [] },
+        { name: 'starts_on', type: 'dateRange', multiple: false, searchable: false, options: [] },
+    ] })
+    c.persist = () => {}
+    c.init()
+
+    assert.deepEqual(c.active, { status: '', tags: [], is_done: '', mine: false, starts_on: { from: '', until: '' } })
+    assert.equal(c.activeFilterCount(), 0)
+    assert.deepEqual(c.activeFilters(), {})
+
+    c.pickSelect('status', 'done')
+    c.pickSelect('tags', ['a', 'b'])
+    c.pickSelect('is_done', '0')
+    c.toggleFilter(c.filters[3])
+    c.pickFilter('starts_on', 'from', '2026-10-07 00:00:00')
+    assert.equal(c.activeFilterCount(), 5)
+    assert.ok(c.filters.every((f) => c.isActive(f)))
+    assert.deepEqual(c.activeFilters(), { status: 'done', tags: ['a', 'b'], is_done: '0', mine: true, starts_on: { from: '2026-10-07', until: null } })
+
+    // the same list again sends nothing; an empty list is "all"
+    const before = c.wire.refreshes.length
+    c.pickSelect('tags', ['a', 'b'])
+    assert.equal(c.wire.refreshes.length, before)
+    c.pickSelect('tags', [])
+    assert.deepEqual(c.active.tags, [])
+    assert.equal(c.isActive(c.filters[1]), false)
+    // "No" is a choice, '' is not
+    assert.equal(c.isActive(c.filters[2]), true)
+    c.toggleFilter(c.filters[3])
+    assert.equal(c.active.mine, false)
+
+    c.resetFilters()
+    assert.deepEqual(c.active, { status: '', tags: [], is_done: '', mine: false, starts_on: { from: '', until: '' } })
+    assert.equal(c.activeFilterCount(), 0)
+    const after = c.wire.refreshes.length
+    c.resetFilters()
+    assert.equal(c.wire.refreshes.length, after, 'nothing to reset sends nothing')
+})
+
+test('the URL keeps a multiple select, a toggle and the search, and restores them', () => {
+    const location = globalThis.window.location
+    const saved = []
+    globalThis.window.location = { href: 'https://x.test/?f.tags=a&f.tags=b&f.tags=zzz&f.mine=1&f.is_done=0&search=docs', search: '?f.tags=a&f.tags=b&f.tags=zzz&f.mine=1&f.is_done=0&search=docs' }
+    globalThis.window.history.replaceState = (s, t, url) => saved.push(String(url))
+    try {
+        const filters = [
+            { name: 'tags', type: 'select', multiple: true, searchable: false, options: [{ value: 'a', label: 'A' }, { value: 'b', label: 'B' }] },
+            { name: 'mine', type: 'toggle', multiple: false, searchable: false, options: [] },
+            { name: 'is_done', type: 'boolean', multiple: false, searchable: false, options: [{ value: '1', label: 'Yes' }, { value: '0', label: 'No' }] },
+        ]
+        const c = chart({ bars: [], searchable: true, filters })
+        c.init()
+        assert.deepEqual(c.active.tags, ['a', 'b'], 'an option the list does not hold is dropped')
+        assert.equal(c.active.mine, true)
+        assert.equal(c.active.is_done, '0')
+        assert.equal(c.search, 'docs')
+        // the URL's filters and search are loaded once, with the search as the last argument
+        assert.deepEqual(c.wire.refreshes.at(-1), [{ tags: ['a', 'b'], mine: true, is_done: '0' }, '2026-10-01', '2026-10-31', false, false, 'docs'])
+
+        c.persist()
+        const url = new URL(saved.at(-1))
+        assert.deepEqual(url.searchParams.getAll('f.tags'), ['a', 'b'])
+        assert.equal(url.searchParams.get('f.mine'), '1')
+        assert.equal(url.searchParams.get('f.is_done'), '0')
+        assert.equal(url.searchParams.get('search'), 'docs')
+
+        c.search = ''
+        c.toggleFilter(filters[1])
+        c.persist()
+        const cleared = new URL(saved.at(-1))
+        assert.equal(cleared.searchParams.has('search'), false)
+        assert.equal(cleared.searchParams.has('f.mine'), false)
+
+        // a chart without a search box ignores the URL's term
+        const d = chart({ bars: [], searchable: false, filters: [] })
+        d.init()
+        assert.equal(d.search, '')
+    } finally {
+        globalThis.window.location = location
+    }
+})
+
+test('Fit asks for the span of the bars the filters and the search leave', async () => {
+    const c = chart({ bars: [], searchable: true })
+    c.persist = () => {}
+    c.search = 'docs'
+    c.$wire.ganttSpan = async (filters, search) => { c.wire.spans = [[filters, search]]; return null }
+    await c.fitAll()
+    assert.deepEqual(c.wire.spans, [[{}, 'docs']])
 })

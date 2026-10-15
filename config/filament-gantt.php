@@ -80,6 +80,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Filters
+    |--------------------------------------------------------------------------
+    |
+    | Where a chart shows its filters: 'dropdown' (behind a funnel button in
+    | the toolbar, with the count of active ones, as a table's), 'toolbar'
+    | (inline, after the search box) or 'above' (a row of their own between
+    | the toolbar and the chart). A definition's filtersLayout() wins.
+    |
+    */
+
+    'filters_layout' => 'dropdown',
+
+    /*
+    |--------------------------------------------------------------------------
     | Formats
     |--------------------------------------------------------------------------
     |

@@ -12,20 +12,20 @@
 
 </div>
 
-A Gantt chart and resource timeline for Filament: any Eloquent query with a start and an end becomes draggable bars on an hour, day, week or month axis, grouped by project, assignee, room or machine, with every rule enforced on the server. The sibling of [Filament Kanban](https://github.com/packstub/filament-kanban).
+A Gantt chart and resource timeline for Filament: any Eloquent query with a start and an end becomes draggable bars on an hour, day, week, month or year axis, grouped by project, assignee, room or machine, with every rule enforced on the server. The sibling of [Filament Kanban](https://github.com/packstub/filament-kanban).
 
 ## Features
 
-- **[Drag to move, drag an edge to resize, drag to another row](#moving-and-resizing)**: the bar moves at once, snapped to the day (or the hour), and the server is asked afterwards. If it says no, the bar slides back and the reason is shown. Dragged up or down, it lands in another group: a booking in another room, a task on another person. Nothing re-renders on a move. The chart scrolls when a bar nears its edge; on touch a swipe scrolls and a held bar is picked up.
-- **[Keyboard moves](#moving-and-resizing)**: arrow keys move a focused bar, ↑/↓ carry it to another row, Shift or Alt with an arrow resizes it, announced to screen readers (WCAG 2.2 2.5.7).
-- **[Rules on the server](#moving-and-resizing)**: who may move (the model policy, the resource's `canEdit()`), `movable()`, `resizable()`, `regroupable()`, `minDuration()`, `maxDuration()`, `lockedBefore(today())` and `canMove()`/`canRegroup()` closures, all checked again in `Gantt::move()` whatever the browser sent.
-- **[Groups and swimlanes](#groups-and-resource-timelines)**: rows grouped by a column or a relation, collapsible, with a count; or the compact layout where a room's bookings share one row and overlapping ones stack.
-- **[Milestones, progress and dependencies](#defining-bars)**: a null end is a diamond; `progress('progress')` fills the bar; `dependencies('depends_on')` draws finish-to-start arrows between bars, dashed where a successor starts too early (drawn, never enforced).
-- **[Filament actions on bars](#actions)**: click a bar to edit it in a modal or slide-over, right-click for more; click an empty spot to create a record with that date and group already filled in. Each bar offers only the actions the user may run on its record.
-- **[Five scales, continuous zoom, Fit](#the-time-window)**: hour, day, week, month and year, Ctrl/⌘ + wheel or a pinch between them, a Fit button for the whole picture, a two-row axis, a date-range picker and select or date-range filters, all kept in the URL.
-- **[Resource page, standalone page or dashboard widget](#installation)**: `GanttResourcePage` (`/tasks/gantt`, follows the resource policy), `GanttPage`, and `GanttWidget` (read-only by default).
-- **Events**: a `BarMoved` Laravel event, an `afterMove()` hook, a browser event, `refreshOn([...])` for Livewire events and optional polling.
-- **No Gantt library, no build step**: one hand-written ES module and a stylesheet on your panel's palette. **Dark mode**, **RTL** and **translatable** (English, Romanian, Russian, German). MIT.
+- **[Drag to move, resize or reassign](#moving-and-resizing)**: a bar moves at once; drag an edge to resize, up or down to another row.
+- **[Rules on the server](#moving-and-resizing)**: the policy, durations, a locked past and your closures, checked again whatever the browser sent.
+- **[Groups and resource timelines](#groups-and-resource-timelines)**: rows by project, assignee or room, collapsible, or one compact row per resource.
+- **[Milestones, progress and dependencies](#defining-bars)**: diamonds, progress fills and finish-to-start arrows, dashed where a task starts too early.
+- **[Filament actions on bars](#actions)**: click to edit in a modal or slide-over, right-click for more, click an empty spot to create.
+- **[Hour to year, zoom and Fit](#the-time-window)**: five scales, Ctrl/⌘ + wheel or a pinch, Fit for the whole picture, a date range.
+- **[Search and filters](#the-time-window)**: select, multiple, Yes / No, toggle and date-range filters on Filament's own fields, kept in the URL.
+- **[Keyboard and touch](https://packstub.dev/docs/filament-gantt/moves)**: arrows move and resize a focused bar, announced to screen readers; a held bar drags on touch.
+- **[Resource page, standalone page or widget](#installation)**: `GanttResourcePage`, `GanttPage` and a read-only dashboard `GanttWidget`.
+- **[No Gantt library, no build step](#configuration)**: one ES module on your panel's palette; dark mode, RTL, English, Romanian, Russian and German.
 
 ## Compatibility
 
@@ -134,14 +134,19 @@ Read more: [Moving and resizing](https://packstub.dev/docs/filament-gantt/moves)
 
 ## The time window
 
-Hour, day, week, month and year scales, a today line, weekend shading, a date-range picker and filters in the toolbar. The window defaults to a week before the earliest bar and two weeks after the latest (around today for a history longer than two years), or set it with `startDate()`/`endDate()`. Filters are applied on the server:
+Hour, day, week, month and year scales, a today line, weekend shading, a date-range picker, a search box and filters in a table-style toolbar. The window defaults to a week before the earliest bar and two weeks after the latest (around today for a history longer than two years), or set it with `startDate()`/`endDate()`. The search and the filters are applied on the server; the filters sit behind a funnel button by default, inline or above the chart with `filtersLayout()`:
 
 ```php
 ->scale(Scale::Week)
+->searchable(['title', 'project.name'])
 ->filters([
     Filter::select('assignee_id')->options(fn () => User::pluck('name', 'id')->all()),
+    Filter::select('tags')->multiple()->options(['bug' => 'Bug', 'feature' => 'Feature']),
+    Filter::boolean('is_billable'),
+    Filter::toggle('mine')->query(fn ($query) => $query->where('assignee_id', auth()->id())),
     Filter::dateRange('starts_on'),
 ])
+->filtersLayout(FiltersLayout::Toolbar)
 ```
 
 The year scale fits a plan of two years in one screen, quarters over months:
@@ -176,7 +181,7 @@ Read more: [Kanban + Gantt](https://packstub.dev/docs/filament-gantt/kanban).
 
 ```php
 $gantt
-    ->scale('week')            // hour | day | week | month; the user can change it
+    ->scale('week')            // hour | day | week | month | year; the user can change it
     ->scales(['day', 'week'])  // the zoom levels offered
     ->snapTo('day')            // day | hour
     ->firstDayOfWeek(1)        // 1 = Monday … 7 = Sunday
@@ -186,11 +191,18 @@ $gantt
     ->key('tasks');            // where the browser remembers the zoom and folded groups
 ```
 
-`config/filament-gantt.php` holds the defaults: scale, first day of week, weekend days, row height, pixels per day per scale, window padding and bounds, `max_bars`, polling and the date formats of tooltips (the locale's by default).
+`config/filament-gantt.php` holds the defaults: scale, first day of week, weekend days, row height, pixels per day per scale, window padding and bounds, `max_bars`, polling, where the filters are shown (`filters_layout`) and the date formats of tooltips (the locale's by default).
 
 ![The chart in dark mode](https://raw.githubusercontent.com/packstub/art/main/filament-gantt/docs/dark.png)
 
-The stylesheet is plain CSS on Filament's colour variables and follows dark mode; it uses logical properties, so it reads right-to-left with the panel. Restyle it with the `--ps-gantt-*` variables on `.ps-gantt` from your theme.
+The chart sits in a table-style container whose toolbar, filters and menus are Filament's own components, so the panel's theme styles them. The stylesheet is plain CSS on Filament's colour variables and follows dark mode; it uses logical properties, so it reads right-to-left with the panel. Restyle it with the `--ps-gantt-*` variables on `.ps-gantt` from your theme (the same scheme as Kanban's `--ps-kanban-*` and Spreadsheet's `--ps-sheet-*`):
+
+```css
+.fi-body .ps-gantt {
+    --ps-gantt-label-width: 18rem;
+    --ps-gantt-today: var(--danger-500);
+}
+```
 
 Read more: [Styling](https://packstub.dev/docs/filament-gantt/styling).
 

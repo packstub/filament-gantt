@@ -393,6 +393,10 @@ export default function packstubGantt(config) {
         // come with the state the chart then asks for (see refresh()).
         filters: config.filters || [],
         needsFilters: config.filters === null,
+        filtersLayout: config.filtersLayout || 'dropdown',
+        // The toolbar's search box (searchable() attributes); refresh() sends the term with the filters.
+        searchable: !! config.searchable,
+        search: '',
         barActions: config.barActions || [],
         barAction: config.barAction,
         createAction: config.createAction,
@@ -450,7 +454,9 @@ export default function packstubGantt(config) {
                 const el = this.ui('refs').scroll
                 if (! el) return
                 const top = el.getBoundingClientRect().top + window.scrollY
-                this.ui('root').style.setProperty('--ps-gantt-height', Math.max(320, window.innerHeight - top - 24) + 'px')
+                // the footer (the bar count) sits under the chart inside the container
+                const footer = this.ui('root').querySelector?.('.ps-gantt-footer')?.offsetHeight || 0
+                this.ui('root').style.setProperty('--ps-gantt-height', Math.max(320, window.innerHeight - top - footer - 24) + 'px')
             }
             window.addEventListener('resize', this.fit)
             this.$nextTick(() => {
@@ -898,7 +904,7 @@ export default function packstubGantt(config) {
          * still inside it; the window then grows to the width (fill()).
          */
         fitAll() {
-            return this.ui('wire').ganttSpan(this.activeFilters()).then((span) => {
+            return this.ui('wire').ganttSpan(this.activeFilters(), this.search).then((span) => {
                 if (! span?.start) return
                 this.range = { start: span.start, end: span.end }
 
@@ -1507,33 +1513,69 @@ export default function packstubGantt(config) {
             this.applyWindow(null, { user: true })
         },
 
-        /** An option chosen in a select filter (null or '' is "all"). */
+        /**
+         * An option chosen in a select or boolean filter (null or '' is "all"); a
+         * multiple select hands a list (an empty one is "all").
+         */
         pickSelect(name, value) {
-            const v = value === null || value === undefined ? '' : String(value)
-            if ((this.active[name] ?? '') === v) return
+            const filter = this.filters.find((f) => f.name === name)
+            const v = filter?.multiple
+                ? (Array.isArray(value) ? value : (value === null || value === undefined || value === '' ? [] : [value])).map(String)
+                : (value === null || value === undefined ? '' : String(value))
+            if (JSON.stringify(this.active[name] ?? this.blank(filter || { type: 'select' })) === JSON.stringify(v)) return
             this.active[name] = v
             this.refresh()
         },
 
-        /** A day picked for one end of a date-range filter. */
+        /** A day picked for one end of a date-range filter (`Y-m-d H:i:s` from the picker, or null when cleared). */
         pickFilter(name, edge, value) {
             this.active[name] = { ...(this.active[name] || { from: '', until: '' }), [edge]: value ? String(value).slice(0, 10) : '' }
             this.refresh()
         },
 
-        blank(filter) {
-            return filter.type === 'dateRange' ? { from: '', until: '' } : ''
+        /** A toggle filter switched on or off. */
+        toggleFilter(filter) {
+            this.active[filter.name] = this.active[filter.name] !== true
+            this.refresh()
         },
 
+        /** Every filter back to "all", then one reload. */
+        resetFilters() {
+            if (! this.activeFilterCount()) return
+            for (const f of this.filters) this.active[f.name] = this.blank(f)
+            this.refresh()
+        },
+
+        /** The empty state of a filter, what "no choice" looks like: '' / [] / false / { from, until }. */
+        blank(filter) {
+            if (filter.type === 'dateRange') return { from: '', until: '' }
+            if (filter.type === 'toggle') return false
+            if (filter.multiple) return []
+            return ''
+        },
+
+        /** Whether a filter narrows the bars. */
+        isActive(filter) {
+            const v = this.active[filter.name]
+            if (filter.type === 'dateRange') return !! (v?.from || v?.until)
+            if (filter.type === 'toggle') return v === true
+            if (filter.multiple) return Array.isArray(v) && v.length > 0
+            return v !== '' && v !== null && v !== undefined
+        },
+
+        activeFilterCount() {
+            return this.filters.filter((f) => this.isActive(f)).length
+        },
+
+        /** What the server gets: the active filters' values in their URL shapes. */
         activeFilters() {
             const out = {}
             for (const f of this.filters) {
+                if (! this.isActive(f)) continue
                 const v = this.active[f.name]
-                if (f.type === 'dateRange') {
-                    if (v?.from || v?.until) out[f.name] = { from: v.from || null, until: v.until || null }
-                } else if (v) {
-                    out[f.name] = v
-                }
+                if (f.type === 'dateRange') out[f.name] = { from: v.from || null, until: v.until || null }
+                else if (f.type === 'toggle') out[f.name] = true
+                else out[f.name] = v
             }
             return out
         },
@@ -1577,7 +1619,7 @@ export default function packstubGantt(config) {
             const asked = this.range.start && this.range.end ? Math.abs(parse(this.range.end) - parse(this.range.start)) / DAY + 1 : null
 
             // Only a range the user typed (or Fit's span) is shown as asked; any other is at least min_window_days.
-            return this.ui('wire').ganttRefresh(this.activeFilters(), this.range.start || null, this.range.end || null, this.needsFilters, user).then((result) => {
+            return this.ui('wire').ganttRefresh(this.activeFilters(), this.range.start || null, this.range.end || null, this.needsFilters, user, this.search).then((result) => {
                 if (seq !== this.refreshSeq) {
                     if (after) this.filling = false
                     return
@@ -1608,7 +1650,7 @@ export default function packstubGantt(config) {
         refresh(background = false) {
             const seq = ++this.refreshSeq
             // The window stays what it is: a typed one stays exact while it is the user's (userRange).
-            this.ui('wire').ganttRefresh(this.activeFilters(), this.period.start, this.period.end, this.needsFilters, !! this.userRange).then((result) => {
+            this.ui('wire').ganttRefresh(this.activeFilters(), this.period.start, this.period.end, this.needsFilters, !! this.userRange, this.search).then((result) => {
                 if (seq !== this.refreshSeq || (background && (this.dragging || this.pending || this.keyboard))) return
                 this.apply(result)
                 if (! background) this.persist()
@@ -1617,8 +1659,8 @@ export default function packstubGantt(config) {
 
         /* ------------------------------------------------------------ remembered state */
 
-        // The zoom, the window and the filters live in the URL (shareable); collapsed
-        // groups and the last zoom in local storage.
+        // The zoom, the window, the search and the filters live in the URL (shareable);
+        // collapsed groups and the last zoom in local storage.
         restore() {
             const asked = { window: false, filters: false }
 
@@ -1645,7 +1687,12 @@ export default function packstubGantt(config) {
                     this.range = { start: from || this.period.start, end: until || this.period.end }
                     asked.window = true
                 }
-                asked.filters = this.restoreFilters(params)
+                const search = params.get('search')
+                if (search && this.searchable) {
+                    this.search = search.slice(0, 200)
+                    asked.filters = true
+                }
+                asked.filters = this.restoreFilters(params) || asked.filters
             } catch (e) {}
 
             return asked
@@ -1662,9 +1709,14 @@ export default function packstubGantt(config) {
                         const a = params.get(`f.${f.name}.from`) || ''
                         const b = params.get(`f.${f.name}.until`) || ''
                         if (a || b) { this.active[f.name] = { from: a, until: b }; any = true }
+                    } else if (f.type === 'toggle') {
+                        if (params.get(`f.${f.name}`) === '1') { this.active[f.name] = true; any = true }
+                    } else if (f.multiple) {
+                        // A listed option, or any value for a searchable select (its options come from a search)
+                        const values = params.getAll(`f.${f.name}`).filter((v) => v && (f.searchable || f.options.some((o) => o.value === v)))
+                        if (values.length) { this.active[f.name] = [...new Set(values)]; any = true }
                     } else {
                         const v = params.get(`f.${f.name}`)
-                        // A listed option, or any value for a searchable select (its options come from a search)
                         if (v && (f.searchable || f.options.some((o) => o.value === v))) { this.active[f.name] = v; any = true }
                     }
                 }
@@ -1686,15 +1738,22 @@ export default function packstubGantt(config) {
                 else params.delete('zoom')
                 params.set('from', this.period.start)
                 params.set('until', this.period.end)
+                if (this.search) params.set('search', this.search)
+                else params.delete('search')
                 for (const f of this.filters) {
                     params.delete(`f.${f.name}`)
                     params.delete(`f.${f.name}.from`)
                     params.delete(`f.${f.name}.until`)
+                    if (! this.isActive(f)) continue
                     const v = this.active[f.name]
                     if (f.type === 'dateRange') {
-                        if (v?.from) params.set(`f.${f.name}.from`, v.from)
-                        if (v?.until) params.set(`f.${f.name}.until`, v.until)
-                    } else if (v) {
+                        if (v.from) params.set(`f.${f.name}.from`, v.from)
+                        if (v.until) params.set(`f.${f.name}.until`, v.until)
+                    } else if (f.type === 'toggle') {
+                        params.set(`f.${f.name}`, '1')
+                    } else if (f.multiple) {
+                        for (const one of v) params.append(`f.${f.name}`, one)
+                    } else {
                         params.set(`f.${f.name}`, v)
                     }
                 }

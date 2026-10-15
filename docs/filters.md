@@ -37,7 +37,7 @@ The chart draws the days between two dates:
 2. otherwise `startDate()` and `endDate()` from the definition;
 3. otherwise a padded span around the bars: `window_padding_days.before` (7) before the earliest start to `window_padding_days.after` (14) after the latest end. When that span is longer than `max_window_days` (years of shifts or bookings), the chart opens around today instead: from `before` days before today to `after` days after it.
 
-A window the chart derives (from the bars, or from `startDate()`/`endDate()`) is stretched to at least `min_window_days` (28); a range the user typed in full, and the span Fit loads, is shown as asked, down to a single day. Every window is cut to at most `max_window_days` (730); the server decides, whatever the browser asked for. A range the user typed that was cut says so in a notification, and an "Until" before the "From" is read the other way round. Only the bars overlapping the window are loaded (a milestone by its start), at most `max_bars` (2,000) of them: when the window holds more, the toolbar shows "2,000 of 5,312 bars" (narrow the dates or filter).
+A window the chart derives (from the bars, or from `startDate()`/`endDate()`) is stretched to at least `min_window_days` (28); a range the user typed in full, and the span Fit loads, is shown as asked, down to a single day. Every window is cut to at most `max_window_days` (730); the server decides, whatever the browser asked for. A range the user typed that was cut says so in a notification, and an "Until" before the "From" is read the other way round. Only the bars overlapping the window are loaded (a milestone by its start), at most `max_bars` (2,000) of them: when the window holds more, the footer under the chart shows "2,000 of 5,312 bars" (narrow the dates or filter).
 
 A window narrower than the chart (zoomed out to months, or on a wide screen) grows at its end to fill the chart's width, so the grid never stops a third of the way.
 
@@ -46,15 +46,28 @@ A window narrower than the chart (zoomed out to months, or on a wide screen) gro
 ->endDate(now()->endOfQuarter())
 ```
 
+## Search
+
+`searchable()` names the attributes a search box in the toolbar looks in (`like %term%`, case-insensitive on PostgreSQL too); a dotted path searches a relation's attribute through `whereHas`. Without it there is no search box. The term travels with the filters (`ganttRefresh`, the URL's `search=`), and Fit follows it.
+
+```php
+->searchable(['title', 'project.name'])
+```
+
 ## Filters
 
-A `Filter` is a small control in the toolbar, applied on the server. Values it did not offer are ignored, so the browser cannot filter on anything you did not allow.
+A `Filter` is a control applied on the server. Values it did not offer are ignored, so the browser cannot filter on anything you did not allow. One `Filter` class, the same in Kanban, Gantt and Spreadsheet.
 
 ```php
 use Packstub\Gantt\Filter;
 
 ->filters([
     Filter::select('assignee_id')->label('Assignee')->options(fn () => User::pluck('name', 'id')->all()),
+    Filter::select('tags')->multiple()->options(['bug' => 'Bug', 'feature' => 'Feature'])
+        ->query(fn (Builder $query, array $values) => $query->whereJsonContains('tags', $values)),
+    Filter::boolean('is_billable'),
+    Filter::toggle('mine')->label('Assigned to me')
+        ->query(fn (Builder $query) => $query->where('assignee_id', auth()->id())),
     Filter::dateRange('starts_on'),
     Filter::select('state')->options(['late' => 'Late', 'open' => 'Open'])
         ->query(fn (Builder $query, string $value) => match ($value) {
@@ -64,8 +77,11 @@ use Packstub\Gantt\Filter;
 ])
 ```
 
-- `Filter::select()` (or `Filter::make()`): by default `where(<name>, <value>)`.
-- `Filter::dateRange()`: two date inputs; by default `where(<name>, '>=', from)` and `where(<name>, '<', until + 1 day)`, either side optional: plain ranges that keep the column's index in use and include the whole last day of a datetime column too. A `query()` closure receives `['from' => ?string, 'until' => ?string]`.
+- `Filter::select()` (or `Filter::make()`): one option, Filament's own select; by default `where(<name>, <value>)`.
+- `->multiple()`: several options at once; by default `whereIn(<name>, <values>)`, a `query()` closure gets a list of strings.
+- `Filter::boolean()`: a Yes / No select; by default `where(<name>, true|false)`, a `query()` closure gets a bool.
+- `Filter::toggle()`: one checkbox with the label, no options; `query()` is required (there is no default) and gets `true` when it is on.
+- `Filter::dateRange()`: two date pickers; by default `where(<name>, '>=', from)` and `where(<name>, '<', until + 1 day)`, either side optional: plain ranges that keep the column's index in use and include the whole last day of a datetime column too. A `query()` closure receives `['from' => ?string, 'until' => ?string]`.
 
 ### Searchable selects
 
@@ -81,9 +97,23 @@ Filter::select('assignee_id')->label('Assignee')->searchable()
 
 `optionsLimit()` caps a list or a search (default 50). The select is Filament's own (the component behind the `Select` field), so it looks and behaves like one in a form; the search is a renderless call, nothing on the page re-renders.
 
-Filters live in the URL too (`?f.assignee_id=3&f.starts_on.from=2026-10-01`).
+### Where the filters are shown
 
-The toolbar is built from Filament's own Blade components (tabs, button, input wrapper, Filament's date picker and select), so it follows the panel's theme, but it is not a Filament form: the chart is drawn by the browser and a filter change is a renderless call, so nothing on the page re-renders. A form-based filter (`Filter::form()`) is on the roadmap; until then, put a real Filament form in the page's header actions and dispatch `packstub-gantt-refresh` from it.
+```php
+use Packstub\Gantt\Enums\FiltersLayout;
+
+->filtersLayout(FiltersLayout::Toolbar)   // or 'toolbar'
+```
+
+- `FiltersLayout::Dropdown` (the default, as a table's): behind a funnel button at the end of the toolbar, the count of active filters on it, a Reset link in the panel.
+- `FiltersLayout::Toolbar`: inline in the toolbar, after the search box, each field with its label as a prefix.
+- `FiltersLayout::AboveContent`: on a row of their own between the toolbar and the chart.
+
+The config's `filters_layout` sets the default for every chart (`dropdown`, `toolbar` or `above`; another value throws). A chart without filters shows no funnel.
+
+Filters live in the URL too (`?f.assignee_id=3&f.tags=bug&f.tags=feature&f.mine=1&f.starts_on.from=2026-10-01&search=docs`); a value the filter does not offer is dropped on the way in.
+
+The toolbar is built from Filament's own Blade components (tabs, button, input wrapper, input, Filament's date picker, select, checkbox and dropdown) in a table-style container, so it follows the panel's theme, but it is not a Filament form: the chart is drawn by the browser and a filter change is a renderless call, so nothing on the page re-renders. A form-based filter (`Filter::form()`) is on the roadmap; until then, put a real Filament form in the page's header actions and dispatch `packstub-gantt-refresh` from it.
 
 ## Refreshing
 

@@ -51,22 +51,23 @@ trait InteractsWithGantt
 
     /**
      * The bars and groups of a window (the current one, or the one the toolbar asks
-     * for), with the current filters. The server clamps the window and answers with
-     * the one it settled on; with $withFilters, the filters' definitions too (a
-     * config rendered without them); with $exact, a range typed in full is shown as
-     * asked instead of stretched to `min_window_days`. Both flags count only as `true`.
+     * for), with the current filters and search. The server clamps the window and
+     * answers with the one it settled on; with $withFilters, the filters' definitions
+     * too (a config rendered without them); with $exact, a range typed in full is
+     * shown as asked instead of stretched to `min_window_days`. Both flags count only
+     * as `true`; the search term is read as a string or nothing.
      *
      * @param  array<string, mixed>  $filters
      * @return array<string, mixed>
      */
     #[Renderless]
-    public function ganttRefresh(mixed $filters = [], mixed $from = null, mixed $until = null, mixed $withFilters = false, mixed $exact = false): array
+    public function ganttRefresh(mixed $filters = [], mixed $from = null, mixed $until = null, mixed $withFilters = false, mixed $exact = false, mixed $search = ''): array
     {
         $gantt = $this->getGantt();
-        $state = $gantt->getState(is_array($filters) ? $filters : [], is_string($from) ? $from : null, is_string($until) ? $until : null, $exact === true);
+        $state = $gantt->getState(is_array($filters) ? $filters : [], is_string($from) ? $from : null, is_string($until) ? $until : null, $exact === true, is_string($search) ? $search : '');
 
         if ($withFilters === true) {
-            $state['filters'] = array_map(fn ($filter) => $filter->toArray(), $gantt->getFilters());
+            $state['filters'] = array_map(fn ($filter) => $filter->toArray(), $this->ganttUsableFilters());
         }
 
         return $state;
@@ -80,9 +81,9 @@ trait InteractsWithGantt
      * @return array{start: string, end: string}|null
      */
     #[Renderless]
-    public function ganttSpan(mixed $filters = []): ?array
+    public function ganttSpan(mixed $filters = [], mixed $search = ''): ?array
     {
-        return $this->getGantt()->getSpan(is_array($filters) ? $filters : []);
+        return $this->getGantt()->getSpan(is_array($filters) ? $filters : [], is_string($search) ? $search : '');
     }
 
     /**
@@ -96,7 +97,7 @@ trait InteractsWithGantt
     {
         $filter = is_string($name) ? $this->ganttFilter($name) : null;
 
-        if ($filter === null || $filter->isDateRange() || ($search !== null && ! is_string($search))) {
+        if ($filter === null || ! ($filter->isSelect() || $filter->isBoolean()) || ($search !== null && ! is_string($search))) {
             return [];
         }
 
@@ -113,7 +114,55 @@ trait InteractsWithGantt
     {
         $filter = is_string($name) ? $this->ganttFilter($name) : null;
 
-        return $filter === null || $filter->isDateRange() || ! is_string($value) || $value === '' ? null : $filter->getOptionLabel($value);
+        return $filter === null || ! ($filter->isSelect() || $filter->isBoolean()) || ! is_string($value) || $value === '' ? null : $filter->getOptionLabel($value);
+    }
+
+    /**
+     * The labels of a multiple select filter's values (ones restored from the URL),
+     * as the browser's select expects them; a value with no label is left out.
+     *
+     * @return list<array{value: string, label: string}>
+     */
+    #[Renderless]
+    public function ganttFilterOptionLabels(mixed $name, mixed $values = []): array
+    {
+        $filter = is_string($name) ? $this->ganttFilter($name) : null;
+
+        if ($filter === null || ! ($filter->isSelect() || $filter->isBoolean()) || ! is_array($values)) {
+            return [];
+        }
+
+        $labels = [];
+
+        foreach ($values as $value) {
+            if ((is_string($value) && $value !== '') || is_int($value)) {
+                $label = $filter->getOptionLabel($value);
+
+                if ($label !== null) {
+                    $labels[] = ['value' => (string) $value, 'label' => $label];
+                }
+            }
+        }
+
+        return $labels;
+    }
+
+    /**
+     * The filters, checked once when they are sent to the browser: a toggle without
+     * a query() is a mistake in the definition, told on the first render, not the
+     * first time a user turns it on.
+     *
+     * @return list<Filter>
+     */
+    protected function ganttUsableFilters(): array
+    {
+        $filters = $this->getGantt()->getFilters();
+
+        foreach ($filters as $filter) {
+            $filter->assertUsable();
+        }
+
+        return $filters;
     }
 
     protected function ganttFilter(string $name): ?Filter
@@ -222,10 +271,14 @@ trait InteractsWithGantt
             'dateTimeFormat' => Gantt::dateTimeFormat(),
             'readOnly' => $gantt->isReadOnly(),
             'height' => $this->getGanttHeight(),
+            'searchable' => $gantt->isSearchable(),
+            'filtersLayout' => $gantt->getFiltersLayout()->value,
+            // Whether the view draws the filters' home at all (their definitions may come later, see below).
+            'hasFilters' => $gantt->getFilters() !== [],
             // Filter options are often queries: a render after the first one (the chart
             // is wire:ignore) does without them, and a chart that is new on such a render
             // asks for them along with its state.
-            'filters' => $withState ? array_map(fn ($f) => $f->toArray(), $gantt->getFilters()) : null,
+            'filters' => $withState ? array_map(fn ($f) => $f->toArray(), $this->ganttUsableFilters()) : null,
             'refreshOn' => $gantt->getRefreshOn(),
             'poll' => $gantt->getPoll(),
             'barActions' => array_map(fn ($action) => $this->ganttActionConfig($action), $actions ? $gantt->getBarActions() : []),

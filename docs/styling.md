@@ -1,6 +1,6 @@
 # Styling
 
-The stylesheet is plain CSS on Filament's colour variables (`--gray-*`, `--primary-*`, `--danger-*`) and follows the panel's theme and dark mode without compiling anything. Restyle it with the `--ps-gantt-*` variables on `.ps-gantt` from your theme, prefixed so they win over the plugin's stylesheet:
+The stylesheet is plain CSS on Filament's colour variables (`--gray-*`, `--primary-*`, `--danger-*`) and follows the panel's theme and dark mode without compiling anything. The chart sits in a table-style container (`.ps-gantt`: the same ring, radius and shadow as a Filament table) with a toolbar, the chart and a footer with the bar count; every control in it (tabs, buttons, the search box, the date pickers, the selects, the funnel dropdown, the bar menu) is a Filament component, so the panel's theme styles it. Kanban, Gantt and Spreadsheet share the scheme: the same variables under each plugin's prefix (`--ps-kanban-*`, `--ps-gantt-*`, `--ps-sheet-*`), so one theme rule per plugin restyles all three alike. Restyle the chart with the `--ps-gantt-*` variables on `.ps-gantt` from your theme, prefixed so they win over the plugin's stylesheet:
 
 ```css
 .fi-body .ps-gantt {
@@ -17,10 +17,13 @@ The stylesheet is plain CSS on Filament's colour variables (`--gray-*`, `--prima
 
 | Variable | What it sets |
 | --- | --- |
-| `--ps-gantt-bg`, `--ps-gantt-surface`, `--ps-gantt-border`, `--ps-gantt-line` | Backgrounds, borders and grid lines. |
-| `--ps-gantt-text`, `--ps-gantt-muted`, `--ps-gantt-soft`, `--ps-gantt-bar-text` | Text colours. |
-| `--ps-gantt-weekend`, `--ps-gantt-group`, `--ps-gantt-today`, `--ps-gantt-ring` | Weekend shading, group rows, the today line, focus rings. |
-| `--ps-gantt-label-width`, `--ps-gantt-height`, `--ps-gantt-radius`, `--ps-gantt-bar-radius` | Sizes. |
+| `--ps-gantt-bg`, `--ps-gantt-surface`, `--ps-gantt-border`, `--ps-gantt-line` | Backgrounds, borders and grid lines (shared scheme). |
+| `--ps-gantt-text`, `--ps-gantt-muted`, `--ps-gantt-soft`, `--ps-gantt-bar-text` | Text colours (the first three shared). |
+| `--ps-gantt-ring`, `--ps-gantt-radius`, `--ps-gantt-shadow`, `--ps-gantt-outline`, `--ps-gantt-mono` | The container's focus ring and active-filter ring, its radius (`0.75rem`, a table's), shadow and 1px outline, the hint's monospace font (shared scheme). |
+| `--ps-gantt-weekend`, `--ps-gantt-group`, `--ps-gantt-today`, `--ps-gantt-arrow`, `--ps-gantt-arrow-late` | Weekend shading, group rows, the today line, dependency arrows and the dashed late ones. |
+| `--ps-gantt-label-width`, `--ps-gantt-height`, `--ps-gantt-bar-radius` | Sizes: the sticky label column, the most the chart grows to, the bars' corners. |
+
+The container's parts are `ps-gantt-toolbar` (with `ps-gantt-toolbar-start` and `ps-gantt-toolbar-end`), `ps-gantt-filters-inline` / `ps-gantt-filters-above` / `ps-gantt-filters-panel` (by `filtersLayout()`), `ps-gantt-scroll` (the chart), `ps-gantt-footer` (the bar count) and `ps-gantt-menu` (the bar menu, in Filament's `fi-dropdown-panel` clothes).
 
 Row height and pixels per day are numbers the script needs: set them in `config/filament-gantt.php` (`row_height`, `px_per_day`).
 

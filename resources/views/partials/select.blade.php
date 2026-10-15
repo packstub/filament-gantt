@@ -1,9 +1,10 @@
 {{--
-    Filament's own select (the component behind Select, searchable or not), driven by
-    the chart instead of a form: the options come with the chart or from a renderless
-    search (`ganttFilterOptions`), a choice flows out as a `gantt-select` event. The
-    markup follows Select::toEmbeddedHtml(); the messages are Filament's own strings.
-    Rendered inside the chart's `x-for="filter in filters"`.
+    Filament's own select (the component behind Select, searchable or not, single or
+    multiple), driven by the component instead of a form: the options come with the
+    config or from a renderless search (`$wire.ganttFilterOptions`), a choice flows
+    out as a `ps-gantt-select` event. The markup follows Select::toEmbeddedHtml(); the
+    messages are Filament's own strings. Rendered inside `x-for="filter in filters"`,
+    with `active[filter.name]` holding '' (none), a value, or a list for a multiple.
 --}}
 <div
     x-load
@@ -13,7 +14,7 @@
         canSelectPlaceholder: true,
         clearButtonLabel: @js(__('filament-forms::components.select.actions.clear.label')),
         getOptionLabelUsing: async () => await $wire.ganttFilterOptionLabel(filter.name, active[filter.name] || null),
-        getOptionLabelsUsing: async () => [],
+        getOptionLabelsUsing: async () => await $wire.ganttFilterOptionLabels(filter.name, active[filter.name] || []),
         getOptionsUsing: async () => await $wire.ganttFilterOptions(filter.name),
         getSearchResultsUsing: async (search) => await $wire.ganttFilterOptions(filter.name, search),
         hasDynamicOptions: filter.searchable && ! filter.options.length,
@@ -22,11 +23,11 @@
         id: 'ps-gantt-filter-' + filter.name,
         initialOptionLabel: null,
         initialOptionLabels: [],
-        initialState: active[filter.name] || null,
+        initialState: filter.multiple ? (active[filter.name] || []) : (active[filter.name] || null),
         isAutofocused: false,
         isDisabled: false,
         isHtmlAllowed: false,
-        isMultiple: false,
+        isMultiple: filter.multiple,
         isReorderable: false,
         isSearchable: filter.searchable,
         livewireId: $wire.__instance?.id ?? null,
@@ -45,11 +46,11 @@
         searchLabel: @js(__('filament-forms::components.select.search_label')),
         searchPrompt: @js(__('filament-forms::components.select.search_prompt')),
         searchableOptionFields: ['label'],
-        state: active[filter.name] || null,
+        state: filter.multiple ? (active[filter.name] || []) : (active[filter.name] || null),
         statePath: 'gantt.' + filter.name,
     })"
-    x-init="$watch('state', (value) => $dispatch('gantt-select', value))"
-    x-on:gantt-select="pickSelect(filter.name, $event.detail)"
+    x-init="$watch('state', (value) => $dispatch('ps-gantt-select', value))"
+    x-on:ps-gantt-select="pickSelect(filter.name, $event.detail)"
     x-on:keydown.esc="select.dropdown.isActive && $event.stopPropagation()"
     x-bind:aria-label="filter.label"
     class="fi-select-input"

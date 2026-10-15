@@ -1,11 +1,11 @@
 {{--
     Filament's own date picker (the Alpine component behind DatePicker), driven by the
-    chart instead of a form: the chart's value flows in through x-effect, a pick flows
-    out as a `gantt-pick` event (the day as `Y-m-d H:i:s`, or null when cleared). The
+    component instead of a form: the value flows in through x-effect, a pick flows out
+    as a `ps-gantt-pick` event (the day as `Y-m-d H:i:s`, or null when cleared). The
     markup follows Filament's DateTimePicker::toEmbeddedHtml() so the forms stylesheet
     styles it; only the state binding and the pick event differ.
 
-    @param  string  $model  the chart expression holding a `Y-m-d` string (`range.start`)
+    @param  string  $model  the expression holding a `Y-m-d` string (`active[filter.name].from`)
     @param  string  $pick   what to run on a pick, with `$event.detail`
     @param  string  $label  a JS expression for the accessible name
 --}}
@@ -18,14 +18,14 @@
     x-data="dateTimePickerFormComponent({
         defaultFocusedDate: null,
         displayFormat: @js($displayFormat),
-        firstDayOfWeek: {{ (int) $config['firstDayOfWeek'] }},
+        firstDayOfWeek: {{ (int) ($firstDayOfWeek ?? 1) }},
         isAutofocused: false,
         locale: @js(str_replace('_', '-', app()->getLocale())),
         shouldCloseOnDateSelection: true,
         state: null,
     })"
     x-effect="state = ({{ $model }}) || null"
-    x-on:gantt-pick="{{ $pick }}"
+    x-on:ps-gantt-pick="{{ $pick }}"
     x-on:keydown.esc="isOpen() && $event.stopPropagation()"
     class="fi-fo-date-time-picker"
 >
@@ -36,13 +36,13 @@
     <button
         x-ref="button"
         x-on:click="togglePanelVisibility()"
-        x-on:keydown.enter.prevent.stop="isOpen() ? (selectDate(), $dispatch('gantt-pick', state)) : togglePanelVisibility()"
+        x-on:keydown.enter.prevent.stop="isOpen() ? (selectDate(), $dispatch('ps-gantt-pick', state)) : togglePanelVisibility()"
         x-on:keydown.arrow-left.prevent.stop="focusPreviousDay()"
         x-on:keydown.arrow-right.prevent.stop="focusNextDay()"
         x-on:keydown.arrow-up.prevent.stop="focusPreviousWeek()"
         x-on:keydown.arrow-down.prevent.stop="focusNextWeek()"
-        x-on:keydown.backspace.prevent.stop="clearState(); $dispatch('gantt-pick', null)"
-        x-on:keydown.delete.prevent.stop="clearState(); $dispatch('gantt-pick', null)"
+        x-on:keydown.backspace.prevent.stop="clearState(); $dispatch('ps-gantt-pick', null)"
+        x-on:keydown.delete.prevent.stop="clearState(); $dispatch('ps-gantt-pick', null)"
         x-bind:aria-label="{{ $label }}"
         type="button"
         class="fi-fo-date-time-picker-trigger"
@@ -78,7 +78,7 @@
             <template x-for="day in daysInFocusedMonth" x-bind:key="day">
                 <div
                     x-text="day"
-                    x-on:click="dayIsDisabled(day) || (selectDate(day), $dispatch('gantt-pick', state))"
+                    x-on:click="dayIsDisabled(day) || (selectDate(day), $dispatch('ps-gantt-pick', state))"
                     x-on:mouseenter="setFocusedDay(day)"
                     role="option"
                     x-bind:aria-selected="focusedDate.date() === day"
