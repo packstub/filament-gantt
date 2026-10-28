@@ -70,6 +70,13 @@ The `CarbonImmutable` instances handed to `canMove()`, `moveUsing()`, `afterMove
 ->authorizeMoves(true)   // anyone who sees the chart
 ```
 
+Moves are the only thing authorized by default outside a resource. On a `GanttPage`, a `GanttWidget` or your own component, Filament's `EditAction` and `DeleteAction` in `barActions()` run for anyone who can open the page unless the action says what it needs, or the chart sits on a `GanttResourcePage`, where the resource's policy applies ([Actions](actions.md#which-actions-a-bar-offers)):
+
+```php
+EditAction::make()->authorize('update'),
+DeleteAction::make()->authorize('delete'),
+```
+
 ## Rules
 
 Every rule takes a boolean or a closure that receives the record, and is checked on the server whatever the browser sent:

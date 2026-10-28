@@ -17,7 +17,9 @@ use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Traits\Conditionable;
+use InvalidArgumentException;
 use LogicException;
+use Packstub\Gantt\Enums\FiltersLayout;
 use Packstub\Gantt\Enums\Scale;
 use Packstub\Gantt\Enums\Unit;
 use Packstub\Gantt\Events\BarMoved;
@@ -141,6 +143,11 @@ class Gantt
 
     /** @var list<Filter> */
     protected array $filters = [];
+
+    protected FiltersLayout|string|null $filtersLayout = null;
+
+    /** @var list<string> */
+    protected array $searchable = [];
 
     /** @var list<Action> */
     protected array $barActions = [];
@@ -515,6 +522,32 @@ class Gantt
     }
 
     /**
+     * Where the filters are shown: behind a funnel button in the toolbar (the
+     * default, as a table's), inline in the toolbar, or on a row above the chart.
+     * Default: the config's `filters_layout`.
+     */
+    public function filtersLayout(FiltersLayout|string|null $layout): static
+    {
+        $this->filtersLayout = $layout;
+
+        return $this;
+    }
+
+    /**
+     * Attributes the toolbar's search box looks in (`like %term%`, case-insensitive
+     * on PostgreSQL), a dotted path for a relation's attribute (`project.name`).
+     * Without any, there is no search box.
+     *
+     * @param  list<string>  $attributes
+     */
+    public function searchable(array $attributes): static
+    {
+        $this->searchable = array_values(array_filter($attributes, 'is_string'));
+
+        return $this;
+    }
+
+    /**
      * Filament actions offered on each bar (right-click, or the ⋯ button). The bar's
      * record is the action's record, resolved through the chart's query.
      *
@@ -578,10 +611,18 @@ class Gantt
      * Livewire events after which the chart reloads its bars (`$this->dispatch('task-updated')`
      * anywhere on the page).
      *
-     * @param  list<string>  $events
+     * @param  list<string>  $events  names of letters, digits, `_`, `.`, `:` and `-` (they end up in the view's `x-on:` attributes)
+     *
+     * @throws InvalidArgumentException for a name of another shape
      */
     public function refreshOn(array $events): static
     {
+        foreach ($events as $event) {
+            if (! is_string($event) || ! preg_match('/^[\w.:-]+$/', $event)) {
+                throw new InvalidArgumentException(sprintf('A refreshOn() event name holds letters, digits, "_", ".", ":" and "-" only, [%s] given.', is_string($event) ? $event : get_debug_type($event)));
+            }
+        }
+
         $this->refreshOn = array_values($events);
 
         return $this;
@@ -596,7 +637,7 @@ class Gantt
             $this->poll = max(1000, $interval);
         } else {
             preg_match('/^(\d+)\s*(ms|s|m)?$/', trim($interval), $m)
-                ?: throw new \InvalidArgumentException("Cannot read the poll interval [{$interval}]: use '10s', '1m' or milliseconds.");
+                ?: throw new InvalidArgumentException("Cannot read the poll interval [{$interval}]: use '10s', '1m' or milliseconds.");
             $this->poll = max(1000, (int) $m[1] * match ($m[2] ?? 'ms') {
                 's' => 1000, 'm' => 60000, default => 1
             });
@@ -814,6 +855,23 @@ class Gantt
         return $this->filters;
     }
 
+    /** The definition's layout, else the config's `filters_layout` (a value that is no layout throws). */
+    public function getFiltersLayout(): FiltersLayout
+    {
+        return FiltersLayout::fromConfig($this->filtersLayout ?? config('filament-gantt.filters_layout'));
+    }
+
+    /** @return list<string> */
+    public function getSearchable(): array
+    {
+        return $this->searchable;
+    }
+
+    public function isSearchable(): bool
+    {
+        return $this->searchable !== [];
+    }
+
     /** @return list<Action> */
     public function getBarActions(): array
     {
@@ -937,6 +995,12 @@ class Gantt
             return null;
         }
 
+        // An integer key never matches 'abc': asked anyway, PostgreSQL throws a QueryException
+        // (a 500 from an action's hidden()), so a bar id of another shape is simply not found.
+        if (! is_int($id) && $this->newModel()->getKeyType() === 'int' && ! ctype_digit((string) $id)) {
+            return null;
+        }
+
         return array_key_exists($key = (string) $id, $this->records)
             ? $this->records[$key]
             : $this->records[$key] = $this->baseQuery()->whereKey($key)->first();
@@ -1002,10 +1066,10 @@ class Gantt
      * @param  array<string, mixed>  $filters
      * @return array{window: array{start: string, end: string}, groups: list<array<string, mixed>>, bars: list<array<string, mixed>>}
      */
-    public function getState(array $filters = [], ?string $from = null, ?string $until = null, bool $exact = false): array
+    public function getState(array $filters = [], ?string $from = null, ?string $until = null, bool $exact = false, string $search = ''): array
     {
         $window = $this->getWindow($from, $until, $exact);
-        $query = $this->windowQuery($filters, $window['start'], $window['end']);
+        $query = $this->windowQuery($filters, $window['start'], $window['end'], $search);
         $limit = max(1, (int) config('filament-gantt.max_bars', 2000));
 
         $records = (clone $query)->limit($limit + 1)->get();
@@ -1027,9 +1091,9 @@ class Gantt
      * @param  array<string, mixed>  $filters
      * @return list<array<string, mixed>>
      */
-    public function getBars(array $filters = [], ?CarbonInterface $from = null, ?CarbonInterface $until = null): array
+    public function getBars(array $filters = [], ?CarbonInterface $from = null, ?CarbonInterface $until = null, string $search = ''): array
     {
-        return $this->presentBars($this->windowQuery($filters, $from, $until)->get());
+        return $this->presentBars($this->windowQuery($filters, $from, $until, $search)->get());
     }
 
     /**
@@ -1050,9 +1114,9 @@ class Gantt
      *
      * @param  array<string, mixed>  $filters
      */
-    protected function windowQuery(array $filters = [], ?CarbonInterface $from = null, ?CarbonInterface $until = null): Builder
+    protected function windowQuery(array $filters = [], ?CarbonInterface $from = null, ?CarbonInterface $until = null, string $search = ''): Builder
     {
-        $query = $this->filteredQuery($filters);
+        $query = $this->filteredQuery($filters, $search);
         $start = $query->qualifyColumn($this->startAttribute);
         $end = $query->qualifyColumn($this->endAttribute);
 
@@ -1431,7 +1495,7 @@ class Gantt
      *
      * @param  array<string, mixed>  $filters
      */
-    public function filteredQuery(array $filters = []): Builder
+    public function filteredQuery(array $filters = [], string $search = ''): Builder
     {
         $query = $this->baseQuery();
 
@@ -1439,7 +1503,42 @@ class Gantt
             $filter->apply($query, $filters[$filter->getName()] ?? null);
         }
 
+        if (($search = trim(mb_substr($search, 0, 200))) !== '') {
+            $this->applySearch($query, $search);
+        }
+
         return $query;
+    }
+
+    /**
+     * `like %term%` over every searchable() attribute, a dotted path through
+     * `whereHas`; nothing without any. `!` escapes the wildcards, with an explicit
+     * ESCAPE clause: SQLite has no escape character by default, and a backslash
+     * there is a parse error on MySQL, while `!` works on all three, so "100%"
+     * finds "100% done" everywhere. Case-insensitive on PostgreSQL (`ilike`), as
+     * MySQL's and SQLite's `like` already are.
+     */
+    protected function applySearch(Builder $query, string $term): void
+    {
+        if ($this->searchable === []) {
+            return;
+        }
+
+        $operator = $query->getConnection()->getDriverName() === 'pgsql' ? 'ilike' : 'like';
+        $like = '%'.str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $term).'%';
+
+        $match = fn (Builder $q, string $column, string $boolean) => $q->whereRaw($q->getGrammar()->wrap($q->qualifyColumn($column))." {$operator} ? escape '!'", [$like], $boolean);
+
+        $query->where(function (Builder $q) use ($match): void {
+            foreach ($this->searchable as $path) {
+                if (str_contains($path, '.')) {
+                    // The relation's own constraint is an AND inside the EXISTS; the OR is between the paths.
+                    $q->orWhereHas(str($path)->beforeLast('.')->toString(), fn (Builder $r) => $match($r, str($path)->afterLast('.')->toString(), 'and'));
+                } else {
+                    $match($q, $path, 'or');
+                }
+            }
+        });
     }
 
     /**
@@ -1671,9 +1770,9 @@ class Gantt
      * @param  array<string, mixed>  $filters
      * @return array{start: string, end: string}|null
      */
-    public function getSpan(array $filters = []): ?array
+    public function getSpan(array $filters = [], string $search = ''): ?array
     {
-        $span = $this->spanOf($filters);
+        $span = $this->spanOf($filters, $search);
 
         return $span === null ? null : ['start' => $span[0]->toDateString(), 'end' => $span[1]->toDateString()];
     }
@@ -1682,9 +1781,9 @@ class Gantt
      * @param  array<string, mixed>  $filters
      * @return array{0: CarbonImmutable, 1: CarbonImmutable}|null
      */
-    protected function spanOf(array $filters): ?array
+    protected function spanOf(array $filters, string $search = ''): ?array
     {
-        $query = $this->filteredQuery($filters);
+        $query = $this->filteredQuery($filters, $search);
         $start = $query->qualifyColumn($this->startAttribute);
         $end = $query->qualifyColumn($this->endAttribute);
 

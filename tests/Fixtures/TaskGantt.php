@@ -16,6 +16,7 @@ use Filament\Schemas\Concerns\InteractsWithSchemas;
 use Filament\Schemas\Contracts\HasSchemas;
 use Livewire\Component;
 use Packstub\Gantt\Concerns\InteractsWithGantt;
+use Packstub\Gantt\Enums\FiltersLayout;
 use Packstub\Gantt\Filter;
 use Packstub\Gantt\Gantt;
 
@@ -37,6 +38,12 @@ class TaskGantt extends Component implements HasActions, HasSchemas
     /** Shapes each bar when set: `fn (Task $task): ?Bar`. */
     public static ?Closure $bar = null;
 
+    /** Where the filters are shown; null = the config's. */
+    public static FiltersLayout|string|null $filtersLayout = null;
+
+    /** The filters, when a test wants others than the two below. */
+    public static ?array $filters = null;
+
     public function gantt(Gantt $gantt): Gantt
     {
         return $gantt
@@ -46,10 +53,12 @@ class TaskGantt extends Component implements HasActions, HasSchemas
             ->progress('progress')
             ->bar(fn (Task $task) => static::$bar ? (static::$bar)($task) : null)
             ->groupBy('project', label: 'project.name')
-            ->filters([
+            ->filters(static::$filters ?? [
                 Filter::select('project_id')->options(fn () => Project::query()->pluck('name', 'id')->all()),
                 Filter::dateRange('starts_on'),
             ])
+            ->filtersLayout(static::$filtersLayout)
+            ->searchable(['title', 'project.name'])
             ->movable(fn (Task $task) => static::$movable === null || in_array($task->title, static::$movable, true))
             ->readOnly(fn () => static::$readOnly)
             ->minDuration(days: 1)

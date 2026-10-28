@@ -1,76 +1,198 @@
 /*
- * packstub/filament-gantt — plain CSS on the panel's own palette (--gray-*, --primary-*),
- * so the chart follows the theme and dark mode without compiling the plugin's views.
- * Logical properties throughout: the chart reads right-to-left with the page.
- * Override the --ps-gantt-* variables on .ps-gantt to restyle it.
+ * Shared shell, identical in Kanban (ps-gantt = ps-kanban), Gantt (ps-gantt) and
+ * Spreadsheet (ps-sheet). The values are Filament's table container's (fi-ta-ctn,
+ * fi-ta-header-toolbar, fi-ta-filters, fi-ta-selection-indicator, fi-pagination), so
+ * the three sit on a page exactly like a table does. Only the layout and what
+ * Filament has no word for is here: the controls themselves are Filament's own
+ * components (fi-btn, fi-icon-btn, fi-input-wrp, fi-select-input, fi-fo-date-time-picker,
+ * fi-checkbox-input, fi-badge, fi-dropdown-panel, fi-tabs, fi-modal), styled by the panel.
  */
 
 .ps-gantt {
     --ps-gantt-bg: #fff;
     --ps-gantt-surface: var(--gray-50);
     --ps-gantt-border: var(--gray-200);
-    --ps-gantt-line: color-mix(in oklab, var(--gray-200) 60%, transparent);
+    --ps-gantt-line: color-mix(in oklab, var(--gray-200) 70%, transparent);
     --ps-gantt-text: var(--gray-950);
     --ps-gantt-muted: var(--gray-500);
     --ps-gantt-soft: var(--gray-600);
-    --ps-gantt-weekend: color-mix(in oklab, var(--gray-100) 70%, transparent);
-    --ps-gantt-group: color-mix(in oklab, var(--gray-100) 80%, transparent);
     --ps-gantt-ring: var(--primary-500);
-    --ps-gantt-arrow: var(--gray-400);
-    --ps-gantt-arrow-late: var(--danger-500);
-    --ps-gantt-today: var(--primary-500);
-    --ps-gantt-bar-text: var(--gray-950);
-    --ps-gantt-radius: 0.5rem;
-    --ps-gantt-bar-radius: 0.3rem;
-    --ps-gantt-label-width: 15rem;
-    --ps-gantt-height: calc(100dvh - var(--topbar-height, 4rem) - 10rem);
+    --ps-gantt-radius: 0.75rem;   /* the container's, as a table's (rounded-xl) */
+    --ps-gantt-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);   /* a table's (shadow-sm) */
+    --ps-gantt-outline: rgb(9 9 11 / 0.05);  /* ring-gray-950/5 */
     --ps-gantt-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
 
+    position: relative;
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
     min-width: 0;
+    border-radius: var(--ps-gantt-radius);
+    background: var(--ps-gantt-bg);
+    box-shadow: var(--ps-gantt-shadow), 0 0 0 1px var(--ps-gantt-outline);
     color: var(--ps-gantt-text);
+    font-size: 0.875rem;   /* a table's text, for whatever sets no size of its own */
+    line-height: 1.25rem;
 }
 
 .dark .ps-gantt {
-    --ps-gantt-arrow: var(--gray-500);
     --ps-gantt-bg: var(--gray-900);
-    --ps-gantt-surface: rgb(255 255 255 / 0.03);
-    --ps-gantt-border: rgb(255 255 255 / 0.09);
-    --ps-gantt-line: rgb(255 255 255 / 0.06);
+    --ps-gantt-surface: rgb(255 255 255 / 0.05);
+    --ps-gantt-border: rgb(255 255 255 / 0.1);
+    --ps-gantt-line: rgb(255 255 255 / 0.07);
     --ps-gantt-text: #fff;
     --ps-gantt-muted: var(--gray-400);
     --ps-gantt-soft: var(--gray-300);
-    --ps-gantt-weekend: rgb(255 255 255 / 0.035);
-    --ps-gantt-group: rgb(255 255 255 / 0.04);
-    --ps-gantt-bar-text: #fff;
+    --ps-gantt-outline: rgb(255 255 255 / 0.1);
 }
 
 .ps-gantt [x-cloak] { display: none !important; }
-.ps-gantt svg { width: 1rem; height: 1rem; flex: none; }
 
-/* ------------------------------------------------------------------ toolbar */
+/* ------------------------------------------------------------------ toolbar (fi-ta-header-toolbar) */
 
 .ps-gantt-toolbar {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.5rem;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--ps-gantt-border);
 }
 
-.ps-gantt-spacer { flex: 1; }
+@media (min-width: 40rem) { .ps-gantt-toolbar { padding-inline: 1.5rem; } }
 
-/* The controls are Filament's own components (fi-tabs, fi-btn, fi-input-wrp): only their size in a row is set here. */
-.ps-gantt-toolbar .fi-tabs { padding: 0.25rem; gap: 0.25rem; margin: 0; } /* Filament centres the nav with auto margins; in a wrapping row that leaves a hole */
-.ps-gantt-toolbar .fi-tabs-item { padding-block: 0.375rem; }
+/*
+ * Two groups: the component's own controls at the start, search / filters / toggles at
+ * the end. One row like a table's toolbar: the start group gives way first, wrapping its
+ * own items, and keeps the end group on the same row; only on a narrow screen does the
+ * end group take a row of its own. Neither group may overflow the toolbar (min-width: 0).
+ */
+.ps-gantt-toolbar-start, .ps-gantt-toolbar-end { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; min-height: 2.25rem; min-width: 0; }
+.ps-gantt-toolbar-start { flex: 1 1 auto; }
+.ps-gantt-toolbar-end { flex: 0 1 auto; margin-inline-start: auto; }
+@media (min-width: 64rem) { .ps-gantt-toolbar, .ps-gantt-toolbar-end { flex-wrap: nowrap; } }
+
+/* Filament centres a tab nav with auto margins; in a row that leaves a hole */
+.ps-gantt-toolbar .fi-tabs { margin: 0; }
 .ps-gantt-toolbar .fi-input-wrp { width: auto; }
-.ps-gantt-toolbar .fi-fo-date-time-picker-display-text-input { width: 8.5rem; }
-.ps-gantt-toolbar .fi-select-input { width: auto; min-width: 11rem; }
-.ps-gantt-range, .ps-gantt-filter { display: flex; align-items: center; gap: 0.35rem; }
-.ps-gantt-filter-on .fi-input-wrp { --tw-ring-color: var(--primary-500); }
+.ps-gantt-toolbar .fi-select-input { min-width: 11rem; }
+.ps-gantt-toolbar .fi-fo-date-time-picker-display-text-input { width: 7.25rem; }
+.ps-gantt-search .fi-input { width: 10rem; }
+
+/* a group of buttons that belong together (undo / redo, prev / next) */
+.ps-gantt-seg { display: inline-flex; gap: 0.25rem; }
+
+/* ------------------------------------------------------------------ filters */
+
+/* inline in the toolbar: fields in a row, the label as each wrapper's prefix */
+.ps-gantt-filters-inline { display: contents; }
+.ps-gantt-filter { display: flex; align-items: center; gap: 0.5rem; }
+.ps-gantt-range { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.25rem; }
+.ps-gantt-toggle { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; font-weight: 500; cursor: pointer; }
+
+/* a filter that narrows the rows wears the primary ring, as an active state */
+.ps-gantt-filter-on .fi-input-wrp { --tw-ring-color: var(--ps-gantt-ring); box-shadow: 0 0 0 1px var(--ps-gantt-ring); }
+
+/* the funnel's dropdown panel and the "above" row: stacked, a label over each field (fi-ta-filters) */
+.ps-gantt-filters-panel, .ps-gantt-filters-above { display: grid; gap: 1rem; }
+.ps-gantt-filters-panel { padding: 1.5rem; }
+.ps-gantt-filters-above { padding: 1rem; border-bottom: 1px solid var(--ps-gantt-border); grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); }
+@media (min-width: 40rem) { .ps-gantt-filters-above { padding-inline: 1.5rem; } }
+.ps-gantt-filters-header { display: flex; align-items: center; justify-content: space-between; }
+.ps-gantt-filters-heading { font-size: 1rem; line-height: 1.5rem; font-weight: 600; color: var(--ps-gantt-text); }
+.ps-gantt-filter-stacked { flex-direction: column; align-items: stretch; gap: 0.5rem; }
+.ps-gantt-filter-stacked .fi-input-wrp, .ps-gantt-filter-stacked .ps-gantt-field, .ps-gantt-filter-stacked .fi-select-input { width: 100%; }
+.ps-gantt-filter-stacked .ps-gantt-range { display: grid; grid-template-columns: 1fr 1fr; }
+.ps-gantt-filter-label { font-size: 0.875rem; line-height: 1.5rem; font-weight: 500; color: var(--ps-gantt-text); }
+.ps-gantt-filters-trigger { position: relative; display: inline-flex; }
+/* the count of active filters on the funnel's top-right corner, as Filament places an icon button's badge (icon-button.css) */
+.ps-gantt-filters-trigger > .fi-icon-btn-badge-ctn { position: absolute; inset-inline-start: 100%; top: 0.25rem; z-index: 1; display: flex; width: max-content; transform: translate(-50%, -50%); border-radius: 0.375rem; background: #fff; }
+.ps-gantt-filters-trigger > .fi-icon-btn-badge-ctn:where([dir="rtl"], [dir="rtl"] *) { transform: translate(50%, -50%); }
+.dark .ps-gantt-filters-trigger > .fi-icon-btn-badge-ctn { background: var(--gray-900); }
+.ps-gantt-filters-above .ps-gantt-filters-header { grid-column: 1 / -1; }
+
+/* ------------------------------------------------------------------ an indicator strip under the toolbar (fi-ta-selection-indicator) */
+
+.ps-gantt-indicator {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.375rem 0.75rem;
+    border-bottom: 1px solid var(--ps-gantt-border);
+    background: var(--ps-gantt-surface);
+    font-size: 0.875rem;
+    line-height: 1.5rem;
+    font-weight: 500;
+    color: var(--gray-700);
+}
+.dark .ps-gantt-indicator { color: var(--gray-200); }
+@media (min-width: 40rem) { .ps-gantt-indicator { padding-inline: 1.5rem; } }
+.ps-gantt-indicator-end { display: flex; align-items: center; gap: 0.75rem; margin-inline-start: auto; }
+
+/* ------------------------------------------------------------------ footer (fi-pagination) */
+
+.ps-gantt-footer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem 1rem;
+    padding: 0.75rem;
+    border-top: 1px solid var(--ps-gantt-border);
+    font-size: 0.875rem;
+    color: var(--ps-gantt-muted);
+}
+@media (min-width: 40rem) { .ps-gantt-footer { padding-inline: 1.5rem; } }
+/* as tall as a table's pagination row (its controls are 2.25rem) */
+.ps-gantt-footer > * { display: inline-flex; align-items: center; min-height: 2.25rem; }
+
+/* ------------------------------------------------------------------ menus at the pointer (fi-dropdown-panel, placed by the component) */
+
+.ps-gantt-menu { position: absolute; z-index: 40; width: max-content; min-width: 11rem; }
+.ps-gantt-menu-item { width: 100%; text-align: start; cursor: pointer; }
+
+/* ------------------------------------------------------------------ screen readers */
+
+.ps-gantt-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+
+/* ------------------------------------------------------------------ small screens */
+
+@media (max-width: 40rem) {
+    .ps-gantt-search .fi-input { width: 8rem; }
+}
+
+/* ------------------------------------------------------------------ the chart's own variables and rules */
+
+/*
+ * Plain CSS on the panel's own palette (--gray-*, --primary-*), so the chart follows
+ * the theme and dark mode without compiling the plugin's views. Logical properties
+ * throughout: the chart reads right-to-left with the page. Override the --ps-gantt-*
+ * variables on .ps-gantt to restyle it.
+ */
+
+.ps-gantt {
+    --ps-gantt-weekend: color-mix(in oklab, var(--gray-100) 70%, transparent);
+    --ps-gantt-group: color-mix(in oklab, var(--gray-100) 80%, transparent);
+    --ps-gantt-arrow: var(--gray-400);
+    --ps-gantt-arrow-late: var(--danger-500);
+    --ps-gantt-today: var(--primary-500);
+    --ps-gantt-bar-text: var(--gray-950);
+    --ps-gantt-bar-radius: 0.3rem;
+    --ps-gantt-label-width: 15rem;
+    --ps-gantt-height: calc(100dvh - var(--topbar-height, 4rem) - 13rem);
+}
+
+.dark .ps-gantt {
+    --ps-gantt-arrow: var(--gray-500);
+    --ps-gantt-weekend: rgb(255 255 255 / 0.035);
+    --ps-gantt-group: rgb(255 255 255 / 0.04);
+    --ps-gantt-bar-text: #fff;
+}
+
+.ps-gantt-range { gap: 0.35rem; }
 .ps-gantt-bar:focus-visible, .ps-gantt-fold:focus-visible { outline: 2px solid var(--ps-gantt-ring); outline-offset: 1px; }
-.ps-gantt-count { font-size: 0.75rem; font-variant-numeric: tabular-nums; color: var(--ps-gantt-muted); }
+.ps-gantt-count { font-variant-numeric: tabular-nums; }
 .ps-gantt-count-truncated { color: var(--warning-600); cursor: help; }
 .dark .ps-gantt-count-truncated { color: var(--warning-400); }
 
@@ -87,8 +209,6 @@
     /* a focused bar is never scrolled under the sticky label column or header */
     scroll-padding-inline-start: var(--ps-gantt-label-width);
     scroll-padding-top: 3.25rem;
-    border: 1px solid var(--ps-gantt-border);
-    border-radius: var(--ps-gantt-radius);
     background: var(--ps-gantt-bg);
     overscroll-behavior: contain;
     scrollbar-width: thin;
@@ -326,6 +446,8 @@
 
 /* ------------------------------------------------------------------ hint and menu */
 
+.ps-gantt-fold svg { width: 1rem; height: 1rem; flex: none; }
+
 .ps-gantt-hint {
     position: fixed;
     bottom: 1.25rem;
@@ -344,36 +466,8 @@
 /* the live region: read out, never seen */
 .ps-gantt-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
-.ps-gantt-menu {
-    position: fixed;
-    z-index: 60;
-    min-width: 12rem;
-    padding: 0.3rem;
-    border: 1px solid var(--ps-gantt-border);
-    border-radius: var(--ps-gantt-radius);
-    background: var(--ps-gantt-bg);
-    box-shadow: 0 10px 30px -10px rgb(0 0 0 / 0.25);
-}
-
-.ps-gantt-menu-item {
-    display: flex;
-    align-items: center;
-    gap: 0.55rem;
-    width: 100%;
-    padding: 0.45rem 0.5rem;
-    border-radius: 0.3rem;
-    font-size: 0.8125rem;
-    text-align: start;
-    color: var(--ps-gantt-text);
-    cursor: pointer;
-}
-
-.ps-gantt-menu-item:hover, .ps-gantt-menu-item:focus-visible { background: var(--gray-100); outline: none; }
-.dark .ps-gantt-menu-item:hover, .dark .ps-gantt-menu-item:focus-visible { background: rgb(255 255 255 / 0.06); }
-.ps-gantt-menu-icon { display: grid; width: 1rem; height: 1rem; color: var(--ps-gantt-muted); }
-.ps-gantt-menu-icon svg { width: 1rem; height: 1rem; }
-.ps-gantt-menu-item-danger, .ps-gantt-menu-item-danger .ps-gantt-menu-icon { color: var(--danger-600); }
-.dark .ps-gantt-menu-item-danger, .dark .ps-gantt-menu-item-danger .ps-gantt-menu-icon { color: var(--danger-400); }
+/* the bar menu wears Filament's dropdown panel; placed by the component at the pointer, kept inside the viewport */
+.ps-gantt-menu { position: fixed; z-index: 60; }
 
 @media (prefers-reduced-motion: reduce) {
     .ps-gantt-bar-flash { animation: none; }
@@ -382,7 +476,6 @@
 
 @media (max-width: 40rem) {
     .ps-gantt { --ps-gantt-label-width: 9rem; }
-    .ps-gantt-count { display: none; }
     .ps-gantt-range { flex-wrap: wrap; } /* From and Until under each other instead of past the page's edge */
 }
 

@@ -1,5 +1,6 @@
 @php
     use Filament\Support\Facades\FilamentAsset;
+    use Filament\Support\Icons\Heroicon;
 
     $config = $this->getGanttConfig();
 @endphp
@@ -26,63 +27,97 @@
     :class="{ 'ps-gantt-is-dragging': dragging, 'ps-gantt-is-readonly': readOnly, 'ps-gantt-is-compact': compact }"
     :style="height ? '--ps-gantt-height:' + height : null"
 >
-    {{-- The toolbar is Filament's own components (tabs, button, input wrapper, input, select), so it follows the panel's theme. --}}
+    {{--
+        A table-style container: the toolbar in two groups (the chart's own controls at
+        the start; the search and the filters at the end), the filters where
+        filtersLayout() puts them, the scrolling chart, the bar count in the footer.
+        Every control is Filament's own component, so it follows the panel's theme.
+    --}}
     <div class="ps-gantt-toolbar">
-        <x-filament::tabs x-bind:aria-label="t.zoom">
-            <template x-for="s in scales" :key="s">
-                <x-filament::tabs.item alpine-active="scale === s" x-on:click="setScale(s)">
-                    <span x-text="t[s]"></span>
-                </x-filament::tabs.item>
-            </template>
-        </x-filament::tabs>
+        <div class="ps-gantt-toolbar-start">
+            <x-filament::tabs x-bind:aria-label="t.zoom">
+                <template x-for="s in scales" :key="s">
+                    <x-filament::tabs.item alpine-active="scale === s" x-on:click="setScale(s)">
+                        <span x-text="t[s]"></span>
+                    </x-filament::tabs.item>
+                </template>
+            </x-filament::tabs>
 
-        <x-filament::button color="gray" x-on:click="scrollToToday()">
-            <span x-text="t.today"></span>
-        </x-filament::button>
+            <x-filament::button color="gray" x-on:click="scrollToToday()">
+                <span x-text="t.today"></span>
+            </x-filament::button>
 
-        {{-- Everything the filters leave, in one screen --}}
-        <x-filament::button color="gray" x-on:click="fitAll()" x-bind:title="t.fit_hint">
-            <span x-text="t.fit"></span>
-        </x-filament::button>
+            {{-- Everything the filters leave, in one screen --}}
+            <x-filament::button color="gray" x-on:click="fitAll()" x-bind:title="t.fit_hint">
+                <span x-text="t.fit"></span>
+            </x-filament::button>
 
-        <div class="ps-gantt-range" role="group" x-bind:aria-label="t.range">
-            <x-filament::input.wrapper>
-                <x-slot name="prefix"><span x-text="t.from"></span></x-slot>
-                @include('packstub-gantt::partials.date-picker', ['model' => 'range.start', 'pick' => "pickRange('start', \$event.detail)", 'label' => 't.from'])
-            </x-filament::input.wrapper>
-            <x-filament::input.wrapper>
-                <x-slot name="prefix"><span x-text="t.until"></span></x-slot>
-                @include('packstub-gantt::partials.date-picker', ['model' => 'range.end', 'pick' => "pickRange('end', \$event.detail)", 'label' => 't.until'])
-            </x-filament::input.wrapper>
+            <div class="ps-gantt-range" role="group" x-bind:aria-label="t.range">
+                <x-filament::input.wrapper class="ps-gantt-field">
+                    <x-slot name="prefix"><span x-text="t.from"></span></x-slot>
+                    @include('packstub-gantt::partials.date-picker', ['model' => 'range.start', 'pick' => "pickRange('start', \$event.detail)", 'label' => 't.from', 'firstDayOfWeek' => $config['firstDayOfWeek']])
+                </x-filament::input.wrapper>
+                <x-filament::input.wrapper class="ps-gantt-field">
+                    <x-slot name="prefix"><span x-text="t.until"></span></x-slot>
+                    @include('packstub-gantt::partials.date-picker', ['model' => 'range.end', 'pick' => "pickRange('end', \$event.detail)", 'label' => 't.until', 'firstDayOfWeek' => $config['firstDayOfWeek']])
+                </x-filament::input.wrapper>
+            </div>
         </div>
 
-        <template x-for="filter in filters" :key="filter.name">
-            <div class="ps-gantt-filter" :class="{ 'ps-gantt-filter-on': filter.type === 'dateRange' ? (active[filter.name].from || active[filter.name].until) : !! active[filter.name] }">
-                <template x-if="filter.type === 'dateRange'">
-                    <div class="ps-gantt-range">
-                        <x-filament::input.wrapper>
-                            <x-slot name="prefix"><span x-text="filter.label"></span></x-slot>
-                            @include('packstub-gantt::partials.date-picker', ['model' => 'active[filter.name].from', 'pick' => "pickFilter(filter.name, 'from', \$event.detail)", 'label' => "filter.label + ' ' + t.from"])
-                        </x-filament::input.wrapper>
-                        <x-filament::input.wrapper>
-                            <x-slot name="prefix">–</x-slot>
-                            @include('packstub-gantt::partials.date-picker', ['model' => 'active[filter.name].until', 'pick' => "pickFilter(filter.name, 'until', \$event.detail)", 'label' => "filter.label + ' ' + t.until"])
-                        </x-filament::input.wrapper>
-                    </div>
-                </template>
-                <template x-if="filter.type !== 'dateRange'">
-                    <x-filament::input.wrapper>
-                        <x-slot name="prefix"><span x-text="filter.label"></span></x-slot>
-                        @include('packstub-gantt::partials.select')
+        <div class="ps-gantt-toolbar-end">
+            @if ($config['searchable'])
+                <div class="ps-gantt-search">
+                    <x-filament::input.wrapper inline-prefix :prefix-icon="Heroicon::MagnifyingGlass" class="ps-gantt-field">
+                        <x-filament::input type="search" inline-prefix autocomplete="off" x-model="search" x-on:input.debounce.400ms="refresh()" x-bind:placeholder="t.search" x-bind:aria-label="t.search" />
                     </x-filament::input.wrapper>
-                </template>
-            </div>
-        </template>
+                </div>
+            @endif
 
-        <div class="ps-gantt-spacer"></div>
-
-        <span class="ps-gantt-count" :class="{ 'ps-gantt-count-truncated': total > bars.length }" x-text="countText()" :title="total > bars.length ? t.truncated_hint : null"></span>
+            @if ($config['filtersLayout'] === 'toolbar')
+                {{-- inline: the label as each field's prefix --}}
+                <div class="ps-gantt-filters-inline">
+                    @include('packstub-gantt::filters', ['firstDayOfWeek' => $config['firstDayOfWeek']])
+                </div>
+            @elseif ($config['filtersLayout'] === 'dropdown' && $config['hasFilters'])
+                {{-- behind a funnel button, the count of active filters on it, a reset link in the panel; nothing without filters --}}
+                <div class="ps-gantt-filters-dropdown">
+                    {{-- a panel of fields, not a menu: Filament 5.10+ would take the keys typed in a select's search for menu navigation --}}
+                    <x-filament::dropdown placement="bottom-end" width="xs" :menu="false">
+                        <x-slot name="trigger">
+                            <div class="ps-gantt-filters-trigger">
+                                <x-filament::icon-button color="gray" :icon="Heroicon::OutlinedFunnel" :label="__('packstub-gantt::gantt.filters')" x-bind:title="t.filters" />
+                                <div class="fi-icon-btn-badge-ctn" x-show="activeFilterCount()">
+                                    <x-filament::badge size="xs" color="primary" class="ps-gantt-filters-count"><span x-text="activeFilterCount()"></span></x-filament::badge>
+                                </div>
+                            </div>
+                        </x-slot>
+                        <div class="ps-gantt-filters-panel">
+                            <div class="ps-gantt-filters-header">
+                                <h4 class="ps-gantt-filters-heading" x-text="t.filters"></h4>
+                                <x-filament::link tag="button" color="danger" size="sm" class="ps-gantt-filters-reset" x-show="activeFilterCount()" x-on:click="resetFilters()">
+                                    <span x-text="t.reset_filters"></span>
+                                </x-filament::link>
+                            </div>
+                            @include('packstub-gantt::filters', ['stacked' => true, 'firstDayOfWeek' => $config['firstDayOfWeek']])
+                        </div>
+                    </x-filament::dropdown>
+                </div>
+            @endif
+        </div>
     </div>
+
+    @if ($config['filtersLayout'] === 'above' && $config['hasFilters'])
+        {{-- on a row of their own between the toolbar and the chart --}}
+        <div class="ps-gantt-filters-above">
+            <div class="ps-gantt-filters-header">
+                <h4 class="ps-gantt-filters-heading" x-text="t.filters"></h4>
+                <x-filament::link tag="button" color="danger" size="sm" class="ps-gantt-filters-reset" x-show="activeFilterCount()" x-on:click="resetFilters()">
+                    <span x-text="t.reset_filters"></span>
+                </x-filament::link>
+            </div>
+            @include('packstub-gantt::filters', ['stacked' => true, 'firstDayOfWeek' => $config['firstDayOfWeek']])
+        </div>
+    @endif
 
     <div
         class="ps-gantt-scroll"
@@ -201,14 +236,19 @@
         <div class="ps-gantt-empty" x-show="! bars.length" x-text="t.empty"></div>
     </div>
 
+    {{-- the bar count, as a table's pagination summary; warns when the window holds more than max_bars --}}
+    <div class="ps-gantt-footer">
+        <span class="ps-gantt-count" :class="{ 'ps-gantt-count-truncated': total > bars.length }" x-text="countText()" :title="total > bars.length ? t.truncated_hint : null"></span>
+    </div>
+
     <div class="ps-gantt-hint" x-show="hint" x-cloak x-text="hint"></div>
 
     {{-- What a keyboard move did, or why it was refused, for screen readers --}}
     <div class="ps-gantt-sr" role="status" aria-live="polite" x-text="live"></div>
 
-    {{-- x-show and :style share the style attribute: object syntax keeps the display x-show sets --}}
+    {{-- The bar menu at the pointer, in Filament's dropdown clothes. x-show and :style share the style attribute: object syntax keeps the display x-show sets --}}
     <div
-        class="ps-gantt-menu"
+        class="ps-gantt-menu fi-dropdown-panel"
         x-ref="menu"
         x-show="menu"
         x-cloak
@@ -222,11 +262,13 @@
         role="menu"
         :aria-label="t.bar_menu"
     >
-        <template x-for="action in (menu ? actionsFor(menu.bar) : [])" :key="action.name">
-            <button type="button" class="ps-gantt-menu-item" :class="action.color && 'ps-gantt-menu-item-' + action.color" role="menuitem" x-on:click="runAction(action.name, menu.bar)">
-                <span class="ps-gantt-menu-icon" x-show="action.icon" x-html="action.icon"></span>
-                <span x-text="action.label"></span>
-            </button>
-        </template>
+        <div class="fi-dropdown-list">
+            <template x-for="action in (menu ? actionsFor(menu.bar) : [])" :key="action.name">
+                <button type="button" class="ps-gantt-menu-item fi-dropdown-list-item" :class="action.color ? 'fi-color-' + action.color : 'fi-color-gray'" role="menuitem" x-on:click="runAction(action.name, menu.bar)">
+                    <span class="fi-icon fi-dropdown-list-item-icon fi-size-md" x-show="action.icon" x-html="action.icon"></span>
+                    <span class="fi-dropdown-list-item-label" x-text="action.label"></span>
+                </button>
+            </template>
+        </div>
     </div>
 </div>

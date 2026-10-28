@@ -10,7 +10,7 @@ test('a config without a window (a chart that appeared after the component\'s fi
     // the harness lays out on construction; the component itself starts with an empty view
     Object.assign(c.view, { days: 0, width: 0, columns: [], top: [], shades: [], rows: [] })
     c.init()
-    assert.deepEqual(c.wire.refreshes, [[{}, null, null, false, false]])
+    assert.deepEqual(c.wire.refreshes, [[{}, null, null, false, false, '']])
     // nothing is drawn for the round trip: no one-column, no-row chart before the answer
     assert.equal(c.view.columns.length, 0)
     assert.equal(c.view.rows.length, 0)
