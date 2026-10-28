@@ -450,6 +450,9 @@ export default function packstubGantt(config) {
             }
 
             const fromUrl = this.restore()
+            // Filament's fields (the window's pickers, the filters) show what the browser holds from the start.
+            this.syncWindow()
+            this.syncFields()
 
             // A config without a window has nothing to draw yet: the server's answer
             // (apply()) draws it, instead of a one-column, no-row chart for the round trip.
@@ -1515,10 +1518,58 @@ export default function packstubGantt(config) {
 
         /* ------------------------------------------------------------ window, filters, refresh */
 
-        /** A day picked in Filament's date picker for the window's start or end (`Y-m-d H:i:s`, or null when cleared). */
+        /**
+         * A day picked in the window's From or Until (Filament's date picker, `Y-m-d`
+         * or null when cleared). The pickers echo what syncWindow() sets, so a value
+         * equal to the one shown is nothing.
+         */
         pickRange(edge, value) {
-            this.range = { ...this.range, [edge]: value ? String(value).slice(0, 10) : '' }
+            if (edge !== 'start' && edge !== 'end') return
+            const day = value ? String(value).slice(0, 10) : ''
+            if (day === (this.range[edge] || '') || (! day && ! this.range[edge])) return
+            this.range = { ...this.range, [edge]: day }
             this.applyWindow(null, { user: true })
+        },
+
+        /**
+         * A filter's field changed (its `ps-gantt-filter` event): a select's value or
+         * list, a toggle's boolean, or one edge of a date range. The fields echo what
+         * syncFields() sets, so a value equal to the active one is nothing.
+         */
+        setFilter(name, value, edge = undefined) {
+            const filter = this.filters.find((f) => f.name === name)
+            if (! filter) return
+            if (filter.type === 'dateRange') return this.pickFilter(name, edge, value)
+            if (filter.type === 'toggle') {
+                const on = value === true
+                if ((this.active[name] === true) === on) return
+                this.active[name] = on
+                return this.refresh()
+            }
+            this.pickSelect(name, value)
+        },
+
+        /** The active filters in the shape the fields hold (null for "all"), set on the component without a request. */
+        fieldState() {
+            const out = {}
+            for (const f of this.filters) {
+                const v = this.active[f.name]
+                if (f.type === 'dateRange') out[f.name] = { from: v?.from || null, until: v?.until || null }
+                else if (f.type === 'toggle') out[f.name] = v === true
+                else if (f.multiple) out[f.name] = Array.isArray(v) ? v : []
+                else out[f.name] = v === '' || v === null || v === undefined ? null : v
+            }
+            return out
+        },
+
+        /** The fields follow the browser's state (a restored URL, Reset, a pick made elsewhere); no request is sent. */
+        syncFields() {
+            try { this.ui('wire').$set('ganttFilters', this.fieldState(), false) } catch (e) {}
+        },
+
+        /** The From / Until pickers show the window drawn. */
+        syncWindow() {
+            try { this.ui('wire').$set('ganttWindow', { start: this.period.start || null, end: this.period.end || null }, false) } catch (e) {}
         },
 
         /**
@@ -1551,10 +1602,11 @@ export default function packstubGantt(config) {
             this.refresh()
         },
 
-        /** Every filter back to "all", then one reload. */
+        /** Every filter back to "all" (the fields too), then one reload. */
         resetFilters() {
             if (! this.activeFilterCount()) return
             for (const f of this.filters) this.active[f.name] = this.blank(f)
+            this.syncFields()
             this.refresh()
         },
 
@@ -1604,6 +1656,7 @@ export default function packstubGantt(config) {
             }
             this.period = result.window
             this.range = { ...result.window }
+            this.syncWindow()
             this.groups = result.groups
             this.bars = result.bars
             this.total = result.total ?? result.bars.length
@@ -1617,6 +1670,7 @@ export default function packstubGantt(config) {
                 return this.refresh()
             }
             this.$nextTick(() => this.fill())
+            this.syncFields()
         },
 
         /**

@@ -85,31 +85,30 @@
 /* ------------------------------------------------------------------ filters */
 
 /* inline in the toolbar: fields in a row, the label as each wrapper's prefix */
+/* Filament's schema draws its fields on a grid; in the toolbar and the "above" row they sit on one wrapping line */
 .ps-gantt-filters-inline { display: contents; }
-.ps-gantt-filter { display: flex; align-items: center; gap: 0.5rem; }
+.ps-gantt-filters-inline .fi-sc, .ps-gantt-range .fi-sc, .ps-gantt-filters-above > .fi-sc { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.ps-gantt-filters-above > .fi-sc { align-items: flex-start; gap: 1rem; }
+.ps-gantt-filters-above > .fi-sc > .fi-sc-component { min-width: 14rem; }
+/* a date range's two pickers side by side */
+.ps-gantt-filters-inline .fi-sc .fi-sc-component .fi-grid, .ps-gantt-range .fi-grid { display: flex; gap: 0.35rem; }
 .ps-gantt-range { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.25rem; }
 .ps-gantt-toggle { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; font-weight: 500; cursor: pointer; }
 
-/* a filter that narrows the rows wears the primary ring, as an active state */
-.ps-gantt-filter-on .fi-input-wrp { --tw-ring-color: var(--ps-gantt-ring); box-shadow: 0 0 0 1px var(--ps-gantt-ring); }
 
 /* the funnel's dropdown panel and the "above" row: stacked, a label over each field (fi-ta-filters) */
-.ps-gantt-filters-panel, .ps-gantt-filters-above { display: grid; gap: 1rem; }
+/* the funnel's panel and the "above" row wear a table's filters classes (fi-ta-filters): the heading with the reset link, then Filament's fields */
 .ps-gantt-filters-panel { padding: 1.5rem; }
-.ps-gantt-filters-above { padding: 1rem; border-bottom: 1px solid var(--ps-gantt-border); grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); }
+.ps-gantt-filters-panel, .ps-gantt-filters-above { display: grid; gap: 1rem; }
+.ps-gantt .fi-ta-filters-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.ps-gantt .fi-ta-filters-heading { font-size: 1rem; line-height: 1.5rem; font-weight: 600; color: var(--ps-gantt-text); }
+.ps-gantt-filters-above { padding: 1rem; border-bottom: 1px solid var(--ps-gantt-border); }
 @media (min-width: 40rem) { .ps-gantt-filters-above { padding-inline: 1.5rem; } }
-.ps-gantt-filters-header { display: flex; align-items: center; justify-content: space-between; }
-.ps-gantt-filters-heading { font-size: 1rem; line-height: 1.5rem; font-weight: 600; color: var(--ps-gantt-text); }
-.ps-gantt-filter-stacked { flex-direction: column; align-items: stretch; gap: 0.5rem; }
-.ps-gantt-filter-stacked .fi-input-wrp, .ps-gantt-filter-stacked .ps-gantt-field, .ps-gantt-filter-stacked .fi-select-input { width: 100%; }
-.ps-gantt-filter-stacked .ps-gantt-range { display: grid; grid-template-columns: 1fr 1fr; }
-.ps-gantt-filter-label { font-size: 0.875rem; line-height: 1.5rem; font-weight: 500; color: var(--ps-gantt-text); }
 .ps-gantt-filters-trigger { position: relative; display: inline-flex; }
 /* the count of active filters on the funnel's top-right corner, as Filament places an icon button's badge (icon-button.css) */
 .ps-gantt-filters-trigger > .fi-icon-btn-badge-ctn { position: absolute; inset-inline-start: 100%; top: 0.25rem; z-index: 1; display: flex; width: max-content; transform: translate(-50%, -50%); border-radius: 0.375rem; background: #fff; }
 .ps-gantt-filters-trigger > .fi-icon-btn-badge-ctn:where([dir="rtl"], [dir="rtl"] *) { transform: translate(50%, -50%); }
 .dark .ps-gantt-filters-trigger > .fi-icon-btn-badge-ctn { background: var(--gray-900); }
-.ps-gantt-filters-above .ps-gantt-filters-header { grid-column: 1 / -1; }
 
 /* ------------------------------------------------------------------ an indicator strip under the toolbar (fi-ta-selection-indicator) */
 

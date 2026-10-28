@@ -2,14 +2,17 @@
 
 namespace Packstub\Gantt\Tests\Fixtures;
 
+use Filament\Schemas\Concerns\InteractsWithSchemas;
+use Filament\Schemas\Contracts\HasSchemas;
 use Livewire\Component;
 use Packstub\Gantt\Concerns\InteractsWithGantt;
 use Packstub\Gantt\Gantt;
 
 /** The chart behind a tab, the way an app's own component includes it on a later render. */
-class TabbedGantt extends Component
+class TabbedGantt extends Component implements HasSchemas
 {
     use InteractsWithGantt;
+    use InteractsWithSchemas;
 
     public string $tab = 'list';
 

@@ -123,4 +123,4 @@ class ProjectTimeline extends Component implements HasActions, HasSchemas
 }
 ```
 
-`HasActions` and `HasSchemas` are only needed for [bar and create actions](actions.md); `InteractsWithSchemas` is required for the filters' selects on Filament 4.16+ and 5.11+, whose select asks the component for its options through the schema route.
+`HasSchemas` and `InteractsWithSchemas` are required: the toolbar's From / Until pickers and the filters are Filament form components rendered through the component's schemas. `HasActions` is only needed for [bar and create actions](actions.md).

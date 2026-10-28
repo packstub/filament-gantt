@@ -3,6 +3,11 @@
     use Filament\Support\Icons\Heroicon;
 
     $config = $this->getGanttConfig();
+
+    // The filters and the window's pickers are Filament form components, rendered through schemas.
+    if (! $this instanceof \Filament\Schemas\Contracts\HasSchemas) {
+        throw new \LogicException(static::class . ' must implement Filament\Schemas\Contracts\HasSchemas and use Filament\Schemas\Concerns\InteractsWithSchemas (the Gantt pages and widget do).');
+    }
 @endphp
 
 {{--
@@ -20,6 +25,8 @@
     x-on:keydown.escape.window="onEscape()"
     x-on:pointerdown.capture="pressAt($event)"
     x-on:packstub-gantt-refresh.window="refresh(true)"
+    x-on:ps-gantt-filter="setFilter($event.detail.name, $event.detail.value, $event.detail.edge)"
+    x-on:ps-gantt-range="pickRange($event.detail.edge, $event.detail.value)"
     @foreach ($config['refreshOn'] as $event)
         x-on:{{ $event }}.window="refresh(true)"
     @endforeach
@@ -52,15 +59,9 @@
                 <span x-text="t.fit"></span>
             </x-filament::button>
 
+            {{-- From / Until: Filament's date pickers (ganttWindowForm); a pick comes back as ps-gantt-range --}}
             <div class="ps-gantt-range" role="group" x-bind:aria-label="t.range">
-                <x-filament::input.wrapper class="ps-gantt-field">
-                    <x-slot name="prefix"><span x-text="t.from"></span></x-slot>
-                    @include('packstub-gantt::partials.date-picker', ['model' => 'range.start', 'pick' => "pickRange('start', \$event.detail)", 'label' => 't.from', 'firstDayOfWeek' => $config['firstDayOfWeek']])
-                </x-filament::input.wrapper>
-                <x-filament::input.wrapper class="ps-gantt-field">
-                    <x-slot name="prefix"><span x-text="t.until"></span></x-slot>
-                    @include('packstub-gantt::partials.date-picker', ['model' => 'range.end', 'pick' => "pickRange('end', \$event.detail)", 'label' => 't.until', 'firstDayOfWeek' => $config['firstDayOfWeek']])
-                </x-filament::input.wrapper>
+                {{ $this->getSchema('ganttWindowForm') }}
             </div>
         </div>
 
@@ -76,7 +77,7 @@
             @if ($config['filtersLayout'] === 'toolbar')
                 {{-- inline: the label as each field's prefix --}}
                 <div class="ps-gantt-filters-inline">
-                    @include('packstub-gantt::filters', ['firstDayOfWeek' => $config['firstDayOfWeek']])
+                    {{ $this->getSchema('ganttFiltersForm') }}
                 </div>
             @elseif ($config['filtersLayout'] === 'dropdown' && $config['hasFilters'])
                 {{-- behind a funnel button, the count of active filters on it, a reset link in the panel; nothing without filters --}}
@@ -91,14 +92,15 @@
                                 </div>
                             </div>
                         </x-slot>
-                        <div class="ps-gantt-filters-panel">
-                            <div class="ps-gantt-filters-header">
-                                <h4 class="ps-gantt-filters-heading" x-text="t.filters"></h4>
+                        {{-- a table's filters panel: its heading, the reset link, Filament's fields (ganttFiltersForm) --}}
+                        <div class="fi-ta-filters ps-gantt-filters-panel">
+                            <div class="fi-ta-filters-header">
+                                <h4 class="fi-ta-filters-heading" x-text="t.filters"></h4>
                                 <x-filament::link tag="button" color="danger" size="sm" class="ps-gantt-filters-reset" x-show="activeFilterCount()" x-on:click="resetFilters()">
                                     <span x-text="t.reset_filters"></span>
                                 </x-filament::link>
                             </div>
-                            @include('packstub-gantt::filters', ['stacked' => true, 'firstDayOfWeek' => $config['firstDayOfWeek']])
+                            {{ $this->getSchema('ganttFiltersForm') }}
                         </div>
                     </x-filament::dropdown>
                 </div>
@@ -108,14 +110,14 @@
 
     @if ($config['filtersLayout'] === 'above' && $config['hasFilters'])
         {{-- on a row of their own between the toolbar and the chart --}}
-        <div class="ps-gantt-filters-above">
-            <div class="ps-gantt-filters-header">
-                <h4 class="ps-gantt-filters-heading" x-text="t.filters"></h4>
+        <div class="fi-ta-filters ps-gantt-filters-above">
+            <div class="fi-ta-filters-header">
+                <h4 class="fi-ta-filters-heading" x-text="t.filters"></h4>
                 <x-filament::link tag="button" color="danger" size="sm" class="ps-gantt-filters-reset" x-show="activeFilterCount()" x-on:click="resetFilters()">
                     <span x-text="t.reset_filters"></span>
                 </x-filament::link>
             </div>
-            @include('packstub-gantt::filters', ['stacked' => true, 'firstDayOfWeek' => $config['firstDayOfWeek']])
+            {{ $this->getSchema('ganttFiltersForm') }}
         </div>
     @endif
 
