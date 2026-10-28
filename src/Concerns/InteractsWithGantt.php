@@ -6,14 +6,15 @@ use Closure;
 use Filament\Actions\Action;
 use Filament\Actions\Contracts\HasActions;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\DatePicker;
 use Filament\Schemas\Schema;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Locked;
 use Livewire\Attributes\Renderless;
+use Packstub\Gantt\Enums\FiltersLayout;
 use Packstub\Gantt\Exceptions\MoveRejected;
 use Packstub\Gantt\Filter;
 use Packstub\Gantt\Gantt;
-use Packstub\Gantt\Support\FilterSelect;
 
 /**
  * The server side of a chart, for any Livewire component (the plugin's pages and
@@ -89,86 +90,59 @@ trait InteractsWithGantt
     }
 
     /**
-     * The options of a select filter: its list, or the ones matching a search (a
-     * searchable filter's live search), as the browser's select expects them.
+     * The filters' fields hold their state here (Filament's fields need a Livewire
+     * path); the browser owns the real state and keeps this one in step
+     * (`syncFields()`), never the other way round: a change is dispatched by the
+     * field (`Filter::toFormComponent()`) and applied by the Alpine component.
      *
-     * @return list<array{value: string, label: string}>
+     * @var array<string, mixed>
      */
-    #[Renderless]
-    public function ganttFilterOptions(mixed $name, mixed $search = null): array
-    {
-        $filter = is_string($name) ? $this->ganttFilter($name) : null;
+    public array $ganttFilters = [];
 
-        if ($filter === null || ! ($filter->isSelect() || $filter->isBoolean()) || ($search !== null && ! is_string($search))) {
-            return [];
-        }
-
-        $search = $search === null ? '' : mb_substr(trim($search), 0, 200);
-
-        $options = $search === ''
-            ? array_slice($filter->getOptions(), 0, $filter->getOptionsLimit(), preserve_keys: true)
-            : $filter->getSearchResults($search);
-
-        return collect($options)->map(fn ($label, $value) => ['value' => (string) $value, 'label' => (string) $label])->values()->all();
-    }
-
-    /** The label of a select filter's value (one restored from the URL that the listed options do not hold). */
-    #[Renderless]
-    public function ganttFilterOptionLabel(mixed $name, mixed $value = null): ?string
-    {
-        $filter = is_string($name) ? $this->ganttFilter($name) : null;
-
-        return $filter === null || ! ($filter->isSelect() || $filter->isBoolean()) || ! is_string($value) || $value === '' ? null : $filter->getOptionLabel($value);
-    }
+    /** The window's From / Until pickers, the same way. @var array{start?: ?string, end?: ?string} */
+    public array $ganttWindow = [];
 
     /**
-     * The labels of a multiple select filter's values (ones restored from the URL),
-     * as the browser's select expects them; a value with no label is left out.
-     *
-     * @return list<array{value: string, label: string}>
+     * Every field's path exists before the browser entangles it (Livewire refuses a
+     * missing one), as a Filament page fills its form on mount. Livewire runs this
+     * trait hook on the first request only; later requests carry the browser's state.
      */
-    #[Renderless]
-    public function ganttFilterOptionLabels(mixed $name, mixed $values = []): array
+    public function mountInteractsWithGantt(): void
     {
-        $filter = is_string($name) ? $this->ganttFilter($name) : null;
-
-        if ($filter === null || ! ($filter->isSelect() || $filter->isBoolean()) || ! is_array($values)) {
-            return [];
-        }
-
-        $labels = [];
-
-        // At most optionsLimit() distinct values: each one not among the options costs a getOptionLabelUsing() call.
-        $values = array_slice(array_values(array_unique(array_filter($values, fn ($value) => (is_string($value) && $value !== '' && mb_strlen($value) <= 255) || is_int($value)))), 0, $filter->getOptionsLimit());
-
-        foreach ($values as $value) {
-            $label = $filter->getOptionLabel($value);
-
-            if ($label !== null) {
-                $labels[] = ['value' => (string) $value, 'label' => $label];
-            }
-        }
-
-        return $labels;
+        $this->getSchema('ganttWindowForm')?->fill();
+        $this->getSchema('ganttFiltersForm')?->fill();
     }
 
-    /**
-     * A schema never rendered, one FilterSelect per select filter, keyed
-     * `ganttFilters.<filter>`: Filament 4.16+ and 5.11+ ask a select's options
-     * through `callSchemaComponentMethod` with that key (see partials/select).
-     * Filament caches it by name on the first call.
-     */
-    public function ganttFiltersSchema(Schema $schema): Schema
+    /** The filters as Filament's own form components, where filtersLayout() puts them. */
+    public function ganttFiltersForm(Schema $schema): Schema
     {
-        $components = [];
+        $gantt = $this->getGantt();
+        $inline = $gantt->getFiltersLayout() === FiltersLayout::Toolbar;
 
-        foreach ($this->getGantt()->getFilters() as $filter) {
-            if ($filter->isSelect() || $filter->isBoolean()) {
-                $components[] = FilterSelect::make($filter->getName())->key($filter->getName());
-            }
-        }
+        return $schema
+            ->statePath('ganttFilters')
+            ->components(array_map(
+                fn (Filter $filter) => $filter->toFormComponent($inline, $gantt->getFirstDayOfWeek(), Gantt::dateFormat()),
+                $this->ganttUsableFilters(),
+            ));
+    }
 
-        return $schema->components($components);
+    /** The window's From and Until as Filament's date pickers; a pick is dispatched as `ps-gantt-range`. */
+    public function ganttWindowForm(Schema $schema): Schema
+    {
+        $picker = fn (string $edge, string $label): DatePicker => DatePicker::make($edge)
+            ->hiddenLabel()
+            ->prefix($label)
+            ->native(false)
+            ->format('Y-m-d')
+            ->displayFormat(Gantt::dateFormat())
+            ->firstDayOfWeek($this->getGantt()->getFirstDayOfWeek())
+            ->closeOnDateSelection()
+            ->afterStateUpdatedJs("\$dispatch('ps-gantt-range', { edge: '{$edge}', value: \$state })");
+
+        return $schema
+            ->statePath('ganttWindow')
+            ->components([$picker('start', __('packstub-gantt::gantt.from')), $picker('end', __('packstub-gantt::gantt.until'))]);
     }
 
     /**

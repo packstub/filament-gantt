@@ -33,8 +33,6 @@ it('refuses a renderless call whose arguments have another shape, instead of a t
     $component->call('ganttMove', [$task->id], '2026-10-12 00:00')->assertReturned(['ok' => false, 'message' => __('packstub-gantt::gantt.failed')]);
     $component->call('ganttMove', (string) $task->id, null)->assertReturned(['ok' => false, 'message' => __('packstub-gantt::gantt.failed')]);
     $component->call('ganttMove', (string) $task->id, '2026-10-12 00:00', ['x'])->assertReturned(['ok' => false, 'message' => __('packstub-gantt::gantt.failed')]);
-    $component->call('ganttFilterOptions', ['x'])->assertReturned([]);
-    $component->call('ganttFilterOptionLabel', 'project_id', ['x'])->assertReturned(null);
     $component->call('ganttSpan', 'x')->assertReturned(fn ($span) => $span['start'] === '2026-10-05');
     $component->call('ganttRefresh', 'x', ['y'], 7)->assertReturned(fn ($state) => count($state['bars']) === 1);
 
@@ -263,25 +261,6 @@ it('moves a bar to another row renderless, and answers a refused row with its re
         ->assertReturned(['ok' => false, 'message' => 'That row is not on the chart.']);
 
     expect($task->fresh()->project_id)->toBe($beta->id);
-});
-
-it('answers a select filter\'s options, a search and a value\'s label renderless', function () {
-    $acme = project('Acme');
-    $beta = project('Beta');
-
-    Livewire::test(TaskGantt::class)
-        ->call('ganttFilterOptions', 'project_id')
-        ->assertReturned([['value' => (string) $acme->id, 'label' => 'Acme'], ['value' => (string) $beta->id, 'label' => 'Beta']])
-        ->call('ganttFilterOptions', 'project_id', 'bet')
-        ->assertReturned([['value' => (string) $beta->id, 'label' => 'Beta']])
-        ->call('ganttFilterOptions', 'starts_on')
-        ->assertReturned([])
-        ->call('ganttFilterOptions', 'nope')
-        ->assertReturned([])
-        ->call('ganttFilterOptionLabel', 'project_id', (string) $acme->id)
-        ->assertReturned('Acme')
-        ->call('ganttFilterOptionLabel', 'project_id', '999')
-        ->assertReturned(null);
 });
 
 it('answers the span of the filtered bars renderless, for Fit', function () {

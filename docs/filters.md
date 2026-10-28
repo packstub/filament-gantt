@@ -95,7 +95,7 @@ Filter::select('assignee_id')->label('Assignee')->searchable()
     ->query(fn (Builder $query, string $value) => $query->where('assignee_id', $value === 'me' ? auth()->id() : $value)),
 ```
 
-`optionsLimit()` caps a list or a search (default 50); it also caps the values a searchable multiple filter accepts from the URL and the labels looked up for them. The select is Filament's own (the component behind the `Select` field), so it looks and behaves like one in a form; the search is a renderless call, nothing on the page re-renders.
+`optionsLimit()` caps a list or a search (default 50); it also caps the values a searchable multiple filter accepts from the URL and the labels looked up for them. The select is Filament's own `Select` form component, so it looks and behaves exactly like one in a form; the search goes through the component's schema, nothing on the page re-renders.
 
 ### Where the filters are shown
 
@@ -113,7 +113,7 @@ The config's `filters_layout` sets the default for every chart (`dropdown`, `too
 
 Filters live in the URL too (`?f.assignee_id=3&f.tags=bug&f.tags=feature&f.mine=1&f.starts_on.from=2026-10-01&search=docs`); a value the filter does not offer is dropped on the way in.
 
-The toolbar is built from Filament's own Blade components (tabs, button, input wrapper, input, Filament's date picker, select, checkbox and dropdown) in a table-style container, so it follows the panel's theme, but it is not a Filament form: the chart is drawn by the browser and a filter change is a renderless call, so nothing on the page re-renders. A form-based filter (`Filter::form()`) is on the roadmap; until then, put a real Filament form in the page's header actions and dispatch `packstub-gantt-refresh` from it.
+The toolbar is built from Filament's own components (tabs, button, input wrapper, input and dropdown; the filters and the From / Until pickers are Filament's `Select`, `Toggle` and `DatePicker` form components rendered through a schema) in a table-style container, so it follows the panel's theme. It is not a Filament form you submit: the chart is drawn by the browser, a field's change is applied there and the bars are reloaded renderless, so nothing on the page re-renders. A form-based filter (`Filter::form()`) is on the roadmap; until then, put a real Filament form in the page's header actions and dispatch `packstub-gantt-refresh` from it.
 
 ## Refreshing
 

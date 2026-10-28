@@ -82,17 +82,17 @@ and the Pest suite again on MySQL 8.4 and PostgreSQL 17 (the `databases` job): S
   block of `gantt.css`, the `--ps-gantt-*` scheme): a two-group toolbar (`ps-gantt-toolbar-start`: scale tabs, Today,
   Fit, From / Until; `ps-gantt-toolbar-end`: the search box when `searchable()`, the filters where `filtersLayout()`
   puts them), the scrolling chart, the bar count in `ps-gantt-footer`. Every control is Filament's own component; the
-  bar menu wears `fi-dropdown-panel` / `fi-dropdown-list-item`. The filters are `resources/views/filters.blade.php`
-  (the kit view shared by the three plugins, `$stacked` for the funnel panel and the "above" row); the date picker and
-  the select are Filament's form-field Alpine components driven by the chart
-  (`resources/views/partials/{date-picker,select}.blade.php`, markup after `DateTimePicker::` and
-  `Select::toEmbeddedHtml()`; the date picker takes `$firstDayOfWeek` from the include; each partial serves two shapes of
-  Filament's component, up to 5.9/4.15 and from 5.10/4.16, telling them apart at runtime (`typeof weeksInFocusedMonth`,
-  `isPanelOpen`, `handleTriggerKeydown`; the select through a parent-scope shim and the `ganttFilters.<filter>` schema key);
-  the funnel dropdown is `:menu="false"`, or 5.10+ takes the keys typed in a select's search for menu navigation): the chart's value flows in
-  (`x-effect`, or the initial `state`), a pick flows out as a `ps-gantt-pick`/`ps-gantt-select` event to
-  `pickRange()`/`pickFilter()`/`pickSelect()`. Searches are renderless (`ganttFilterOptions`, `ganttFilterOptionLabel`,
-  `ganttFilterOptionLabels`). `Filter` is the kit class shared with Kanban and Spreadsheet (select, multiple, searchable,
+  bar menu wears `fi-dropdown-panel` / `fi-dropdown-list-item`. The filters and the window's From / Until are Filament's own form components
+  (`Select`, `Toggle`, `DatePicker`, a `Fieldset` for a date range), built by `Filter::toFormComponent()` and rendered
+  through two schemas on the component (`ganttFiltersForm` → `$ganttFilters`, `ganttWindowForm` → `$ganttWindow`, filled on
+  mount by `mountInteractsWithGantt()`; so the component needs `HasSchemas` / `InteractsWithSchemas`, the pages and widget
+  have it). No copied Filament markup anywhere: a searchable select's search goes through Filament's own
+  `callSchemaComponentMethod`. The state stays the browser's: each field dispatches its change with `afterStateUpdatedJs`
+  (`ps-gantt-filter` `{name, value, edge?}`, `ps-gantt-range` `{edge, value}`) to `setFilter()` / `pickRange()`, and the
+  browser writes its state back into the fields without a request (`syncFields()` / `syncWindow()`:
+  `$wire.$set(path, value, false)`), so a restored URL, Reset and the window drawn show in the fields; the handlers ignore
+  an echo equal to what they hold. The funnel dropdown is `:menu="false"` (a menu would take the keys typed in a search).
+  `Filter` is the kit class shared with Kanban and Spreadsheet (select, multiple, searchable,
   boolean, toggle, dateRange; `state()`/`emptyState()` for the URL); the browser's `active[name]` holds '' / [] / false /
   `{from, until}` and `isActive()`, `toggleFilter()`, `resetFilters()`, `activeFilterCount()` have the same names in all three.
 - Every change needs a test; `CHANGELOG.md` stays current. Strings in `resources/lang/{en,ro,ru,de}` (same keys in
