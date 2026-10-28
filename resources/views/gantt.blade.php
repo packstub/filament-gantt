@@ -81,7 +81,8 @@
             @elseif ($config['filtersLayout'] === 'dropdown' && $config['hasFilters'])
                 {{-- behind a funnel button, the count of active filters on it, a reset link in the panel; nothing without filters --}}
                 <div class="ps-gantt-filters-dropdown">
-                    <x-filament::dropdown placement="bottom-end" width="xs">
+                    {{-- a panel of fields, not a menu: Filament 5.10+ would take the keys typed in a select's search for menu navigation --}}
+                    <x-filament::dropdown placement="bottom-end" width="xs" :menu="false">
                         <x-slot name="trigger">
                             <div class="ps-gantt-filters-trigger">
                                 <x-filament::icon-button color="gray" :icon="Heroicon::OutlinedFunnel" :label="__('packstub-gantt::gantt.filters')" x-bind:title="t.filters" />

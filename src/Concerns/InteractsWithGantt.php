@@ -6,12 +6,14 @@ use Closure;
 use Filament\Actions\Action;
 use Filament\Actions\Contracts\HasActions;
 use Filament\Facades\Filament;
+use Filament\Schemas\Schema;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Locked;
 use Livewire\Attributes\Renderless;
 use Packstub\Gantt\Exceptions\MoveRejected;
 use Packstub\Gantt\Filter;
 use Packstub\Gantt\Gantt;
+use Packstub\Gantt\Support\FilterSelect;
 
 /**
  * The server side of a chart, for any Livewire component (the plugin's pages and
@@ -101,7 +103,9 @@ trait InteractsWithGantt
             return [];
         }
 
-        $options = $search === null || $search === ''
+        $search = $search === null ? '' : mb_substr(trim($search), 0, 200);
+
+        $options = $search === ''
             ? array_slice($filter->getOptions(), 0, $filter->getOptionsLimit(), preserve_keys: true)
             : $filter->getSearchResults($search);
 
@@ -134,17 +138,37 @@ trait InteractsWithGantt
 
         $labels = [];
 
-        foreach ($values as $value) {
-            if ((is_string($value) && $value !== '') || is_int($value)) {
-                $label = $filter->getOptionLabel($value);
+        // At most optionsLimit() distinct values: each one not among the options costs a getOptionLabelUsing() call.
+        $values = array_slice(array_values(array_unique(array_filter($values, fn ($value) => (is_string($value) && $value !== '' && mb_strlen($value) <= 255) || is_int($value)))), 0, $filter->getOptionsLimit());
 
-                if ($label !== null) {
-                    $labels[] = ['value' => (string) $value, 'label' => $label];
-                }
+        foreach ($values as $value) {
+            $label = $filter->getOptionLabel($value);
+
+            if ($label !== null) {
+                $labels[] = ['value' => (string) $value, 'label' => $label];
             }
         }
 
         return $labels;
+    }
+
+    /**
+     * A schema never rendered, one FilterSelect per select filter, keyed
+     * `ganttFilters.<filter>`: Filament 4.16+ and 5.11+ ask a select's options
+     * through `callSchemaComponentMethod` with that key (see partials/select).
+     * Filament caches it by name on the first call.
+     */
+    public function ganttFiltersSchema(Schema $schema): Schema
+    {
+        $components = [];
+
+        foreach ($this->getGantt()->getFilters() as $filter) {
+            if ($filter->isSelect() || $filter->isBoolean()) {
+                $components[] = FilterSelect::make($filter->getName())->key($filter->getName());
+            }
+        }
+
+        return $schema->components($components);
     }
 
     /**

@@ -321,3 +321,55 @@ it('refreshes with the search as a trailing argument, read as a string or nothin
         ->call('ganttSpan', [], ['x'])
         ->assertReturned(['start' => '2026-10-05', 'end' => '2026-10-08']);
 });
+
+/* ------------------------------------------------------------------ bounds and the schema route (Filament 4.16+ / 5.11+) */
+
+it('caps the values a searchable multiple filter, a label lookup and a search take', function () {
+    $lookups = 0;
+    TaskGantt::$filters = [
+        Filter::select('owner')->multiple()->searchable()->optionsLimit(5)
+            ->options(['a' => 'A'])
+            ->getOptionLabelUsing(function (string $value) use (&$lookups) {
+                $lookups++;
+
+                return "L{$value}";
+            })
+            ->getSearchResultsUsing(fn (string $search) => collect(['s' => mb_strlen($search)])),
+    ];
+
+    $filter = TaskGantt::$filters[0];
+    $applied = null;
+    $filter->query(function ($query, array $values) use (&$applied) {
+        $applied = $values;
+    });
+    $filter->apply(Task::query(), array_map('strval', range(1, 50)));
+
+    expect($applied)->toHaveCount(5)->and($applied)->toBe(['1', '2', '3', '4', '5']);
+
+    $filter->apply(Task::query(), [str_repeat('x', 256), 'ok']);
+    expect($applied)->toBe(['ok']);
+
+    Livewire::test(TaskGantt::class)
+        ->call('ganttFilterOptionLabels', 'owner', array_merge(array_map('strval', range(1, 40)), ['1', '1']))
+        ->assertReturned([['value' => '1', 'label' => 'L1'], ['value' => '2', 'label' => 'L2'], ['value' => '3', 'label' => 'L3'], ['value' => '4', 'label' => 'L4'], ['value' => '5', 'label' => 'L5']])
+        ->call('ganttFilterOptions', 'owner', str_repeat('q', 500))
+        ->assertReturned([['value' => 's', 'label' => '200']]);
+
+    expect($lookups)->toBe(5);
+});
+
+it('answers Filament 4.16+ option requests through the ganttFilters schema by key', function () {
+    $acme = project('Acme');
+    project('Beta');
+    TaskGantt::$filters = [Filter::select('project_id')->searchable()->options(fn () => Project::query()->orderBy('name')->pluck('name', 'id')->all())];
+
+    Livewire::test(TaskGantt::class)
+        ->call('callSchemaComponentMethod', 'ganttFilters.project_id', 'getOptionsForJs')
+        ->assertReturned([['value' => (string) $acme->id, 'label' => 'Acme'], ['value' => (string) Project::query()->where('name', 'Beta')->value('id'), 'label' => 'Beta']])
+        ->call('callSchemaComponentMethod', 'ganttFilters.project_id', 'getSearchResultsForJs', ['search' => 'bet'])
+        ->assertReturned([['value' => (string) Project::query()->where('name', 'Beta')->value('id'), 'label' => 'Beta']])
+        ->call('callSchemaComponentMethod', 'ganttFilters.project_id', 'getOptionLabelsForJs')
+        ->assertReturned([])
+        ->call('callSchemaComponentMethod', 'ganttFilters.nope', 'getOptionsForJs')
+        ->assertReturned(null);
+});

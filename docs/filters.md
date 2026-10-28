@@ -95,7 +95,7 @@ Filter::select('assignee_id')->label('Assignee')->searchable()
     ->query(fn (Builder $query, string $value) => $query->where('assignee_id', $value === 'me' ? auth()->id() : $value)),
 ```
 
-`optionsLimit()` caps a list or a search (default 50). The select is Filament's own (the component behind the `Select` field), so it looks and behaves like one in a form; the search is a renderless call, nothing on the page re-renders.
+`optionsLimit()` caps a list or a search (default 50); it also caps the values a searchable multiple filter accepts from the URL and the labels looked up for them. The select is Filament's own (the component behind the `Select` field), so it looks and behaves like one in a form; the search is a renderless call, nothing on the page re-renders.
 
 ### Where the filters are shown
 
