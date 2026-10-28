@@ -87,7 +87,8 @@ it('filters with a Yes / No select, handing the query a bool', function () {
 
     // without a query: where(<name>, true|false) on the column
     $sql = Filter::boolean('is_done')->apply($q = Task::query(), '1') ?? $q->toSql();
-    expect($sql)->toContain('"is_done" = ?')
+    // the column as this connection's grammar wraps it ("is_done" on SQLite, `is_done` on MySQL)
+    expect($sql)->toContain($q->getGrammar()->wrap('is_done').' = ?')
         ->and($q->getBindings())->toBe([true]);
 });
 
