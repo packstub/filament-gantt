@@ -7,6 +7,7 @@ use Filament\Actions\Action;
 use Filament\Actions\Contracts\HasActions;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
+use Filament\Schemas\Contracts\HasSchemas;
 use Filament\Schemas\Schema;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Locked;
@@ -109,6 +110,10 @@ trait InteractsWithGantt
      */
     public function mountInteractsWithGantt(): void
     {
+        if (! $this instanceof HasSchemas) {
+            throw new \LogicException(static::class.' must implement Filament\\Schemas\\Contracts\\HasSchemas and use Filament\\Schemas\\Concerns\\InteractsWithSchemas: the filters are Filament form components (the Gantt pages and widget do).');
+        }
+
         $this->getSchema('ganttWindowForm')?->fill();
         $this->getSchema('ganttFiltersForm')?->fill();
     }
