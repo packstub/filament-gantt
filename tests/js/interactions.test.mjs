@@ -711,7 +711,7 @@ test('only a range the user typed is asked for exactly; a refresh keeps it exact
 test('a day picked in the date picker sets the window edge as a date and loads it; a filter pick refreshes', () => {
     const c = chart({ filters: [{ name: 'starts_on', type: 'dateRange' }], bars: [] })
     c.init = () => {}
-    c.active = { starts_on: { from: '', until: '' } }
+    c.active = { starts_on: { from: null, until: null } }
 
     c.pickRange('start', '2026-10-05 00:00:00')
     assert.deepEqual(c.range, { start: '2026-10-05', end: '2026-10-31' })
@@ -723,7 +723,7 @@ test('a day picked in the date picker sets the window edge as a date and loads i
 
     c.pickFilter('starts_on', 'from', '2026-10-07 00:00:00')
     c.pickFilter('starts_on', 'until', null)
-    assert.deepEqual(c.active.starts_on, { from: '2026-10-07', until: '' })
+    assert.deepEqual(c.active.starts_on, { from: '2026-10-07', until: null })
     assert.equal(c.wire.refreshes.at(-1)[0].starts_on.from, '2026-10-07')
 })
 
@@ -884,7 +884,7 @@ test('every filter type has an empty state, a test for activity, a count and a r
     c.persist = () => {}
     c.init()
 
-    assert.deepEqual(c.active, { status: '', tags: [], is_done: '', mine: false, starts_on: { from: '', until: '' } })
+    assert.deepEqual(c.active, { status: '', tags: [], is_done: '', mine: false, starts_on: { from: null, until: null } })
     assert.equal(c.activeFilterCount(), 0)
     assert.deepEqual(c.activeFilters(), {})
 
@@ -910,7 +910,7 @@ test('every filter type has an empty state, a test for activity, a count and a r
     assert.equal(c.active.mine, false)
 
     c.resetFilters()
-    assert.deepEqual(c.active, { status: '', tags: [], is_done: '', mine: false, starts_on: { from: '', until: '' } })
+    assert.deepEqual(c.active, { status: '', tags: [], is_done: '', mine: false, starts_on: { from: null, until: null } })
     assert.equal(c.activeFilterCount(), 0)
     const after = c.wire.refreshes.length
     c.resetFilters()
@@ -967,4 +967,42 @@ test('Fit asks for the span of the bars the filters and the search leave', async
     c.$wire.ganttSpan = async (filters, search) => { c.wire.spans = [[filters, search]]; return null }
     await c.fitAll()
     assert.deepEqual(c.wire.spans, [[{}, 'docs']])
+})
+
+test('a date-range filter takes a real calendar day for its two edges only, and the URL restores dates of that shape alone', () => {
+    const c = chart({ filters: [{ name: 'starts_on', type: 'dateRange', multiple: false, searchable: false, options: [] }], bars: [] })
+    c.init = () => {}
+    c.active = { starts_on: { from: null, until: null } }
+
+    const before = c.wire.refreshes.length
+    c.pickFilter('starts_on', 'from', '2026-02-30 00:00:00')   // not a calendar date
+    c.pickFilter('starts_on', 'from', 'tomorrow')
+    c.pickFilter('starts_on', 'from', 12)
+    c.pickFilter('starts_on', 'start', '2026-10-07 00:00:00')   // not an edge of the range
+    c.pickFilter('starts_on', 'constructor', '2026-10-07 00:00:00')
+    c.pickFilter('starts_on', 'until', null)                    // cleared while empty: nothing to do
+    assert.deepEqual(c.active.starts_on, { from: null, until: null })
+    assert.equal(c.wire.refreshes.length, before, 'a refused pick sends nothing')
+
+    c.pickFilter('starts_on', 'from', '2026-10-07 00:00:00')
+    c.pickFilter('starts_on', 'from', '2026-10-07 12:00:00')    // the same day again
+    assert.deepEqual(c.active.starts_on, { from: '2026-10-07', until: null })
+    assert.equal(c.wire.refreshes.length, before + 1)
+
+    // the URL: `f.<name>.from` / `.until` as dates only, as the server applies them
+    const location = globalThis.window.location
+    globalThis.window.location = { href: 'https://x.test/?f.starts_on.from=2026-10-07&f.starts_on.until=%3Cb%3Ex', search: '?f.starts_on.from=2026-10-07&f.starts_on.until=%3Cb%3Ex' }
+    try {
+        const d = chart({ bars: [], filters: c.filters })
+        d.init()
+        assert.deepEqual(d.active.starts_on, { from: '2026-10-07', until: null })
+
+        globalThis.window.location = { href: 'https://x.test/?f.starts_on.from=2026-13-01', search: '?f.starts_on.from=2026-13-01' }
+        const e = chart({ bars: [], filters: c.filters })
+        e.init()
+        assert.deepEqual(e.active.starts_on, { from: null, until: null })
+        assert.equal(e.isActive(e.filters[0]), false)
+    } finally {
+        globalThis.window.location = location
+    }
 })

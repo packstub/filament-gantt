@@ -94,6 +94,14 @@ export function format(ts, withTime = true) {
 }
 
 /** ISO weekday of a UTC timestamp: 1 = Monday … 7 = Sunday. */
+/** A `Y-m-d` string naming a real calendar date (a picker's `Y-m-d H:i:s` cut to its day), or null: as Filter::date() on the server. */
+export function isoDay(value) {
+    const m = typeof value === 'string' && value.match(/^(\d{4})-(\d{2})-(\d{2})/)
+    if (! m || +m[1] < 1000) return null
+    const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]))
+    return d.getUTCFullYear() === +m[1] && d.getUTCMonth() === +m[2] - 1 && d.getUTCDate() === +m[3] ? m[1] + '-' + m[2] + '-' + m[3] : null
+}
+
 export function isoWeekday(ts) {
     return ((new Date(ts).getUTCDay() + 6) % 7) + 1
 }
@@ -1527,9 +1535,13 @@ export default function packstubGantt(config) {
             this.refresh()
         },
 
-        /** A day picked for one end of a date-range filter (`Y-m-d H:i:s` from the picker, or null when cleared). */
+        /** A day picked for one end of a date-range filter: the day as `Y-m-d` (from the picker's `Y-m-d H:i:s`), or null when cleared. */
         pickFilter(name, edge, value) {
-            this.active[name] = { ...(this.active[name] || { from: '', until: '' }), [edge]: value ? String(value).slice(0, 10) : '' }
+            if (edge !== 'from' && edge !== 'until') return
+            const day = isoDay(value)
+            const current = this.active[name] || { from: null, until: null }
+            if ((current[edge] || null) === day) return
+            this.active[name] = { ...current, [edge]: day }
             this.refresh()
         },
 
@@ -1548,7 +1560,7 @@ export default function packstubGantt(config) {
 
         /** The empty state of a filter, what "no choice" looks like: '' / [] / false / { from, until }. */
         blank(filter) {
-            if (filter.type === 'dateRange') return { from: '', until: '' }
+            if (filter.type === 'dateRange') return { from: null, until: null }
             if (filter.type === 'toggle') return false
             if (filter.multiple) return []
             return ''
@@ -1706,8 +1718,9 @@ export default function packstubGantt(config) {
                 params ??= new URLSearchParams(window.location.search)
                 for (const f of this.filters) {
                     if (f.type === 'dateRange') {
-                        const a = params.get(`f.${f.name}.from`) || ''
-                        const b = params.get(`f.${f.name}.until`) || ''
+                        // a real calendar date only, as the server applies it (nothing else reaches the picker)
+                        const a = isoDay(params.get(`f.${f.name}.from`))
+                        const b = isoDay(params.get(`f.${f.name}.until`))
                         if (a || b) { this.active[f.name] = { from: a, until: b }; any = true }
                     } else if (f.type === 'toggle') {
                         if (params.get(`f.${f.name}`) === '1') { this.active[f.name] = true; any = true }

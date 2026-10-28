@@ -7,6 +7,7 @@ use Filament\Support\Colors\Color;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Livewire\Livewire;
 use Packstub\Gantt\Bar;
 use Packstub\Gantt\Enums\Scale;
 use Packstub\Gantt\Enums\Unit;
@@ -18,6 +19,7 @@ use Packstub\Gantt\Group;
 use Packstub\Gantt\Tests\Fixtures\Project;
 use Packstub\Gantt\Tests\Fixtures\Shift;
 use Packstub\Gantt\Tests\Fixtures\Task;
+use Packstub\Gantt\Tests\Fixtures\TaskGantt;
 use Packstub\Gantt\Tests\Fixtures\UncastTask;
 
 beforeEach(function () {
@@ -968,4 +970,33 @@ it('tells the span of the bars the filters leave, or nothing', function () {
         ->and($gantt->getSpan(['project_id' => (string) $acme->id]))->toBe(['start' => '2026-10-05', 'end' => '2026-10-06'])
         ->and($gantt->getSpan(['project_id' => '999']))->toBe(['start' => '2026-10-05', 'end' => '2026-12-21'])
         ->and(gantt()->filters([Filter::select('project_id')->options([$acme->id => 'Acme'])->query(fn ($q) => $q->whereRaw('1 = 0'))])->getSpan(['project_id' => (string) $acme->id]))->toBeNull();
+});
+
+it('refuses a refreshOn() event name that could not sit in an x-on attribute', function () {
+    expect(gantt()->refreshOn(['task-updated', 'echo:tasks.saved', 'v1_done'])->getRefreshOn())->toBe(['task-updated', 'echo:tasks.saved', 'v1_done'])
+        ->and(fn () => gantt()->refreshOn(['saved" x-init="alert(1)']))->toThrow(InvalidArgumentException::class)
+        ->and(fn () => gantt()->refreshOn(['a b']))->toThrow(InvalidArgumentException::class)
+        ->and(fn () => gantt()->refreshOn(['']))->toThrow(InvalidArgumentException::class)
+        ->and(fn () => gantt()->refreshOn([null]))->toThrow(InvalidArgumentException::class);
+});
+
+it('finds no record for an id of another shape than the integer key, without asking the database', function () {
+    $task = task('Draft', '2026-10-05', '2026-10-07');
+    $gantt = gantt();
+
+    expect($gantt->findRecord($task->id)?->id)->toBe($task->id)
+        ->and($gantt->findRecord((string) $task->id)?->id)->toBe($task->id)
+        ->and($gantt->findRecord(''))->toBeNull()
+        ->and($gantt->findRecord(null))->toBeNull();
+
+    DB::enableQueryLog();
+    expect($gantt->findRecord('abc'))->toBeNull()
+        ->and($gantt->findRecord('1e3'))->toBeNull()
+        ->and($gantt->findRecord('-1'))->toBeNull()
+        ->and($gantt->findRecord(' 1'))->toBeNull()
+        ->and(DB::getQueryLog())->toBe([]);
+    DB::disableQueryLog();
+
+    // An action mounted for such an id is hidden, not a 500.
+    Livewire::test(TaskGantt::class)->assertActionHidden('edit', ['ganttRecord' => 'abc']);
 });

@@ -17,6 +17,7 @@ use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Traits\Conditionable;
+use InvalidArgumentException;
 use LogicException;
 use Packstub\Gantt\Enums\FiltersLayout;
 use Packstub\Gantt\Enums\Scale;
@@ -610,10 +611,18 @@ class Gantt
      * Livewire events after which the chart reloads its bars (`$this->dispatch('task-updated')`
      * anywhere on the page).
      *
-     * @param  list<string>  $events
+     * @param  list<string>  $events  names of letters, digits, `_`, `.`, `:` and `-` (they end up in the view's `x-on:` attributes)
+     *
+     * @throws InvalidArgumentException for a name of another shape
      */
     public function refreshOn(array $events): static
     {
+        foreach ($events as $event) {
+            if (! is_string($event) || ! preg_match('/^[\w.:-]+$/', $event)) {
+                throw new InvalidArgumentException(sprintf('A refreshOn() event name holds letters, digits, "_", ".", ":" and "-" only, [%s] given.', is_string($event) ? $event : get_debug_type($event)));
+            }
+        }
+
         $this->refreshOn = array_values($events);
 
         return $this;
@@ -628,7 +637,7 @@ class Gantt
             $this->poll = max(1000, $interval);
         } else {
             preg_match('/^(\d+)\s*(ms|s|m)?$/', trim($interval), $m)
-                ?: throw new \InvalidArgumentException("Cannot read the poll interval [{$interval}]: use '10s', '1m' or milliseconds.");
+                ?: throw new InvalidArgumentException("Cannot read the poll interval [{$interval}]: use '10s', '1m' or milliseconds.");
             $this->poll = max(1000, (int) $m[1] * match ($m[2] ?? 'ms') {
                 's' => 1000, 'm' => 60000, default => 1
             });
@@ -983,6 +992,12 @@ class Gantt
     public function findRecord(string|int|null $id): ?Model
     {
         if (blank($id)) {
+            return null;
+        }
+
+        // An integer key never matches 'abc': asked anyway, PostgreSQL throws a QueryException
+        // (a 500 from an action's hidden()), so a bar id of another shape is simply not found.
+        if (! is_int($id) && $this->newModel()->getKeyType() === 'int' && ! ctype_digit((string) $id)) {
             return null;
         }
 

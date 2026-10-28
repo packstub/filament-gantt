@@ -18,7 +18,7 @@
     --ps-gantt-soft: var(--gray-600);
     --ps-gantt-ring: var(--primary-500);
     --ps-gantt-radius: 0.75rem;   /* the container's, as a table's (rounded-xl) */
-    --ps-gantt-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    --ps-gantt-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);   /* a table's (shadow-sm) */
     --ps-gantt-outline: rgb(9 9 11 / 0.05);  /* ring-gray-950/5 */
     --ps-gantt-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
 
@@ -30,6 +30,8 @@
     background: var(--ps-gantt-bg);
     box-shadow: var(--ps-gantt-shadow), 0 0 0 1px var(--ps-gantt-outline);
     color: var(--ps-gantt-text);
+    font-size: 0.875rem;   /* a table's text, for whatever sets no size of its own */
+    line-height: 1.25rem;
 }
 
 .dark .ps-gantt {
@@ -59,17 +61,23 @@
 
 @media (min-width: 40rem) { .ps-gantt-toolbar { padding-inline: 1.5rem; } }
 
-/* two groups: the component's own controls at the start, search / filters / toggles at the end */
-.ps-gantt-toolbar-start, .ps-gantt-toolbar-end { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; min-height: 2.25rem; }
-.ps-gantt-toolbar-start { flex-shrink: 0; }
-.ps-gantt-toolbar-end { margin-inline-start: auto; }
+/*
+ * Two groups: the component's own controls at the start, search / filters / toggles at
+ * the end. One row like a table's toolbar: the start group gives way first, wrapping its
+ * own items, and keeps the end group on the same row; only on a narrow screen does the
+ * end group take a row of its own. Neither group may overflow the toolbar (min-width: 0).
+ */
+.ps-gantt-toolbar-start, .ps-gantt-toolbar-end { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; min-height: 2.25rem; min-width: 0; }
+.ps-gantt-toolbar-start { flex: 1 1 auto; }
+.ps-gantt-toolbar-end { flex: 0 1 auto; margin-inline-start: auto; }
+@media (min-width: 64rem) { .ps-gantt-toolbar, .ps-gantt-toolbar-end { flex-wrap: nowrap; } }
 
 /* Filament centres a tab nav with auto margins; in a row that leaves a hole */
 .ps-gantt-toolbar .fi-tabs { margin: 0; }
 .ps-gantt-toolbar .fi-input-wrp { width: auto; }
 .ps-gantt-toolbar .fi-select-input { min-width: 11rem; }
-.ps-gantt-toolbar .fi-fo-date-time-picker-display-text-input { width: 8.5rem; }
-.ps-gantt-search .fi-input { width: 12rem; }
+.ps-gantt-toolbar .fi-fo-date-time-picker-display-text-input { width: 7.25rem; }
+.ps-gantt-search .fi-input { width: 10rem; }
 
 /* a group of buttons that belong together (undo / redo, prev / next) */
 .ps-gantt-seg { display: inline-flex; gap: 0.25rem; }
@@ -97,6 +105,10 @@
 .ps-gantt-filter-stacked .ps-gantt-range { display: grid; grid-template-columns: 1fr 1fr; }
 .ps-gantt-filter-label { font-size: 0.875rem; line-height: 1.5rem; font-weight: 500; color: var(--ps-gantt-text); }
 .ps-gantt-filters-trigger { position: relative; display: inline-flex; }
+/* the count of active filters on the funnel's top-right corner, as Filament places an icon button's badge (icon-button.css) */
+.ps-gantt-filters-trigger > .fi-icon-btn-badge-ctn { position: absolute; inset-inline-start: 100%; top: 0.25rem; z-index: 1; display: flex; width: max-content; transform: translate(-50%, -50%); border-radius: 0.375rem; background: #fff; }
+.ps-gantt-filters-trigger > .fi-icon-btn-badge-ctn:where([dir="rtl"], [dir="rtl"] *) { transform: translate(50%, -50%); }
+.dark .ps-gantt-filters-trigger > .fi-icon-btn-badge-ctn { background: var(--gray-900); }
 .ps-gantt-filters-above .ps-gantt-filters-header { grid-column: 1 / -1; }
 
 /* ------------------------------------------------------------------ an indicator strip under the toolbar (fi-ta-selection-indicator) */
@@ -132,6 +144,8 @@
     color: var(--ps-gantt-muted);
 }
 @media (min-width: 40rem) { .ps-gantt-footer { padding-inline: 1.5rem; } }
+/* as tall as a table's pagination row (its controls are 2.25rem) */
+.ps-gantt-footer > * { display: inline-flex; align-items: center; min-height: 2.25rem; }
 
 /* ------------------------------------------------------------------ menus at the pointer (fi-dropdown-panel, placed by the component) */
 
