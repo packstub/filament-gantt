@@ -8,6 +8,8 @@ A Gantt chart and resource timeline for Filament v4 (4.13+) and v5. Any Eloquent
 - Packagist: [packstub/filament-gantt](https://packagist.org/packages/packstub/filament-gantt)
 - Support: [GitHub issues](https://github.com/packstub/filament-gantt/issues)
 
+![A Filament Gantt chart fitted to the plan: a task bar dragged later with the date hint and the dependency arrows following, then another bar stretched from its end](https://raw.githubusercontent.com/packstub/art/main/filament-gantt/docs/gantt.gif)
+
 ## Features
 
 - **[Drag to move, resize or reassign](moves.md)**: bars move at once, by an edge or to another row.

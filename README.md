@@ -8,11 +8,14 @@
 [![Tests](https://img.shields.io/github/actions/workflow/status/packstub/filament-gantt/tests.yml?branch=main&label=tests&style=flat-square)](https://github.com/packstub/filament-gantt/actions/workflows/tests.yml)
 [![Total Downloads](https://img.shields.io/packagist/dt/packstub/filament-gantt.svg?style=flat-square)](https://packagist.org/packages/packstub/filament-gantt)
 [![License](https://img.shields.io/packagist/l/packstub/filament-gantt.svg?style=flat-square)](https://github.com/packstub/filament-gantt/blob/main/LICENSE.md)
+[![Listed on filamentphp.com](https://img.shields.io/badge/filamentphp.com-listed-fb7185?style=flat-square&logo=filament&logoColor=white)](https://filamentphp.com/plugins/packstub-gantt)
 [![Sponsor](https://img.shields.io/badge/sponsor-%E2%9D%A4-ea4aaa?style=flat-square&logo=githubsponsors&logoColor=white)](https://github.com/sponsors/icaliman)
 
 </div>
 
 A Gantt chart and resource timeline for Filament: any Eloquent query with a start and an end becomes draggable bars on an hour, day, week, month or year axis, grouped by project, assignee, room or machine, with every rule enforced on the server. The sibling of [Filament Kanban](https://github.com/packstub/filament-kanban).
+
+![A Filament Gantt chart fitted to the plan: a task bar dragged later with the date hint and the dependency arrows following, then another bar stretched from its end](https://raw.githubusercontent.com/packstub/art/main/filament-gantt/docs/gantt.gif)
 
 ## Features
 
