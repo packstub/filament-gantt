@@ -618,7 +618,7 @@ export default function packstubGantt(config) {
             // A bar in the air (another bar's answer arrived mid-drag), or one being
             // nudged with the keys, keeps its new dates on the fresh row bar.
             const p = this.pointer
-            if (p) {
+            if (p?.bar) {
                 const fresh = this.rowBar(p.bar.id)
                 if (fresh && fresh !== p.bar) {
                     fresh.s = p.bar.s
@@ -1103,6 +1103,8 @@ export default function packstubGantt(config) {
 
         /** The bar under the pointer: the pointer's travel plus how far the chart has scrolled since the press. */
         track(p) {
+            if (p.select) return this.trackSelection(p)
+
             const sx = p.cx - p.x0
             const sy = p.cy - p.y0
 
@@ -1216,6 +1218,12 @@ export default function packstubGantt(config) {
             if (! p || event.pointerId !== p.id) return
             this.release(p)
 
+            // A press that never moved is a click: createAt() has it.
+            if (p.select) {
+                if (p.moved) this.mountCreate(p.s, p.e, p.group)
+                return
+            }
+
             if (! p.moved) {
                 // Held, then lifted: the bar's menu (touch has no right-click).
                 if (p.touch && p.picked) {
@@ -1240,10 +1248,10 @@ export default function packstubGantt(config) {
             const p = this.pointer
             if (! p || (event?.pointerId !== undefined && event.pointerId !== p.id)) return
             this.release(p)
-            if (p.moved) {
+            if (p.moved || p.select) {
                 this.swallowClick = true
             }
-            if (p.moved && p.allowed) {
+            if (p.moved && p.allowed && ! p.select) {
                 p.bar.s = p.s
                 p.bar.e = p.e
                 this.rebuild()
@@ -1539,17 +1547,69 @@ export default function packstubGantt(config) {
             if (pressed && (pressed.touch ? travel > 8 : travel >= 3)) return
             if (! this.creatable(row) || event.target.closest('.ps-gantt-bar')) return
 
-            const rect = event.currentTarget.getBoundingClientRect()
-            const px = this.rtl() ? rect.right - event.clientX : event.clientX - rect.left
-            const days = Math.floor(px / this.view.pxPerDay / this.unitDays) * this.unitDays
-            const start = this.view.start + days * DAY
-            const end = start + this.unitDays * DAY
+            const start = this.spotAt(event.clientX, event.currentTarget)
 
+            this.mountCreate(start, start + this.unitDays * DAY, row.group.key || null)
+        },
+
+        mountCreate(start, end, group) {
             this.ui('wire').mountAction(this.createAction.name, {
                 ganttStart: format(start),
                 ganttEnd: format(end),
-                ganttGroup: row.group.key || null,
+                ganttGroup: group,
             })
+        },
+
+        /** The start of the snap unit under a point on screen, kept on the canvas. Read from the canvas's own box, so scrolling is counted. */
+        spotAt(clientX, canvas) {
+            const rect = canvas.getBoundingClientRect()
+            const px = Math.max(0, Math.min(this.rtl() ? rect.right - clientX : clientX - rect.left, this.view.width - 1))
+            const days = Math.floor(px / this.view.pxPerDay / this.unitDays) * this.unitDays
+
+            return this.view.start + days * DAY
+        },
+
+        /**
+         * A press on an empty spot of a row: dragged, it selects the period to create.
+         * Lives in `pointer` like a bar's drag (one pointer at a time, Escape, the
+         * chart's auto-scroll), without a `bar`. Mouse only: on touch a swipe scrolls.
+         */
+        selectFrom(event, row) {
+            if (event.button !== 0 || event.pointerType !== 'mouse' || this.pointer || ! this.creatable(row) || event.target.closest('.ps-gantt-bar')) return
+
+            const from = this.spotAt(event.clientX, event.currentTarget)
+
+            this.menu = null
+            this.pointer = {
+                select: true, id: event.pointerId, el: event.currentTarget, key: row.key,
+                group: row.group.key || null,
+                from, s: from, e: from + this.unitDays * DAY,
+                allowed: true, moved: false, touch: false, press: null, rows: false, dy: 0,
+                x0: event.clientX, y0: event.clientY, cx: event.clientX, cy: event.clientY,
+            }
+            event.currentTarget.setPointerCapture?.(event.pointerId)
+        },
+
+        /** The period between the pressed unit and the one under the pointer, both included, whichever way it went. */
+        trackSelection(p) {
+            if (! p.moved && Math.hypot(p.cx - p.x0, p.cy - p.y0) < 3) return
+
+            p.moved = true
+            this.dragging = true
+
+            const at = this.spotAt(p.cx, p.el)
+            p.s = Math.min(p.from, at)
+            p.e = Math.max(p.from, at) + this.unitDays * DAY
+
+            this.hint = this.dates({ s: p.s, e: p.e, allDay: this.unitDays >= 1 }) + (p.group ? ' · ' + this.groupLabel(p.group) : '')
+            this.autoScroll(p)
+        },
+
+        selectionStyle() {
+            const p = this.pointer
+            const x = (p.s - this.view.start) / DAY * this.view.pxPerDay
+
+            return { 'inset-inline-start': x + 'px', width: (p.e - p.s) / DAY * this.view.pxPerDay + 'px' }
         },
 
         /* ------------------------------------------------------------ window, filters, refresh */

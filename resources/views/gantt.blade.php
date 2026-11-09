@@ -186,10 +186,19 @@
                         :class="{ 'ps-gantt-canvas-creatable': creatable(row) }"
                         :title="creatable(row) ? t.create_here : null"
                         x-on:click="createAt($event, row)"
+                        x-on:pointerdown="selectFrom($event, row)"
+                        x-on:pointermove="pointer?.select && drag($event)"
+                        x-on:pointerup="pointer?.select && up($event)"
+                        x-on:pointercancel="pointer?.select && cancel($event)"
+                        x-on:lostpointercapture="pointer?.select && cancel($event)"
                     >
                         {{-- A folded group keeps a line from its first bar to its last, so the row still marks where it sits. --}}
                         <template x-if="row.span">
                             <div class="ps-gantt-span" role="img" :style="spanStyle(row)" :title="spanTitle(row)" :aria-label="spanTitle(row)"></div>
+                        </template>
+                        {{-- The period being selected with a press and drag, for the create form. --}}
+                        <template x-if="pointer?.select && pointer.moved && pointer.key === row.key">
+                            <div class="ps-gantt-selection" :style="selectionStyle()"></div>
                         </template>
                         <template x-for="bar in row.bars" :key="bar.id">
                             <div

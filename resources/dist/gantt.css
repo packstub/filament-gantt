@@ -348,7 +348,15 @@
 
 .ps-gantt-span::before { inset-inline-start: 0; }
 .ps-gantt-span::after { inset-inline-end: 0; }
-.ps-gantt-canvas-creatable { cursor: cell; }
+.ps-gantt-canvas-creatable { cursor: cell; user-select: none; -webkit-user-select: none; }
+.ps-gantt-selection {
+    position: absolute;
+    inset-block: 2px;
+    border-radius: 4px;
+    background: color-mix(in oklab, var(--primary-500) 22%, transparent);
+    box-shadow: inset 0 0 0 1px var(--primary-500);
+    pointer-events: none;
+}
 .ps-gantt-is-readonly .ps-gantt-canvas { cursor: default; }
 
 .ps-gantt-pad { width: 1px; }
