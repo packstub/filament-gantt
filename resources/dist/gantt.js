@@ -715,8 +715,6 @@ export default function packstubGantt(config) {
             return { 'inset-inline-start': c.x + 'px', width: c.w + 'px' }
         },
 
-        // An object, never a string: Alpine sets each property on its own, so a value
-        // (a colour from user data) can never add declarations of its own.
         /** The folded group's extent line: where it sits, in the group's colour when it has one. */
         spanStyle(row) {
             const span = row.span
@@ -734,6 +732,8 @@ export default function packstubGantt(config) {
             return row.span ? this.dates(row.span) : ''
         },
 
+        // An object, never a string: Alpine sets each property on its own, so a value
+        // (a colour from user data) can never add declarations of its own.
         barStyle(bar) {
             const top = 4 + bar.lane * config.rowHeight
             const inner = config.rowHeight - 8

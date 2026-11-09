@@ -189,7 +189,7 @@
                     >
                         {{-- A folded group keeps a line from its first bar to its last, so the row still marks where it sits. --}}
                         <template x-if="row.span">
-                            <div class="ps-gantt-span" :style="spanStyle(row)" :title="spanTitle(row)" :aria-label="spanTitle(row)"></div>
+                            <div class="ps-gantt-span" role="img" :style="spanStyle(row)" :title="spanTitle(row)" :aria-label="spanTitle(row)"></div>
                         </template>
                         <template x-for="bar in row.bars" :key="bar.id">
                             <div

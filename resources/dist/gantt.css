@@ -330,12 +330,8 @@
 /* A folded group's extent: a line from its first bar to its last, with a tick at each end. */
 .ps-gantt-span {
     position: absolute;
-    top: 50%;
-    height: 3px;
-    margin-top: -1.5px;
-    border-radius: 999px;
-    background: var(--ps-bar, var(--ps-gantt-span));
-    pointer-events: none;
+    inset-block: 0; /* the whole row's height to hover; the line itself is 3px */
+    background: linear-gradient(var(--ps-bar, var(--ps-gantt-span)) 0 0) center / 100% 3px no-repeat;
 }
 
 .ps-gantt-span::before,
@@ -347,7 +343,7 @@
     height: 11px;
     margin-top: -5.5px;
     border-radius: 999px;
-    background: inherit;
+    background: var(--ps-bar, var(--ps-gantt-span));
 }
 
 .ps-gantt-span::before { inset-inline-start: 0; }
