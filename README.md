@@ -23,7 +23,7 @@ A Gantt chart and resource timeline for Filament: any Eloquent query with a star
 - **[Rules on the server](#moving-and-resizing)**: policies, durations and a locked past, always checked.
 - **[Groups and resource timelines](#groups-and-resource-timelines)**: rows by project, assignee, room or machine.
 - **[Milestones, progress and dependencies](#defining-bars)**: diamonds, fills and finish-to-start arrows.
-- **[Filament actions on bars](#actions)**: click to edit, right-click for more, click to create.
+- **[Filament actions on bars](#actions)**: click to edit, right-click for more, click or drag to create.
 - **[Hour to year, zoom and Fit](#the-time-window)**: five scales, wheel or pinch zoom, the whole plan in one screen.
 - **[Search and filters](#the-time-window)**: Filament's filter fields, kept in the URL.
 - **[Keyboard and touch](https://packstub.dev/docs/filament-gantt/moves)**: move and resize with the arrows, drag on touch.

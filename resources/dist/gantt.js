@@ -1220,7 +1220,12 @@ export default function packstubGantt(config) {
 
             // A press that never moved is a click: createAt() has it.
             if (p.select) {
-                if (p.moved) this.mountCreate(p.s, p.e, p.group)
+                if (p.moved) {
+                    // Dragged back to where it was pressed, its click looks like a plain one.
+                    this.swallowClick = true
+                    this.mountCreate(p.s, p.e, p.group)
+                }
+
                 return
             }
 
@@ -1575,7 +1580,7 @@ export default function packstubGantt(config) {
          * chart's auto-scroll), without a `bar`. Mouse only: on touch a swipe scrolls.
          */
         selectFrom(event, row) {
-            if (event.button !== 0 || event.pointerType !== 'mouse' || this.pointer || ! this.creatable(row) || event.target.closest('.ps-gantt-bar')) return
+            if (event.button !== 0 || event.ctrlKey || event.pointerType !== 'mouse' || this.pointer || ! this.creatable(row) || event.target.closest('.ps-gantt-bar')) return
 
             const from = this.spotAt(event.clientX, event.currentTarget)
 

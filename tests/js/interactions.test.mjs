@@ -1113,3 +1113,18 @@ test('no selection from a bar, a touch, another button, or on a chart that canno
         assert.equal(c.pointer, null)
     }
 })
+
+test('a selection dragged away and back to where it was pressed opens the form once', () => {
+    const c = chart({ createAction: { name: 'create' }, bars: [bar()] })
+    const s = selecting(c, c.view.rows[0])
+
+    s.move(96)
+    s.up(1)
+    assert.equal(c.wire.mounted.length, 1)
+})
+
+test('a Ctrl+press (the Mac\'s right-click) starts no selection', () => {
+    const c = chart({ createAction: { name: 'create' }, bars: [bar()] })
+    c.selectFrom({ button: 0, ctrlKey: true, pointerId: 9, clientX: 196, clientY: 60, pointerType: 'mouse', target: { closest: () => null }, currentTarget: element() }, c.view.rows[0])
+    assert.equal(c.pointer, null)
+})

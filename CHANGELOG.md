@@ -4,8 +4,12 @@ All notable changes to `packstub/filament-gantt` are documented in this file.
 
 ## Unreleased
 
-- A folded group draws a line from its first bar to its last, so the row still shows where the group sits
+## 1.0.0-beta.2 - 2026-11-09
+
+Run `php artisan filament:assets` after updating.
+
 - Press and drag across an empty stretch of a row to create a record for that period, in that row's group
+- A folded group draws a line from its first bar to its last, so the row still shows where the group sits; hover it for the dates
 
 ## 1.0.0-beta.1 - 2026-10-28
 
