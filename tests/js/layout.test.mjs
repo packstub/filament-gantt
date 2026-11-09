@@ -78,10 +78,21 @@ test('week columns follow firstDayOfWeek and a mid-week window start', () => {
     assert.deepEqual(v.columns.slice(0, 2).map((c) => c.w), [5 * 18, 7 * 18])
 })
 
-test('a collapsed group hides its bars', () => {
+test('a collapsed group hides its bars and keeps a line across their extent', () => {
     const v = layout(bars, { ...window, collapsed: { 1: true } }, 'week')
     assert.deepEqual(v.rows.map((r) => r.type), ['group', 'group', 'bar'])
     assert.equal(v.rows[0].collapsed, true)
+    assert.equal(v.rows[0].span.x, 0)
+    assert.equal(v.rows[0].span.w, 5 * 18)
+    assert.equal(v.rows[0].span.s, parse('2026-10-05'))
+    assert.equal(v.rows[0].span.e, parse('2026-10-10'))
+    assert.equal(v.rows[0].span.milestone, false)
+    assert.equal(v.rows[1].span, null)
+
+    const point = layout(bars, { ...window, collapsed: { 2: true } }, 'week').rows[3].span
+    assert.equal(point.milestone, true)
+    assert.equal(point.w, 2)
+    assert.equal(point.x, 15 * 18)
 })
 
 test('compact: one row per group, overlapping bars in lanes', () => {
