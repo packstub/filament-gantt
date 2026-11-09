@@ -45,7 +45,7 @@ Once an action has run, the chart reloads its bars (keeping the window and the f
 
 ## Create on an empty spot
 
-`createAction()` opens the create form when the user clicks an empty spot of a row, a group's own row included (a group with no bars yet has nothing else to click). The form opens with the start, the end (one snap unit later) and the row's group already filled in; a form without those fields still gets them on save:
+`createAction()` opens the create form when the user clicks an empty spot of a row, a group's own row included (a group with no bars yet has nothing else to click). The form opens with the start, the end (one snap unit later) and the row's group already filled in; a form without those fields still gets them on save. With a mouse, press and drag across the row instead to open it with the whole period you selected, the row's group filled in as well (Escape cancels):
 
 ```php
 use Filament\Actions\CreateAction;

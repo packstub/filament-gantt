@@ -1006,3 +1006,125 @@ test('a date-range filter takes a real calendar day for its two edges only, and 
         globalThis.window.location = location
     }
 })
+
+/* ------------------------------------------------------------------ press and drag to create */
+
+const selecting = (c, row, { x = 196, pointerType = 'mouse', button = 0, target = { closest: () => null }, el = element() } = {}) => {
+    c.pressAt({ clientX: x, clientY: 60, pointerType })
+    c.selectFrom({ button, pointerId: 9, clientX: x, clientY: 60, pointerType, target, currentTarget: el }, row)
+
+    return {
+        move: (dx) => c.drag({ pointerId: 9, clientX: x + dx, clientY: 60 }),
+        up: (dx) => {
+            c.drag({ pointerId: 9, clientX: x + dx, clientY: 60 })
+            c.up({ pointerId: 9, clientX: x + dx, clientY: 60 })
+            // The click its release makes on the canvas.
+            c.createAt({ target: { closest: () => null }, currentTarget: el, clientX: x + dx, clientY: 60 }, row)
+        },
+    }
+}
+
+const grouped = (collapsed) => chart({ createAction: { name: 'create' }, grouped: true, groups: [{ key: '7', label: 'Seven', color: null, collapsed }], bars: [bar({ group: '7' })] })
+
+test('a press and drag over a row opens the create form once, for the whole period selected', () => {
+    const c = chart({ createAction: { name: 'create' }, bars: [bar()] })
+    const s = selecting(c, c.view.rows[0])
+
+    s.move(96)
+    assert.equal(c.pointer.s, parse('2026-10-03'))
+    assert.equal(c.pointer.e, parse('2026-10-06'))
+    assert.deepEqual(c.selectionStyle(), { 'inset-inline-start': '96px', width: '144px' })
+    assert.equal(c.hint, 'Oct 3, 2026 – Oct 5, 2026')
+
+    s.up(96)
+    assert.deepEqual(c.wire.mounted, [['create', { ganttStart: '2026-10-03 00:00', ganttEnd: '2026-10-06 00:00', ganttGroup: null }]])
+    assert.equal(c.pointer, null)
+    assert.equal(c.dragging, false)
+})
+
+test('a selection dragged backwards keeps the pressed unit, and stops at the chart\'s edge', () => {
+    const c = chart({ createAction: { name: 'create' }, bars: [bar()] })
+    const s = selecting(c, c.view.rows[0])
+
+    s.up(-500)
+    assert.deepEqual(c.wire.mounted, [['create', { ganttStart: '2026-10-01 00:00', ganttEnd: '2026-10-04 00:00', ganttGroup: null }]])
+})
+
+test('a selection on a group\'s own row preselects the group, open or folded', () => {
+    for (const collapsed of [false, true]) {
+        const c = grouped(collapsed)
+        const s = selecting(c, c.view.rows[0])
+        s.move(96)
+        assert.equal(c.hint, 'Oct 3, 2026 – Oct 5, 2026 · Seven')
+        s.up(96)
+        assert.equal(c.wire.mounted[0][1].ganttGroup, '7')
+    }
+})
+
+test('a selection on a bar\'s row inside a group preselects that group', () => {
+    const c = grouped(false)
+    const s = selecting(c, c.view.rows.find((row) => row.type === 'bar'))
+    s.up(96)
+    assert.equal(c.wire.mounted[0][1].ganttGroup, '7')
+})
+
+test('a press that does not move stays a click', () => {
+    const c = grouped(true)
+    const s = selecting(c, c.view.rows[0])
+    s.up(1)
+    assert.deepEqual(c.wire.mounted, [['create', { ganttStart: '2026-10-03 00:00', ganttEnd: '2026-10-04 00:00', ganttGroup: '7' }]])
+})
+
+test('Escape abandons a selection: nothing opens, not even from the release\'s click', () => {
+    const c = chart({ createAction: { name: 'create' }, bars: [bar()] })
+    const s = selecting(c, c.view.rows[0])
+
+    s.move(96)
+    c.onEscape()
+    assert.equal(c.pointer, null)
+    s.up(96)
+    assert.deepEqual(c.wire.mounted, [])
+})
+
+test('a rebuild during a selection keeps it', () => {
+    const c = chart({ createAction: { name: 'create' }, bars: [bar()] })
+    const s = selecting(c, c.view.rows[0])
+
+    s.move(96)
+    c.rebuild()
+    assert.equal(c.arrowPaths.length, 0)
+    s.up(96)
+    assert.equal(c.wire.mounted.length, 1)
+})
+
+test('no selection from a bar, a touch, another button, or on a chart that cannot create', () => {
+    const on = { createAction: { name: 'create' }, bars: [bar()] }
+    const cases = [
+        [on, { target: { closest: () => ({}) } }],
+        [on, { pointerType: 'touch' }],
+        [on, { button: 2 }],
+        [{ ...on, readOnly: true }, {}],
+        [{ ...on, createAction: null }, {}],
+    ]
+
+    for (const [config, options] of cases) {
+        const c = chart(config)
+        selecting(c, c.view.rows[0], options)
+        assert.equal(c.pointer, null)
+    }
+})
+
+test('a selection dragged away and back to where it was pressed opens the form once', () => {
+    const c = chart({ createAction: { name: 'create' }, bars: [bar()] })
+    const s = selecting(c, c.view.rows[0])
+
+    s.move(96)
+    s.up(1)
+    assert.equal(c.wire.mounted.length, 1)
+})
+
+test('a Ctrl+press (the Mac\'s right-click) starts no selection', () => {
+    const c = chart({ createAction: { name: 'create' }, bars: [bar()] })
+    c.selectFrom({ button: 0, ctrlKey: true, pointerId: 9, clientX: 196, clientY: 60, pointerType: 'mouse', target: { closest: () => null }, currentTarget: element() }, c.view.rows[0])
+    assert.equal(c.pointer, null)
+})

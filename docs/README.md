@@ -16,7 +16,7 @@ A Gantt chart and resource timeline for Filament v4 (4.13+) and v5. Any Eloquent
 - **[Rules on the server](moves.md)**: policies, durations and a locked past, always checked.
 - **[Groups and resource timelines](groups.md)**: rows by project, assignee, room or machine.
 - **[Milestones, progress and dependencies](bars.md)**: diamonds, fills and finish-to-start arrows.
-- **[Filament actions on bars](actions.md)**: click to edit, right-click for more, click to create.
+- **[Filament actions on bars](actions.md)**: click to edit, right-click for more, click or drag to create.
 - **[Hour to year, zoom and Fit](filters.md)**: five scales, wheel or pinch zoom, the whole plan in one screen.
 - **[Search and filters](filters.md)**: Filament's filter fields, kept in the URL.
 - **[Keyboard and touch](moves.md)**: move and resize with the arrows, drag on touch.
