@@ -170,9 +170,11 @@ export function timePattern(pattern) {
  * scale:  'hour' | 'day' | 'week' | 'month' | 'year'
  *
  * Returns { start, days, width, pxPerDay, rowHeight, columns, top, shades, todayX, rows } where
- * rows are { type: 'group' | 'bar' | 'lanes', key, group, label, height, collapsed, bars }
+ * rows are { type: 'group' | 'bar' | 'lanes', key, group, label, height, collapsed, bars, span }
  * and each row bar is the source bar plus { s, e, x, w, lane, src }. An axis label
- * that does not fit its cell is empty.
+ * that does not fit its cell is empty. A folded group's `span` is
+ * { x, w, s, e, allDay, milestone }: the line from its first bar to its last, so the
+ * row still shows where the group sits. Open groups, and groups with no bars, have none.
  */
 export function layout(bars, window, scale) {
     const start = parse(window.start)
@@ -292,6 +294,23 @@ export function layout(bars, window, scale) {
         groups.push({ key: '', label: '', color: null, collapsed: false, count: 0 })
     }
 
+    // A folded group hides its bars. The line keeps the extent: first start to last end.
+    const spanOf = (bars) => {
+        if (bars.length === 0) return null
+
+        let s = Infinity
+        let e = -Infinity
+
+        for (const bar of bars) {
+            if (bar.s < s) s = bar.s
+            if (bar.e > e) e = bar.e
+        }
+
+        const x0 = x(s)
+
+        return { x: x0, w: Math.max(x(e) - x0, 2), s, e, allDay: bars.every((bar) => bar.allDay), milestone: s === e }
+    }
+
     const rows = []
     for (const group of groups) {
         const own = placed.filter((b) => String(b.group ?? '') === group.key)
@@ -299,12 +318,12 @@ export function layout(bars, window, scale) {
 
         if (window.compact) {
             const lanes = pack(own)
-            rows.push({ type: 'lanes', key: 'g:' + group.key, group, label: group.label, height: Math.max(1, lanes) * rowHeight, collapsed: false, bars: own })
+            rows.push({ type: 'lanes', key: 'g:' + group.key, group, label: group.label, height: Math.max(1, lanes) * rowHeight, collapsed: false, bars: own, span: null })
             continue
         }
 
         if (window.grouped) {
-            rows.push({ type: 'group', key: 'g:' + group.key, group, label: group.label, height: rowHeight, collapsed, bars: [] })
+            rows.push({ type: 'group', key: 'g:' + group.key, group, label: group.label, height: rowHeight, collapsed, bars: [], span: collapsed ? spanOf(own) : null })
         }
 
         if (! collapsed || ! window.grouped) {
@@ -694,6 +713,23 @@ export default function packstubGantt(config) {
 
         cell(c) {
             return { 'inset-inline-start': c.x + 'px', width: c.w + 'px' }
+        },
+
+        /** The folded group's extent line: where it sits, in the group's colour when it has one. */
+        spanStyle(row) {
+            const span = row.span
+            if (! span) return {}
+
+            const style = { 'inset-inline-start': span.x + 'px', width: span.w + 'px' }
+
+            if (row.group.color) style['--ps-bar'] = this.tone(row.group.color)
+
+            return style
+        },
+
+        /** The dates a folded group's line stands for, as a bar's tooltip would say them. */
+        spanTitle(row) {
+            return row.span ? this.dates(row.span) : ''
         },
 
         // An object, never a string: Alpine sets each property on its own, so a value

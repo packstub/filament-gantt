@@ -2,6 +2,10 @@
 
 All notable changes to `packstub/filament-gantt` are documented in this file.
 
+## Unreleased
+
+- A folded group draws a line from its first bar to its last, so the row still shows where the group sits
+
 ## 1.0.0-beta.1 - 2026-10-28
 
 First beta of Filament Gantt: a Gantt chart and resource timeline over any Eloquent query with a start and an end. Works with Filament 4.13+ and 5.

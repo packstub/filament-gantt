@@ -97,7 +97,7 @@ Read more: [Bars](https://packstub.dev/docs/filament-gantt/bars).
 
 ## Groups and resource timelines
 
-Group rows by a column or a `BelongsTo` relation; each group is a collapsible row with a count. For a **resource timeline** (rooms × bookings, machines × jobs) list the resources yourself so empty ones appear, and use the compact layout:
+Group rows by a column or a `BelongsTo` relation; each group is a collapsible row with a count. A folded group keeps a line from its first bar to its last, so the row still shows where the group sits. For a **resource timeline** (rooms × bookings, machines × jobs) list the resources yourself so empty ones appear, and use the compact layout:
 
 ```php
 ->groupBy('room', label: 'room.name')

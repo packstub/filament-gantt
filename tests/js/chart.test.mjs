@@ -400,3 +400,21 @@ test('a row bar carries what the server sent, and its pixels', () => {
     assert.equal(layout(c.bars, c.axis(), 'day').rows[0].bars[0].src, c.bars[0])
     assert.equal(DAY, 86400000)
 })
+
+/* ------------------------------------------------------------------ a folded group's line */
+
+test('a folded group\'s line says its dates, wears the group\'s colour and is hoverable over the whole row; a click there still creates', async () => {
+    const c = chart({ createAction: { name: 'create' }, grouped: true, groups: [{ key: '7', label: 'Seven', color: '#ff0000', collapsed: true }], bars: [bar({ group: '7' })] })
+    const row = c.view.rows[0]
+
+    assert.equal(c.spanTitle(row), 'Oct 5, 2026 – Oct 7, 2026')
+    assert.equal(c.spanStyle(row)['--ps-bar'], '#ff0000')
+
+    c.createAt({ target: { closest: () => null }, currentTarget: { getBoundingClientRect: () => ({ left: 0, right: 1000 }) }, clientX: 50 }, row)
+    assert.equal(c.wire.mounted.length, 1)
+
+    const css = await readFile(new URL('../../resources/dist/gantt.css', import.meta.url), 'utf8')
+    const rule = css.match(/\.ps-gantt-span \{[^}]*\}/)[0]
+    assert.doesNotMatch(rule, /pointer-events: none/)
+    assert.match(rule, /inset-block: 0/)
+})

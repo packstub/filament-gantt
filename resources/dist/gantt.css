@@ -176,6 +176,7 @@
     --ps-gantt-arrow: var(--gray-400);
     --ps-gantt-arrow-late: var(--danger-500);
     --ps-gantt-today: var(--primary-500);
+    --ps-gantt-span: var(--gray-600);
     --ps-gantt-bar-text: var(--gray-950);
     --ps-gantt-bar-radius: 0.3rem;
     --ps-gantt-label-width: 15rem;
@@ -187,6 +188,7 @@
     --ps-gantt-weekend: rgb(255 255 255 / 0.035);
     --ps-gantt-group: rgb(255 255 255 / 0.04);
     --ps-gantt-bar-text: #fff;
+    --ps-gantt-span: var(--gray-300);
 }
 
 .ps-gantt-range { gap: 0.35rem; }
@@ -324,6 +326,28 @@
 [dir="rtl"] .ps-gantt-fold-closed { transform: rotate(90deg); }
 
 .ps-gantt-canvas { position: relative; z-index: 1; flex: none; height: 100%; background-clip: padding-box; }
+
+/* A folded group's extent: a line from its first bar to its last, with a tick at each end. */
+.ps-gantt-span {
+    position: absolute;
+    inset-block: 0; /* the whole row's height to hover; the line itself is 3px */
+    background: linear-gradient(var(--ps-bar, var(--ps-gantt-span)) 0 0) center / 100% 3px no-repeat;
+}
+
+.ps-gantt-span::before,
+.ps-gantt-span::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    width: 2px;
+    height: 11px;
+    margin-top: -5.5px;
+    border-radius: 999px;
+    background: var(--ps-bar, var(--ps-gantt-span));
+}
+
+.ps-gantt-span::before { inset-inline-start: 0; }
+.ps-gantt-span::after { inset-inline-end: 0; }
 .ps-gantt-canvas-creatable { cursor: cell; }
 .ps-gantt-is-readonly .ps-gantt-canvas { cursor: default; }
 
