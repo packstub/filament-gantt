@@ -23,6 +23,19 @@ On a grouped chart a bar dragged up or down is carried to another group: the row
 
 A change of row alone asks `regroupable()` and `canRegroup()`, not `movable()`: the dates did not change. A chart grouped by a relation it cannot write (a `HasOne`, say), or not grouped at all, never offers it.
 
+### A line of pieces
+
+With [`lineBy()`](groups.md#several-bars-on-one-line), the pieces of a split task share a row, and a drag follows the convention of Microsoft Project and most Gantt tools:
+
+- **The first piece carries the line.** Dragging the earliest piece moves every piece of its line by the same amount, the ones outside the window included, so the gaps between them stay as they were. Whole days as soon as one piece is whole days.
+- **Any other piece moves alone**, and every piece resizes alone.
+- **Another group carries the line.** A piece dropped onto another group's rows takes its whole line there (shifted by the same amount when it moved sideways too): a line is one task, and never splits across two groups by a drag. A drop onto another line of the same group changes nothing but the dates.
+- **No merging.** A piece dropped onto another piece of its line stacks into a lane, or, with `preventLineOverlap()`, stops at its edge: joining two pieces would delete a record, and a drag never does that.
+
+The keys work the same way: ←/→ on the first piece move the line, on any other piece that piece alone; ↑/↓ carry the line to the previous or next group. `->movePiecesAlone()` turns the first rule off: the first piece moves alone like the others.
+
+A line move is one request (`ganttMoveLine`). The server loads every piece of the line through the chart's `query()` and checks each one as a move of its own (`movable()`, the lock, `canMove()`, `canRegroup()`…) before it saves anything, so one piece that may not move refuses the whole line, with the reason and the piece's label (`Review, on the same line: Nothing can be scheduled before Oct 14, 2026.`). Then it saves every piece in one transaction, with a `BarMoved` event and an `afterMove()` call for each. The browser knows the rules too: when one piece of a line may not move (a locked past piece, say), dragging its first piece only changes its row, and when one may not change rows, no piece carries the line to another group. In code: `$gantt->moveLine($id, '2026-10-12')` moves the line of bar `$id` so that this bar starts on the 12th.
+
 ### On touch
 
 A swipe always scrolls the chart, wherever it starts, so scrolling a phone screen never reschedules anything. To move a bar, press and hold it until it lifts (the device vibrates where it can), then drag. Held and lifted without moving, the bar opens its menu; a tap runs the click action.
@@ -105,6 +118,9 @@ Every rule takes a boolean or a closure that receives the record, and is checked
 | `lockedBefore($moment)` | A start moved to before the moment, a start that was already before it, an end moved to before it, or any change to a bar that ended before it (its dates and its row: the past stays as it happened). A bar still running at the moment may change its end, and its row. A milestone on the moment itself is not past. The browser knows: a bar that ended before the moment is drawn locked, one that started before it has only its end handle. The message names the moment: a date for a midnight lock (`today()`), date and time otherwise (`now()`). |
 | `canMove()` | Whatever the closure says: `false` refuses with a generic message, a string refuses with that message. Its last two arguments are the new and the previous group key (null when ungrouped, or not grouped). |
 | `canRegroup()` | The same, for a change of row only, with the record, the new and the previous group key. |
+| `preventLineOverlap()` | With `lineBy()`: a move or a resize that makes a piece overlap another piece of its line (pieces that touch are fine), and a new or edited piece whose form dates do (the modal stays open and says why). A whole line moving keeps its pieces apart, and a change of row alone changes no dates: neither is asked. The browser stops a drag at the neighbouring piece and shows a drag-to-create selection red while it overlaps one. |
+
+`preventLineOverlap()` checks the chart's own moves and forms. For your other forms (the resource's edit page, an import), ask the chart with the record holding the new values: `$gantt->overlapsOnLine($task)` is true when its dates overlap another piece of its line.
 
 The dates a closure receives are the chart's half-open range: a whole-day record's end is the day after its last day ([Bars](bars.md#whole-days-and-moments)), as wall-clock moments in the app's timezone ([Time zones](#time-zones)), so `$start->isPast()` means what it says.
 

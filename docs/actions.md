@@ -65,6 +65,8 @@ use Filament\Actions\CreateAction;
 
 The model is taken from the chart's query unless you set one with `->model()`. The group goes to the group column, or to the foreign key of a `BelongsTo` group relation; nothing is set for other relations. `mountUsing()`/`fillForm()` and `mutateDataUsing()` you gave the action still run first.
 
+With [`lineBy()`](groups.md#several-bars-on-one-line), a click or a drag across a line's row adds a piece to that line: the line goes to the `lineBy()` column (preselected when the form has a field for it, added on save when it does not) along with the group. A group's own row creates a task of its own. The server takes only a line on the chart: a record of the chart's query without a parent, or the parent of records in it; a crafted key naming anything else, a piece included (lines never nest), hides the create action like an unknown group does. With `preventLineOverlap()`, a new piece whose dates overlap another piece of its line is not saved: the modal stays open with a notification, so the dates can be fixed.
+
 Only what the form has no field for is filled in on save. A field the form does have belongs to the user: a `project_id` Select they cleared stays empty, the clicked row does not put it back.
 
 ### Which groups a click may create in
