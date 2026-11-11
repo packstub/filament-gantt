@@ -4,6 +4,7 @@ namespace Packstub\Gantt\Concerns;
 
 use Closure;
 use Filament\Actions\Action;
+use Filament\Notifications\Notification;
 use Filament\Schemas\Schema;
 use Illuminate\Database\Eloquent\Model;
 
@@ -13,8 +14,9 @@ use Illuminate\Database\Eloquent\Model;
  * cacheGanttActions() while booting, for every trait whose name ends in "Actions".
  *
  * The browser mounts them with the bar (`ganttRecord`) or the spot that was
- * clicked (`ganttStart`, `ganttEnd`, `ganttGroup`) as arguments; everything else is
- * resolved here again, through the chart's query and rules, whatever the browser sent.
+ * clicked (`ganttStart`, `ganttEnd`, `ganttGroup`, and `ganttLine` on a line's row
+ * with lineBy()) as arguments; everything else is resolved here again, through the
+ * chart's query and rules, whatever the browser sent.
  */
 trait GanttActions
 {
@@ -38,6 +40,17 @@ trait GanttActions
             static::ganttChainHidden($action, fn () => $this->ganttActionRecord === null && (($found = $record()) === null || ! $gantt->offersAction($found, $action->getName())));
             $this->ganttRefreshAfter($action);
 
+            // An edit form that moves the record onto another piece of its line is not saved.
+            $mutate = static::ganttProperty($action, 'mutateDataUsing');
+
+            $action->mutateDataUsing(function (array $data) use ($action, $mutate, $record) {
+                $data = $mutate ? $action->evaluate($mutate, ['data' => $data]) : $data;
+
+                $this->ganttGuardOverlap($action, $data, $record());
+
+                return $data;
+            });
+
             $this->cacheAction($action);
         }
 
@@ -51,13 +64,15 @@ trait GanttActions
                 $action->model($gantt->getModel());
             }
 
-            // Hidden (so refused) unless the chart may create now, in that group.
-            static::ganttChainHidden($action, fn () => ! $gantt->canCreateIn(static::ganttArgument($action, 'ganttGroup')));
+            // Hidden (so refused) unless the chart may create now, in that group, on that line.
+            static::ganttChainHidden($action, fn () => ! $gantt->canCreateIn(static::ganttArgument($action, 'ganttGroup'))
+                || (($line = static::ganttArgument($action, 'ganttLine')) !== null && ! $gantt->canCreateOnLine($line)));
 
             $prefill = fn () => $gantt->prefill(
                 static::ganttArgument($action, 'ganttStart'),
                 static::ganttArgument($action, 'ganttEnd'),
                 static::ganttArgument($action, 'ganttGroup'),
+                static::ganttArgument($action, 'ganttLine'),
             );
 
             // The form opens with the clicked spot's dates and group…
@@ -88,6 +103,8 @@ trait GanttActions
                         $data[$attribute] = $value;
                     }
                 }
+
+                $this->ganttGuardOverlap($action, $data, null);
 
                 return $data;
             });
@@ -121,6 +138,39 @@ trait GanttActions
         }
 
         return $names;
+    }
+
+    /**
+     * With preventLineOverlap(), a form whose dates (or line) would overlap another
+     * piece of the line is not saved: the modal stays open with the user's input, and
+     * a notification says why. The form's values for the dates and the line are laid
+     * over the record being edited, or over a new one.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    protected function ganttGuardOverlap(Action $action, array $data, ?Model $record): void
+    {
+        $gantt = $this->getGantt();
+
+        if (! $gantt->preventsLineOverlap()) {
+            return;
+        }
+
+        $attributes = array_filter([$gantt->getStartAttribute(), $gantt->getEndAttribute(), $gantt->getLineForeignKey()]);
+        $values = array_intersect_key($data, array_flip($attributes));
+
+        if ($values === []) {
+            return;
+        }
+
+        $model = $record ? clone $record : new ($gantt->getModel());
+        $model->forceFill($values);
+
+        if ($gantt->overlapsOnLine($model)) {
+            Notification::make()->danger()->title(__('packstub-gantt::gantt.overlaps'))->send();
+
+            $action->halt();
+        }
     }
 
     /** Once the action has run, the browser reloads the chart (keeping its window and filters). */

@@ -211,7 +211,39 @@ trait InteractsWithGantt
     }
 
     /**
-     * Hook after a successful move (log it, notify someone…).
+     * Move a whole line (see Gantt::moveLine()): the line of bar $id shifts so that
+     * this bar starts at $start, and lands in $group when one is given. Answered like
+     * ganttMove(), with every piece of the line.
+     *
+     * @return array{ok: bool, bars?: list<array<string, mixed>>, message?: string}
+     */
+    #[Renderless]
+    public function ganttMoveLine(mixed $id, mixed $start, mixed $group = null): array
+    {
+        if (! is_string($id) || ! is_string($start) || ($group !== null && ! is_string($group))) {
+            return ['ok' => false, 'message' => __('packstub-gantt::gantt.failed')];
+        }
+
+        try {
+            $bars = $this->getGantt()->moveLine($id, $start, $group);
+        } catch (MoveRejected $e) {
+            return ['ok' => false, 'message' => $e->getMessage()];
+        } catch (\Throwable $e) {
+            report($e);
+
+            return ['ok' => false, 'message' => __('packstub-gantt::gantt.failed')];
+        }
+
+        foreach ($bars as $bar) {
+            $this->ganttMoved($bar['id'], $bar);
+        }
+
+        return ['ok' => true, 'bars' => $bars];
+    }
+
+    /**
+     * Hook after a successful move (log it, notify someone…); once per piece when a
+     * whole line moves.
      *
      * @param  array<string, mixed>  $bar
      */
@@ -236,7 +268,7 @@ trait InteractsWithGantt
             $state = $gantt->getState();
             $this->ganttRendered = true;
         } else {
-            $state = ['window' => ['start' => null, 'end' => null], 'groups' => [], 'bars' => [], 'total' => 0];
+            $state = ['window' => ['start' => null, 'end' => null], 'groups' => [], 'bars' => [], 'lines' => [], 'total' => 0];
         }
 
         // Bar and create actions need Filament's action system on the component.
@@ -249,9 +281,14 @@ trait InteractsWithGantt
             'window' => $state['window'],
             'groups' => $state['groups'],
             'bars' => $state['bars'],
+            'lines' => $state['lines'],
             'total' => $state['total'],
             'grouped' => $gantt->isGrouped(),
             'compact' => $gantt->isCompact(),
+            // lineBy(): the rows are lines (outside the compact layout), how a line's first piece drags, and whether pieces may overlap.
+            'lineLayout' => $gantt->showsLines(),
+            'movePiecesAlone' => $gantt->movesPiecesAlone(),
+            'preventLineOverlap' => $gantt->preventsLineOverlap(),
             'scale' => $gantt->getScale()->value,
             'unit' => $gantt->getUnit()->value,
             'minMinutes' => $gantt->getMinMinutes(),

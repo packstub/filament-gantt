@@ -47,6 +47,8 @@ return [
     'too_long' => 'A bar cannot be longer than :duration.',
     'locked' => 'Nothing can be scheduled before :date.',
     'failed' => 'The change did not go through.',
+    'overlaps' => 'This would overlap another part of the same line.',
+    'line_part' => ':label, on the same line: :reason',
     'offline' => 'Could not reach the server. The bar is back where it was.',
     'days' => '{1} :count day|[2,*] :count days',
     'hours' => '{1} :count hour|[2,*] :count hours',

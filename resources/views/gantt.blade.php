@@ -198,7 +198,11 @@
                         </template>
                         {{-- The period being selected with a press and drag, for the create form. --}}
                         <template x-if="pointer?.select && pointer.moved && pointer.key === row.key">
-                            <div class="ps-gantt-selection" :style="selectionStyle()"></div>
+                            <div class="ps-gantt-selection" :class="{ 'ps-gantt-selection-overlap': pointer.overlaps }" :style="selectionStyle()"></div>
+                        </template>
+                        {{-- A line's pieces (lineBy()) joined by a dotted line where its work stops and resumes. --}}
+                        <template x-for="gap in gaps(row)" :key="gap.key">
+                            <div class="ps-gantt-gap" aria-hidden="true" :style="gapStyle(gap, row)"></div>
                         </template>
                         <template x-for="bar in row.bars" :key="bar.id">
                             <div
@@ -210,9 +214,9 @@
                                     'ps-gantt-bar-locked': ! bar.movable,
                                     'ps-gantt-bar-clickable': !! bar.url || clicks(bar),
                                     'ps-gantt-bar-narrow': narrow(bar),
-                                    'ps-gantt-bar-outside': labelOutside(bar),
+                                    'ps-gantt-bar-outside': labelOutside(bar, row),
                                     'ps-gantt-bar-picked': pointer?.picked && pointer.bar.id === bar.id,
-                                    'ps-gantt-bar-carried': pointer?.dy && pointer.bar.id === bar.id,
+                                    'ps-gantt-bar-carried': carried(bar),
                                 }"
                                 :style="barStyle(bar)"
                                 :title="tooltip(bar)"

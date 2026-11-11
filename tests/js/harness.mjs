@@ -53,9 +53,10 @@ export function chart(over = {}) {
     c.$root = { style: { setProperty() {} } }
     c.$nextTick = (fn) => fn()
     c.$dispatch = () => {}
-    c.wire = { moves: [], mounted: [], refreshes: [] }
+    c.wire = { moves: [], lines: [], mounted: [], refreshes: [] }
     c.$wire = {
         ganttMove: (...args) => { c.wire.moves.push(args); return { then: () => ({ catch: () => ({ finally() {} }) }) } },
+        ganttMoveLine: (...args) => { c.wire.lines.push(args); return { then: () => ({ catch: () => ({ finally() {} }) }) } },
         ganttRefresh: (...args) => { c.wire.refreshes.push(args); return { then() {} } },
         mountAction: (name, args) => { c.wire.mounted.push([name, args]) },
     }
