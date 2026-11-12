@@ -384,3 +384,64 @@ test('a refresh brings the lines with the bars', () => {
     assert.equal(c.carriesLine(rowBar(c, '1')), true)
     assert.equal(parse(c.lineIndex.get('1').pieces[0].start), day(5))
 })
+
+/* ------------------------------------------------------------------ review fixes */
+
+test('stops a piece a whole unit short of a neighbour off the grid, never where the server would round into it', () => {
+    const P = (id, s, e) => ({ id, group: '1', start: s, end: e, allDay: false, milestone: false, movable: true, regroupable: true })
+    const pieces = [P('1', '2026-10-05 00:00', '2026-10-06 00:00'), P('2', '2026-10-07 00:00', '2026-10-08 00:00'), P('3', '2026-10-09 12:00', '2026-10-10 00:00')]
+    const c = chart({
+        grouped: true, lineLayout: true, preventLineOverlap: true,
+        groups: [{ key: '1', label: 'A', color: null, collapsed: false, count: 3 }],
+        bars: pieces.map((p) => bar({ ...p, line: '1', label: 'x' + p.id })),
+        lines: [{ key: '1', label: 'L', pieces }],
+    })
+    c.$refs.body = { getBoundingClientRect: () => ({ top: 0 }) }
+
+    // dragged three days right: the 9th 12:00 stops it after one whole day, not 1.5
+    const p = press(c, rowBar(c, '2'), { y: 50 })
+    p.move(48 * 3)
+    p.up(48 * 3)
+
+    assert.deepEqual(c.wire.moves.at(-1).slice(0, 3), ['2', '2026-10-08 00:00', '2026-10-09 00:00'])
+})
+
+test('names the first piece as the server does when two pieces start together: the line\'s own record, then the key', () => {
+    const c = lineChart()
+    const line = (pieces) => ({ key: '9', label: 'L', pieces })
+
+    assert.equal(c.firstPiece(line([piece('5', '2026-10-05', '2026-10-06'), piece('3', '2026-10-05', '2026-10-06'), piece('9', '2026-10-15', '2026-10-16')])), '3')
+    assert.equal(c.firstPiece(line([piece('10', '2026-10-05', '2026-10-06'), piece('9', '2026-10-05', '2026-10-06')])), '9')
+    assert.equal(c.firstPiece(line([piece('10', '2026-10-05', '2026-10-06'), piece('2', '2026-10-05', '2026-10-06')])), '2')
+})
+
+test('starts no drag on a piece whose line the keys just sent', () => fakeTimers(() => {
+    const c = lineChart()
+
+    key(c, rowBar(c, '1'), 'ArrowRight') // the first piece: the whole line
+    const p = press(c, rowBar(c, '2'), { y: 50 })
+    p.move(96)
+    p.up(96)
+
+    assert.equal(c.wire.lines.length, 1)
+    assert.deepEqual(c.wire.moves, [])
+}))
+
+test('a refused ↓ and → on a line put every piece back in its group and on its dates', async () => {
+    const c = lineChart()
+    c.$wire.ganttMoveLine = () => Promise.resolve({ ok: false, message: 'Not in Beta.' })
+    const notices = []
+    c.notify = (m) => notices.push(m)
+
+    await fakeTimers(async (timers) => {
+        key(c, rowBar(c, '1'), 'ArrowDown')
+        key(c, rowBar(c, '1'), 'ArrowRight')
+        fire(timers)
+    })
+    await tick()
+
+    assert.deepEqual(c.bars.filter((b) => b.line === '1').map((b) => [b.id, String(b.group), b.start, b._pending]), [['1', '1', '2026-10-05', false], ['2', '1', '2026-10-12', false]])
+    assert.deepEqual(c.lineIndex.get('1').pieces.map((p) => [p.group, p.start]), [['1', '2026-10-05 00:00'], ['1', '2026-10-12 00:00'], ['1', '2026-12-01 00:00']])
+    assert.deepEqual(c.groups.map((g) => g.count), [3, 1])
+    assert.deepEqual(notices, ['Not in Beta.'])
+})

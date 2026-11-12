@@ -160,7 +160,7 @@ it('answers ganttMoveLine with every piece, after afterMove() ran for each', fun
     $second = task('Design 2', '2026-10-12', '2026-10-13', ['parent_id' => $root->id]);
 
     Livewire::test(LineGantt::class)
-        ->call('ganttMoveLine', (string) $second->id, '2026-10-13 00:00')
+        ->call('ganttMoveLine', (string) $root->id, '2026-10-06 00:00')
         ->assertReturned(fn ($result) => $result['ok'] === true && array_column($result['bars'], 'start') === ['2026-10-06 00:00', '2026-10-13 00:00']);
 
     expect(TaskGantt::$moved)->toBe([[$root->id, '2026-10-05', '2026-10-06'], [$second->id, '2026-10-12', '2026-10-13']]);
@@ -214,13 +214,17 @@ it('asks canMove() about every piece of a line', function () {
 });
 
 it('refuses to move a line that has a piece before the lock', function () {
-    $root = task('Design', '2026-10-05', '2026-10-07');
-    $next = task('Design 2', '2026-10-20', '2026-10-21', ['parent_id' => $root->id]);
+    $acme = project('Acme');
+    $beta = project('Beta');
+    $root = task('Design', '2026-10-05', '2026-10-07', ['project_id' => $acme->id]);
+    $next = task('Design 2', '2026-10-20', '2026-10-21', ['parent_id' => $root->id, 'project_id' => $acme->id]);
+    task('Other', '2026-10-20', '2026-10-21', ['project_id' => $beta->id]);
 
     $gantt = gantt()->lineBy('parent_id')->lockedBefore(fn () => now());
 
-    expect(refusal(fn () => $gantt->moveLine((string) $next->id, '2026-10-22')))->toBe('Design, on the same line: Nothing can be scheduled before Oct 14, 2026 10:00.')
-        ->and($next->fresh()->starts_on->toDateString())->toBe('2026-10-20');
+    // carried to another group, any piece moves the line; Design lies before the lock
+    expect(refusal(fn () => $gantt->moveLine((string) $next->id, '2026-10-20', (string) $beta->id)))->toBe('Design, on the same line: Nothing can be scheduled before Oct 14, 2026 10:00.')
+        ->and($next->fresh()->project_id)->toBe($acme->id);
 });
 
 it('undoes every piece of the line when saving one of them fails', function () {
@@ -262,6 +266,27 @@ it('moves a line of shifts by whole hours, and a line of whole days by whole day
 
     expect($root->fresh()->starts_on->toDateString())->toBe('2026-10-06')
         ->and($next->fresh()->starts_on->toDateString())->toBe('2026-10-13');
+});
+
+it('moves a line along its days only from its first piece, never with movePiecesAlone() or in the compact layout', function () {
+    $acme = project('Acme');
+    $beta = project('Beta');
+    $root = task('Design', '2026-10-05', '2026-10-07', ['project_id' => $acme->id]);
+    $second = task('Design 2', '2026-10-12', '2026-10-13', ['parent_id' => $root->id, 'project_id' => $acme->id]);
+    task('Other', '2026-10-05', '2026-10-06', ['project_id' => $beta->id]);
+
+    expect(refusal(fn () => gantt()->lineBy('parent_id')->moveLine((string) $second->id, '2026-10-14')))->toBe('The change did not go through.')
+        // naming the group it is already in is no change of group
+        ->and(refusal(fn () => gantt()->lineBy('parent_id')->moveLine((string) $second->id, '2026-10-14', (string) $acme->id)))->toBe('The change did not go through.')
+        ->and(refusal(fn () => gantt()->lineBy('parent_id')->movePiecesAlone()->moveLine((string) $root->id, '2026-10-08')))->toBe('The change did not go through.')
+        ->and(refusal(fn () => gantt()->lineBy('parent_id')->compact()->moveLine((string) $root->id, '2026-10-08')))->toBe('The change did not go through.')
+        ->and($root->fresh()->starts_on->toDateString())->toBe('2026-10-05')
+        ->and($second->fresh()->starts_on->toDateString())->toBe('2026-10-12');
+
+    // to another group, any piece carries the line, movePiecesAlone() or not
+    gantt()->lineBy('parent_id')->movePiecesAlone()->moveLine((string) $second->id, '2026-10-12', (string) $beta->id);
+
+    expect($root->fresh()->project_id)->toBe($beta->id);
 });
 
 it('moves no line on a chart without lines, on a read-only one, nor from a crafted request', function () {

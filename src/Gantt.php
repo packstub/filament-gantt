@@ -1665,7 +1665,8 @@ class Gantt
         $record = $this->findRecord($id)
             ?? throw new MoveRejected(__('packstub-gantt::gantt.missing'));
 
-        if (! $this->hasLines()) {
+        // Lines move as lines only where the rows are lines (not in the compact layout).
+        if (! $this->showsLines()) {
             throw new MoveRejected(__('packstub-gantt::gantt.failed'));
         }
 
@@ -1676,11 +1677,29 @@ class Gantt
         [$previousStart] = $this->span($record)
             ?? throw new MoveRejected(__('packstub-gantt::gantt.missing'));
 
-        $pieces = $this->linePieces((string) $this->lineKey($record));
+        $line = (string) $this->lineKey($record);
+        $pieces = $this->linePieces($line);
         $key = (string) $record->getKey();
 
         if (! $pieces->contains(fn (Model $piece) => (string) $piece->getKey() === $key)) {
             throw new MoveRejected(__('packstub-gantt::gantt.missing'));
+        }
+
+        // As in the browser: a line moves along its days only from its first piece, and
+        // not at all with movePiecesAlone(); any piece carries it to another group.
+        if ($group === null || $group === ($this->groupKey($record) ?? '')) {
+            $first = $this->inLineOrder(
+                $pieces
+                    ->map(fn (Model $piece) => [$piece, ['id' => (string) $piece->getKey(), 'start' => ($this->span($piece)[0] ?? null)?->format('Y-m-d H:i')]])
+                    ->filter(fn (array $piece) => $piece[1]['start'] !== null)
+                    ->values()
+                    ->all(),
+                $line,
+            )[0][1]['id'] ?? null;
+
+            if ($this->movesPiecesAlone() || $first !== $key) {
+                throw new MoveRejected(__('packstub-gantt::gantt.failed'));
+            }
         }
 
         // Snapped relative to where the bar was, like a move; whole days as soon as one

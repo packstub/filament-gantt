@@ -777,10 +777,14 @@ export default function packstubGantt(config) {
 
         /** The id of a line's first piece: the earliest, its own record first among those starting together. */
         firstPiece(line) {
+            // The server's order (Gantt::inLineOrder()): by start, the line's own record, then the key
+            // (numbers as numbers, as the database orders an integer key).
+            const root = String(line.key)
             let first = null
             for (const piece of line.pieces) {
-                const s = parse(piece.start)
-                if (first === null || s < first.s || (s === first.s && String(piece.id) === String(line.key))) first = { id: String(piece.id), s }
+                const c = { id: String(piece.id), s: parse(piece.start) }
+                if (first === null || c.s < first.s || (c.s === first.s && first.id !== root
+                    && (c.id === root || c.id.localeCompare(first.id, undefined, { numeric: true }) < 0))) first = c
             }
             return first?.id ?? null
         },
@@ -820,7 +824,14 @@ export default function packstubGantt(config) {
                 else if (s >= bar.e) right = Math.min(right, s)
                 else return null
             }
-            return { left, right }
+            // In whole units from the bar's edges: a neighbour off the grid (9 Oct 12:00 at
+            // the day unit) stops the bar a whole unit short, never at a half the server
+            // would round (half up) into that neighbour and refuse.
+            const unit = this.unitFor(bar)
+            return {
+                left: left === -Infinity ? left : bar.s + Math.ceil((left - bar.s) / unit) * unit,
+                right: right === Infinity ? right : bar.e + Math.floor((right - bar.e) / unit) * unit,
+            }
         },
 
         /** The other pieces of the line on the dragged bar's row, where they were: they follow when the line moves. */
@@ -1243,6 +1254,8 @@ export default function packstubGantt(config) {
             // One pointer at a time: a second finger neither starts a drag nor ends the first.
             if (event.button !== 0 || bar.src._pending || this.pointer) return
             this.flushNudge()
+            // The keys just sent may have moved this bar (a nudged line takes all its pieces): wait for the answer.
+            if (bar.src._pending) return
             // A bar too narrow for its handles is moved, whatever part of it was grabbed.
             const edge = this.narrow(bar) ? null : (event.target.dataset?.edge || null)
             // lineBy(): the first piece of a line carries the line, and a drag to another
