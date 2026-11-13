@@ -252,6 +252,52 @@ test('a bar stops at the next bar of its row with preventRowOverlap(), and not o
     assert.equal(rowBar(c, '1').s, day(15))
 })
 
+test('a bar carried onto a bar of another row is told so, and a release there sends nothing', () => {
+    const taken = (rule = true) => {
+        const c = rowChart({
+            preventRowOverlap: rule,
+            bars: [
+                bar({ id: '1', group: '1', row: 'bo', start: '2026-10-05', end: '2026-10-08', regroupable: true }),
+                bar({ id: '3', group: '1', row: 'cy', start: '2026-10-09', end: '2026-10-11', regroupable: true }),
+            ],
+        })
+        c.t.row_overlaps = 'Taken'
+        c.notices = []
+        c.notify = (m) => c.notices.push(m)
+        return c
+    }
+    // Rows: Acme (0), Bo (36), Cy (72)
+    let c = taken()
+    press(c, rowBar(c, '1'), { y: 50 })
+    c.drag({ pointerId: 7, clientX: 100 + 48 * 4, clientY: 90 })
+    assert.equal(c.pointer.blocked, true)
+    assert.equal(c.hint, 'Taken')
+    // off Cy's bar again (the 6th to the 9th touches it): a free slot of the row
+    c.drag({ pointerId: 7, clientX: 100 + 48, clientY: 90 })
+    assert.equal(c.pointer.blocked, false)
+    c.drag({ pointerId: 7, clientX: 100 + 48 * 4, clientY: 90 })
+    c.up({ pointerId: 7, clientX: 100 + 48 * 4, clientY: 90 })
+    assert.deepEqual(c.wire.moves, [])
+    assert.deepEqual(c.notices, ['Taken'])
+    assert.equal(rowBar(c, '1').s, day(5))
+    assert.equal(c.bars.find((b) => b.id === '1').row, 'bo')
+
+    // a free slot of that row takes it
+    c = taken()
+    press(c, rowBar(c, '1'), { y: 50 })
+    c.drag({ pointerId: 7, clientX: 100 + 48, clientY: 90 })
+    c.up({ pointerId: 7, clientX: 100 + 48, clientY: 90 })
+    assert.deepEqual(c.wire.moves, [['1', '2026-10-06 00:00', '2026-10-09 00:00', null, 'cy']])
+
+    // without the rule the bars stack
+    c = taken(false)
+    press(c, rowBar(c, '1'), { y: 50 })
+    c.drag({ pointerId: 7, clientX: 100 + 48 * 4, clientY: 90 })
+    assert.equal(c.pointer.blocked, false)
+    c.up({ pointerId: 7, clientX: 100 + 48 * 4, clientY: 90 })
+    assert.equal(c.wire.moves.length, 1)
+})
+
 test('a selection on a row turns red while it overlaps a bar of that row, with preventRowOverlap()', () => {
     const c = rowChart({ preventRowOverlap: true })
     const el = element()

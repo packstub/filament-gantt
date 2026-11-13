@@ -266,6 +266,50 @@ it('refuses a row the chart does not show, a related record that exists included
         ->and($task->fresh()->assignee_id)->toBe($bo->id);
 });
 
+it('refuses a row its group does not show: one met in another group, or listed for another group', function () {
+    $acme = project('Acme');
+    $beta = project('Beta');
+    $bo = person('Bo');
+    $cy = person('Cy');
+    $di = person('Di');
+    $task = task('Design', '2026-10-05', '2026-10-07', ['assignee_id' => $bo->id, 'project_id' => $acme->id]);
+    $build = task('Build', '2026-10-06', '2026-10-09', ['assignee_id' => $cy->id, 'project_id' => $beta->id]);
+
+    $gantt = fn () => rowsGantt()->rows([Row::make($di->id)->group($beta->id)]);
+
+    // Cy's row is met in Beta only, Di's is listed for Beta: neither is a row of Acme
+    expect(rowRefusal(fn () => $gantt()->move((string) $task->id, '2026-10-05', null, row: (string) $cy->id)))->toBe('That row is not on the chart.')
+        ->and(rowRefusal(fn () => $gantt()->move((string) $task->id, '2026-10-05', null, row: (string) $di->id)))->toBe('That row is not on the chart.')
+        // a group change alone would carry Cy's row to Acme, where it does not show either
+        ->and(rowRefusal(fn () => $gantt()->move((string) $build->id, '2026-10-06', null, (string) $acme->id)))->toBe('That row is not on the chart.')
+        // nor is there an unassigned row in Beta while every bar there has a row
+        ->and(rowRefusal(fn () => $gantt()->move((string) $build->id, '2026-10-06', null, row: '')))->toBe('That row is not on the chart.')
+        ->and($task->fresh()->assignee_id)->toBe($bo->id)
+        ->and($build->fresh()->project_id)->toBe($beta->id);
+
+    // with the group, the bar lands on the row where it shows
+    $gantt()->move((string) $task->id, '2026-10-05', null, (string) $beta->id, (string) $di->id);
+
+    expect($task->fresh())->project_id->toBe($beta->id)->assignee_id->toBe($di->id);
+});
+
+it('creates in a row only under a group that shows it', function () {
+    $acme = project('Acme');
+    $beta = project('Beta');
+    $bo = person('Bo');
+    $cy = person('Cy');
+    task('Design', '2026-10-05', '2026-10-07', ['assignee_id' => $bo->id, 'project_id' => $acme->id]);
+    task('Build', '2026-10-06', '2026-10-09', ['assignee_id' => $cy->id, 'project_id' => $beta->id]);
+
+    $gantt = rowsGantt()->createAction(CreateAction::make());
+
+    expect($gantt->canCreateInRow((string) $cy->id, (string) $beta->id))->toBeTrue()
+        ->and($gantt->canCreateInRow((string) $cy->id, (string) $acme->id))->toBeFalse()
+        ->and($gantt->canCreateInRow((string) $cy->id))->toBeFalse()
+        // a row listed without a group shows in every group
+        ->and(rowsGantt()->createAction(CreateAction::make())->rows([Row::make($cy->id)])->canCreateInRow((string) $cy->id, (string) $acme->id))->toBeTrue();
+});
+
 it('keeps a bar on its row when regroupable() says no, the chart is read-only, or the bar is past the lock', function () {
     $bo = person('Bo');
     $cy = person('Cy');

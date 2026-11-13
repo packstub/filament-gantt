@@ -291,6 +291,9 @@
 /* The rows of the group a dragged bar would land in */
 .ps-gantt-row-target .ps-gantt-canvas { background: color-mix(in oklab, var(--primary-500) 10%, transparent); }
 .ps-gantt-row-target .ps-gantt-label { box-shadow: inset 3px 0 0 var(--primary-500); }
+/* preventRowOverlap(): the dragged bar is over another bar of that row (a release there puts it back). */
+.ps-gantt-row-blocked .ps-gantt-canvas { background: color-mix(in oklab, var(--danger-500) 10%, transparent); }
+.ps-gantt-row-blocked .ps-gantt-label { box-shadow: inset 3px 0 0 var(--danger-500); }
 
 .ps-gantt-label {
     position: sticky;

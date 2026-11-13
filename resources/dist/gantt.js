@@ -917,6 +917,21 @@ export default function packstubGantt(config) {
             return this.wallsOf(this.bars.filter((b) => String(b.row ?? '') === String(bar.row)), bar)
         },
 
+        /**
+         * rowBy() with preventRowOverlap(): whether [s, e) on a row meets another bar of
+         * it (bars that touch do not; `id` is the bar asking). The window's bars, as the
+         * server sent them: it checks the rest.
+         */
+        rowTaken(row, id, s, e) {
+            if (! config.rowLayout || ! config.preventRowOverlap || ! row) return false
+            return this.bars.some((b) => {
+                if (String(b.row ?? '') !== String(row) || (id !== null && String(b.id) === String(id))) return false
+                const from = parse(b.start)
+                const until = b.milestone ? from : parse(b.end)
+                return from < e && s < until
+            })
+        },
+
         /** A row's name (rowBy()), for the hints; the unassigned row's for no row. */
         rowLabel(key) {
             if (! key) return config.unassignedLabel ?? this.t.unassigned ?? ''
@@ -1396,6 +1411,8 @@ export default function packstubGantt(config) {
                 x0: event.clientX, y0: event.clientY, cx: event.clientX, cy: event.clientY,
                 s: bar.s, e: bar.e, sl0: this.ui('refs').scroll?.scrollLeft || 0,
                 rows, g0: String(bar.group ?? ''), g: String(bar.group ?? ''), r0: String(bar.row ?? ''), r: String(bar.row ?? ''), dy: 0,
+                // preventRowOverlap(): over another row, on a bar of it (the row turns red, a release there sends nothing).
+                blocked: false,
                 dir: this.rtl() ? -1 : 1, el: event.currentTarget,
                 line: line ? String(line.key) : null, together, lineMoves: !! line && this.lineMovable(line),
                 mates: line ? this.matesOf(bar) : [], shift: 0,
@@ -1503,7 +1520,9 @@ export default function packstubGantt(config) {
             this.place(bar)
             if (p.mates.length) this.shiftMates(p, carried ? bar.s - p.s : 0)
 
-            this.hint = this.dates(bar) + this.placeHint(p)
+            // Its own row has walls; another row says so while the bar is over one of its bars.
+            p.blocked = p.r !== p.r0 && this.rowTaken(p.r, bar.id, bar.s, bar.e)
+            this.hint = p.blocked ? (this.t.row_overlaps || '') : this.dates(bar) + this.placeHint(p)
             this.autoScroll(p)
         },
 
@@ -1589,6 +1608,15 @@ export default function packstubGantt(config) {
             }
 
             if (! p.allowed || (p.bar.s === p.s && p.bar.e === p.e && p.g === p.g0 && p.r === p.r0)) return
+
+            // Dropped on another bar of the row it was carried to: back where it was, with the reason.
+            if (p.blocked) {
+                p.bar.s = p.s
+                p.bar.e = p.e
+                this.rebuild()
+                this.notify(this.t.row_overlaps || this.t.failed, 'danger')
+                return this.say(this.t.row_overlaps || this.t.failed)
+            }
 
             // The line's first piece, or any piece carried to another group: the whole line.
             if (p.line && (p.together || p.g !== p.g0)) {
@@ -2140,14 +2168,7 @@ export default function packstubGantt(config) {
          */
         selectionOverlaps(p) {
             // rowBy() with preventRowOverlap(): any bar of the row, in any group (the window's; the server checks the rest).
-            if (config.preventRowOverlap && p.row) {
-                return this.bars.some((b) => {
-                    if (String(b.row ?? '') !== p.row) return false
-                    const s = parse(b.start)
-                    const e = b.milestone ? s : parse(b.end)
-                    return s < p.e && p.s < e
-                })
-            }
+            if (config.preventRowOverlap && p.row) return this.rowTaken(p.row, null, p.s, p.e)
             if (! config.preventLineOverlap || p.line === null) return false
             const line = this.lineIndex.get(p.line)
             const pieces = line

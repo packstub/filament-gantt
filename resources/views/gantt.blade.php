@@ -168,7 +168,7 @@
             <div class="ps-gantt-pad" :style="'height:' + slice.top + 'px'"></div>
 
             <template x-for="row in visibleRows" :key="row.key">
-                <div class="ps-gantt-row" :class="{ ['ps-gantt-row-' + row.type]: true, 'ps-gantt-row-unassigned': row.type === 'row' && row.row === '', 'ps-gantt-row-target': (target !== null && row.group.key === target) || (targetRow !== null && row.key === targetRow) }" :style="'height:' + row.height + 'px'">
+                <div class="ps-gantt-row" :class="{ ['ps-gantt-row-' + row.type]: true, 'ps-gantt-row-unassigned': row.type === 'row' && row.row === '', 'ps-gantt-row-target': (target !== null && row.group.key === target) || (targetRow !== null && row.key === targetRow), 'ps-gantt-row-blocked': targetRow !== null && row.key === targetRow && !! pointer?.blocked }" :style="'height:' + row.height + 'px'">
                     <div class="ps-gantt-label">
                         <template x-if="row.type === 'group'">
                             <button type="button" class="ps-gantt-fold" x-on:click="toggle(row.group.key)" :title="row.collapsed ? t.expand : t.collapse" :aria-expanded="! row.collapsed">

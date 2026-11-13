@@ -1363,7 +1363,12 @@ class Gantt
             return (bool) ($this->creatableInRow)($row, is_string($group) && $group !== '' ? $group : null);
         }
 
-        return $this->knowsRowKey($row);
+        if (! $this->knowsRowKey($row)) {
+            return false;
+        }
+
+        // Under a group that is a column or a BelongsTo, only a row that group shows.
+        return ! $this->movesBetweenGroups() || $this->rowShowsIn($row, is_string($group) && $group !== '' ? $group : null);
     }
 
     /** @return list<string> */
@@ -2131,6 +2136,12 @@ class Gantt
 
         $relocate = $regroup || $rowChange;
 
+        // And the row has to show in the group the bar lands in, as the browser lays them
+        // out: a row listed for one group is no row of another, whatever the request says.
+        if ($relocate && $this->hasRows() && $this->movesBetweenGroups() && ! $this->rowShowsIn($newRow, $newGroup)) {
+            throw new MoveRejected(__('packstub-gantt::gantt.unknown_group'));
+        }
+
         if ($newStart->equalTo($previousStart) && $newEnd->equalTo($previousEnd) && ! $relocate) {
             return null;
         }
@@ -2716,6 +2727,48 @@ class Gantt
         }
 
         return $this->rowKeyShaped($row) && $query->where($column, $row)->exists();
+    }
+
+    /**
+     * Whether a row shows in a group (null: the ungrouped one), on a chart grouped by a
+     * column or a BelongsTo: a row listed for that group or for every group, or one a
+     * bar of that group is in; the unassigned row (null) when unassignedRow() keeps it
+     * in every group or a bar of that group has no row. What the browser offers as a
+     * target, checked again here (see knowsRowKey() for a chart without such a group).
+     */
+    protected function rowShowsIn(?string $row, ?string $group): bool
+    {
+        if ($row === null && $this->unassignedRowAlways) {
+            return true;
+        }
+
+        if ($row !== null) {
+            foreach ($this->definedRows() as $defined) {
+                if ($defined->getKey() !== $row) {
+                    continue;
+                }
+
+                if ($defined->getGroup() === null || $defined->getGroup() === $group) {
+                    return true;
+                }
+
+                // Listed twice, the first one counts (see getRows()).
+                break;
+            }
+
+            if (! $this->rowKeyShaped($row)) {
+                return false;
+            }
+        }
+
+        $query = $this->baseQuery();
+        $rowColumn = $query->qualifyColumn($this->getRowForeignKey());
+        $groupColumn = $query->qualifyColumn($this->getGroupForeignKey());
+
+        $row === null ? $query->whereNull($rowColumn) : $query->where($rowColumn, $row);
+        $group === null ? $query->whereNull($groupColumn) : $query->where($groupColumn, $group);
+
+        return $query->exists();
     }
 
     /** Whether a string may be a key of the rowBy() relation's model (an integer key never matches 'abc'; PostgreSQL throws). */
