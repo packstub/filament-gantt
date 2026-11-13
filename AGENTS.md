@@ -101,8 +101,16 @@ and the Pest suite again on MySQL 8.4 and PostgreSQL 17 (the `databases` job): S
   or lone move at its children. `writeSpanToParent()`: `applyMove()` calls `writeParentSpans(previousRow, newRow)`
   inside the move's transaction (not for `together`), the actions' `before`/`after` hooks (`ganttRefreshAfter()`)
   do the same around create, edit and delete; the browser reloads after a child's move (`refresh(true)`).
+- Lines inside a row (issue #41 step 5): `rowBy()` + `lineBy()` on two columns (`hasRows()` throws for the same
+  one). `layout()` still takes the `rowLayout` branch: `packRow()` gives a line's pieces one lane (a unit from first
+  to last) unless they overlap each other, `gaps()` chains per line on a `'row'` row (`gap.lane`, `gap.line`). A
+  piece carried to another row carries its line: `carried` also for `p.r !== p.r0`, `commitLine(…, row, rows0)` →
+  `ganttMoveLine(id, start, group, row)` → `moveLine(…, $row)`; ↑/↓ use `regroupLine(key, group, id, row)` and
+  `k.rows0`. `planMove()`'s flags: `together` (a line: skips the line-overlap check), `moving` (keys that move
+  along: skipped by `overlapsRow()`), `withParent` (`moveParent()`: skips `leavesParent()` and the parent's span
+  write). `barWalls()` merges the line's and the row's walls (none while the bar carries its line).
 - Rows (`rowBy()`, issue #41 step 1): a column or a `BelongsTo`;
-  `hasRows()` throws with `compact()` or `lineBy()`. `presentBar()` adds `row` ('' for none), `getState()` adds `rows`
+  `hasRows()` throws with `compact()`. `presentBar()` adds `row` ('' for none), `getState()` adds `rows`
   (`rows()` first with `listed: true`, then those met on bars with `listed: false`). In `layout()` a group holds its
   listed rows (`group` null: every group), then met ones, then the unassigned row (`row` '': the bars without a
   row; `unassignedRow()` names it and keeps it in every group, empty or not, which also makes '' a row

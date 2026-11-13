@@ -143,13 +143,13 @@ it('loads the row\'s relation once, not once per bar', function () {
     expect(collect(DB::getQueryLog())->filter(fn ($q) => preg_match('/["`]users["`]/', $q['query']) === 1)->count())->toBe(1);
 });
 
-it('refuses rowBy() with compact(), with lineBy(), or through a relation that is no BelongsTo', function (Closure $define, string $message) {
+it('refuses rowBy() with compact(), with a lineBy() on its own column, or through a relation that is no BelongsTo', function (Closure $define, string $message) {
     task('Design', '2026-10-05', '2026-10-07');
 
     expect(fn () => $define(gantt())->getState())->toThrow(LogicException::class, $message);
 })->with([
     'compact' => [fn (Gantt $g) => $g->rowBy('assignee')->compact(), 'Use one of them'],
-    'lineBy' => [fn (Gantt $g) => $g->rowBy('assignee')->lineBy('parent_id'), 'do not work on one chart yet'],
+    'lineBy on the same column' => [fn (Gantt $g) => $g->rowBy('parent')->lineBy('parent_id'), 'read the same column'],
     'many' => [fn (Gantt $g) => $g->rowBy('predecessors'), 'neither'],
 ]);
 

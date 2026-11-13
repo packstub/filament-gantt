@@ -202,9 +202,9 @@ it('has no unassigned row: a task without a parent is a row', function () {
         ->and(parentsGantt()->unassignedRow('No parent')->showsUnassignedRow())->toBeFalse();
 });
 
-it('still refuses rowBy() with compact(), with lineBy(), or through a relation that is no BelongsTo', function () {
+it('still refuses rowBy() with compact(), or with a lineBy() on the parent\'s own column', function () {
     expect(fn () => parentsGantt()->compact()->getState())->toThrow(LogicException::class, 'Use one of them')
-        ->and(fn () => parentsGantt()->lineBy('parent_id')->getState())->toThrow(LogicException::class, 'do not work on one chart yet');
+        ->and(fn () => parentsGantt()->lineBy('parent_id')->getState())->toThrow(LogicException::class, 'read the same column');
 });
 
 /* ------------------------------------------------------------------ moving */

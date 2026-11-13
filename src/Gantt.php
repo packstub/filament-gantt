@@ -425,7 +425,9 @@ class Gantt
      *
      * A bar dragged (or carried with ↑/↓) onto another row gets that row's key written,
      * in the same transaction as its dates; a click on a row creates a bar in it. Not
-     * with compact() (its rows are groups) or lineBy().
+     * with compact() (its rows are groups). With lineBy(), on a column of its own, the
+     * pieces of a line sit on their row joined as on a line's row, share a lane, and
+     * a piece carried to another row carries its line.
      *
      * Through a BelongsTo to the chart's own model (`rowBy('parent')`) the parents are
      * the rows: every record of the chart's query without a parent is a row, named by
@@ -1067,7 +1069,7 @@ class Gantt
     /**
      * Whether the rows hold several bars (see rowBy()).
      *
-     * @throws LogicException with compact() or lineBy(), which lay the rows out their own way
+     * @throws LogicException with compact(), which lays the rows out its own way, or with a lineBy() on the same column
      */
     public function hasRows(): bool
     {
@@ -1079,8 +1081,10 @@ class Gantt
             throw new LogicException("The Gantt's rowBy() and compact() each decide what a row is: compact() makes a group one row, rowBy() puts rows inside the groups. Use one of them.");
         }
 
-        if ($this->lineAttribute !== null) {
-            throw new LogicException("The Gantt's rowBy() and lineBy() do not work on one chart yet (issue #41): use one of them.");
+        // With lineBy() the pieces of a line sit on a row and keep their joiner; the two
+        // cannot read one column (a parent would be both the row and a piece of it).
+        if ($this->lineAttribute !== null && $this->getLineForeignKey() === $this->getRowForeignKey()) {
+            throw new LogicException("The Gantt's rowBy() and lineBy() read the same column [{$this->getRowForeignKey()}]: a row holds lines, so each needs a column of its own (rowBy('parent') for the parent task, lineBy('split_of_id') for the task a piece continues).");
         }
 
         return true;
@@ -2282,6 +2286,7 @@ class Gantt
         return [
             'id' => (string) $record->getKey(),
             'group' => $this->groupKey($record) ?? '',
+            ...($this->hasRows() ? ['row' => $this->rowKey($record) ?? ($this->hasParentRows() ? (string) $record->getKey() : '')] : []),
             'start' => $start->format('Y-m-d H:i'),
             'end' => $end->format('Y-m-d H:i'),
             'allDay' => $this->isDateOnly($record),
@@ -2400,7 +2405,7 @@ class Gantt
      *
      * @throws MoveRejected
      */
-    public function moveLine(string $id, string $start, ?string $group = null): array
+    public function moveLine(string $id, string $start, ?string $group = null, ?string $row = null): array
     {
         $record = $this->findRecord($id)
             ?? throw new MoveRejected(__('packstub-gantt::gantt.missing'));
@@ -2427,7 +2432,10 @@ class Gantt
 
         // As in the browser: a line moves along its days only from its first piece, and
         // not at all with movePiecesAlone(); any piece carries it to another group.
-        if ($group === null || $group === ($this->groupKey($record) ?? '')) {
+        $carried = ($group !== null && $group !== ($this->groupKey($record) ?? ''))
+            || ($row !== null && $this->hasRows() && $row !== ($this->rowKey($record) ?? ''));
+
+        if (! $carried) {
             $first = $this->inLineOrder(
                 $pieces
                     ->map(fn (Model $piece) => [$piece, ['id' => (string) $piece->getKey(), 'start' => ($this->span($piece)[0] ?? null)?->format('Y-m-d H:i')]])
@@ -2448,6 +2456,8 @@ class Gantt
         $delta = $this->minutes($previousStart, $unit->snapFrom($this->parse($start), $previousStart));
 
         $plans = [];
+        // With rowBy(): the pieces keep their places among each other, on the row they share or land on.
+        $moving = $pieces->map(fn (Model $piece) => (string) $piece->getKey())->all();
 
         foreach ($pieces as $piece) {
             if (($span = $this->span($piece)) === null) {
@@ -2457,7 +2467,7 @@ class Gantt
             [$from, $until, $milestone] = $span;
 
             try {
-                $plan = $this->planMove($piece, $from->addMinutes($delta), $milestone ? null : $until->addMinutes($delta), $group, together: true);
+                $plan = $this->planMove($piece, $from->addMinutes($delta), $milestone ? null : $until->addMinutes($delta), $group, together: true, row: $row, moving: $moving);
             } catch (MoveRejected $e) {
                 // The bar that was dragged says why; another piece is named.
                 throw (string) $piece->getKey() === $key ? $e : new MoveRejected(__('packstub-gantt::gantt.line_part', ['label' => $this->labelOf($piece), 'reason' => $e->getMessage()]));
@@ -2524,6 +2534,7 @@ class Gantt
         $delta = $this->minutes($previousStart, $unit->snapFrom($this->parse($start), $previousStart));
 
         $plans = [];
+        $moving = $children->map(fn (Model $child) => (string) $child->getKey())->all();
 
         foreach ($own ? [$record, ...$children] : $children as $piece) {
             if (($span = $this->span($piece)) === null) {
@@ -2533,7 +2544,7 @@ class Gantt
             [$from, $until, $milestone] = $span;
 
             try {
-                $plan = $this->planMove($piece, $from->addMinutes($delta), $milestone ? null : $until->addMinutes($delta), null, together: true);
+                $plan = $this->planMove($piece, $from->addMinutes($delta), $milestone ? null : $until->addMinutes($delta), null, moving: $moving, withParent: true);
             } catch (MoveRejected $e) {
                 // The parent says why itself; a child is named.
                 throw $piece === $record ? $e : new MoveRejected(__('packstub-gantt::gantt.child_part', ['label' => $this->labelOf($piece), 'reason' => $e->getMessage()]));
@@ -2579,14 +2590,14 @@ class Gantt
     /**
      * Every rule of a move, checked without writing anything: what applyMove() is to
      * do, or null when the bar would stay as it is. Dates as the browser sends them
-     * (strings) or already read; `$together` when the bar moves with its whole line or with every bar of its parent
+     * (strings) or already read; `$together` when the piece moves with its whole line; `$moving` the keys of the bars that move along (never in its way on the row); `$withParent` when it moves with its parent and the parent's other children
      * (see moveLine()); `$row` the row it lands in (rowBy(): null keeps it, '' is no row).
      *
      * @return array<string, mixed>|null
      *
      * @throws MoveRejected
      */
-    protected function planMove(Model $record, CarbonImmutable|string $start, CarbonImmutable|string|null $end, ?string $group, bool $together = false, ?string $row = null): ?array
+    protected function planMove(Model $record, CarbonImmutable|string $start, CarbonImmutable|string|null $end, ?string $group, bool $together = false, ?string $row = null, array $moving = [], bool $withParent = false): ?array
     {
         // A parent's own dates move only while they are what the chart draws.
         if ($this->parentSpan !== ParentSpan::Own && $this->isParentRecord($record)) {
@@ -2708,7 +2719,7 @@ class Gantt
         }
 
         // keepInsideParent(): a child inside its parent's dates, a parent around its children.
-        if (! $together && ($startChanged || $endChanged || $rowChange) && $this->keepsInsideParent() && ($reason = $this->leavesParent($record, $newRow, $newStart, $newEnd)) !== null) {
+        if (! $withParent && ($startChanged || $endChanged || $rowChange) && $this->keepsInsideParent() && ($reason = $this->leavesParent($record, $newRow, $newStart, $newEnd)) !== null) {
             throw new MoveRejected($reason);
         }
 
@@ -2718,8 +2729,8 @@ class Gantt
         }
 
         // rowBy(): a bar may not land on another bar of its row, the one it moves to included.
-        // Moving with every bar of its parent, it keeps its place among them too.
-        if (! $together && ($startChanged || $endChanged || $rowChange) && $newRow !== null && $this->preventsRowOverlap() && $this->overlapsRow($record, $newRow, $newStart, $newEnd)) {
+        // The bars that move along (its line's pieces, its parent's other children) are never in its way.
+        if (($startChanged || $endChanged || $rowChange) && $newRow !== null && $this->preventsRowOverlap() && $this->overlapsRow($record, $newRow, $newStart, $newEnd, $moving)) {
             throw new MoveRejected(__('packstub-gantt::gantt.row_overlaps'));
         }
 
@@ -2736,7 +2747,7 @@ class Gantt
             $this->verdict(($this->canMove)($record, $start, $end, $from, $until, $newGroup, $previousGroup, $newRow, $previousRow));
         }
 
-        return compact('record', 'newStart', 'newEnd', 'milestone', 'previousStart', 'start', 'end', 'from', 'until', 'regroup', 'newGroup', 'previousGroup', 'rowChange', 'newRow', 'previousRow', 'together');
+        return compact('record', 'newStart', 'newEnd', 'milestone', 'previousStart', 'start', 'end', 'from', 'until', 'regroup', 'newGroup', 'previousGroup', 'rowChange', 'newRow', 'previousRow', 'withParent');
     }
 
     /**
@@ -2769,7 +2780,7 @@ class Gantt
 
         // writeSpanToParent(): the parent it left and the one it is under now. Moving
         // with its parent, the parent moved by the same amount already.
-        if (! $plan['together']) {
+        if (! $plan['withParent']) {
             $this->writeParentSpans($previousRow, $newRow);
         }
 
@@ -2910,7 +2921,7 @@ class Gantt
      * edges that touch do not), in any group: the row is the resource, a machine busy
      * for one project is busy for all. Only the bars near the range are read.
      */
-    protected function overlapsRow(Model $record, string $row, CarbonImmutable $start, CarbonImmutable $end): bool
+    protected function overlapsRow(Model $record, string $row, CarbonImmutable $start, CarbonImmutable $end, array $except = []): bool
     {
         if (! $this->rowKeyShaped($row)) {
             return false;
@@ -2935,6 +2946,11 @@ class Gantt
         }
 
         foreach ($query->get() as $other) {
+            // A bar that moves along with this one is where it will be, not where it was.
+            if (in_array((string) $other->getKey(), $except, true)) {
+                continue;
+            }
+
             if (($span = $this->span($other)) === null) {
                 continue;
             }

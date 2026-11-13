@@ -218,14 +218,14 @@ trait InteractsWithGantt
      * @return array{ok: bool, bars?: list<array<string, mixed>>, message?: string}
      */
     #[Renderless]
-    public function ganttMoveLine(mixed $id, mixed $start, mixed $group = null): array
+    public function ganttMoveLine(mixed $id, mixed $start, mixed $group = null, mixed $row = null): array
     {
-        if (! is_string($id) || ! is_string($start) || ($group !== null && ! is_string($group))) {
+        if (! is_string($id) || ! is_string($start) || ($group !== null && ! is_string($group)) || ($row !== null && ! is_string($row))) {
             return ['ok' => false, 'message' => __('packstub-gantt::gantt.failed')];
         }
 
         try {
-            $bars = $this->getGantt()->moveLine($id, $start, $group);
+            $bars = $this->getGantt()->moveLine($id, $start, $group, $row);
         } catch (MoveRejected $e) {
             return ['ok' => false, 'message' => $e->getMessage()];
         } catch (\Throwable $e) {
