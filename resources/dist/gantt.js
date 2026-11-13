@@ -1540,13 +1540,14 @@ export default function packstubGantt(config) {
             // lineBy(): the first piece of a line carries the line, and a drag to another
             // group carries it whichever piece was grabbed, so every piece must agree.
             const entry = this.lineOf(bar)
-            const line = this.lineDrags && ! edge ? entry : null
+            // A parent's span dragged whole takes its children along: every one on the chart has to be free to go.
+            // It moves as a parent even when it is a piece of a line too: its children follow, the line's other pieces stay.
+            const family = ! edge && this.carriesChildren(bar)
+            const kids = family ? this.childrenOf(bar) : []
+            const line = this.lineDrags && ! edge && ! family ? entry : null
             const together = !! line && this.carriesLine(bar)
             // A whole bar on a grouped chart (or one with rowBy()) may be carried to another row, even one whose dates are fixed.
             const rows = ! edge && (!! config.grouped || !! config.rowLayout) && (line ? this.lineRegroupable(line) : !! bar.regroupable)
-            // A parent's span dragged whole takes its children along: every one on the chart has to be free to go.
-            const family = ! edge && this.carriesChildren(bar)
-            const kids = family ? this.childrenOf(bar) : []
             const allowed = edge ? this.resizes(bar, edge) : ((together ? this.lineMovable(line) : family ? bar.movable && kids.every((b) => b.movable && ! b.src._pending) : bar.movable) || rows)
             const touch = event.pointerType === 'touch' || event.pointerType === 'pen'
 
@@ -1831,11 +1832,11 @@ export default function packstubGantt(config) {
             if (edge && bar.milestone) return
             // lineBy(): ↑/↓ carry the whole line, and so do ←/→ on its first piece (as a drag does).
             const entry = this.lineOf(bar)
-            const line = this.lineDrags && ! edge ? entry : null
-            const together = !! line && (vertical || this.carriesLine(bar))
-            // A parent's span moved whole takes its children along, as a drag does.
+            // A parent's span moved whole takes its children along, as a drag does (a piece of a line or not).
             const family = ! vertical && ! edge && this.carriesChildren(bar)
             const kids = family ? this.childrenOf(bar) : []
+            const line = this.lineDrags && ! edge && ! family ? entry : null
+            const together = !! line && (vertical || this.carriesLine(bar))
             const allowed = vertical
                 ? ((config.rowLayout || !! config.grouped) && (line ? this.lineRegroupable(line) : !! bar.regroupable))
                 : edge ? this.resizes(bar, edge) : (together ? this.lineMovable(line) : family ? bar.movable && kids.every((b) => b.movable && ! b.src._pending) : bar.movable)
