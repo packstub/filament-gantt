@@ -45,7 +45,8 @@ class Chart
     /** Drawn (its script and stylesheet are loaded on request) and holding its state. Call it again after a reload. */
     public function drawn(): static
     {
-        return $this->waitFor('!! document.querySelector(".ps-gantt-scroll") && !! window.Alpine && '.self::CHART.'?.view?.width > 0', 'the chart to draw')->settled();
+        // The fonts too: a font swapped in after the bars were measured moves them under the mouse.
+        return $this->waitFor('!! document.querySelector(".ps-gantt-scroll") && !! window.Alpine && '.self::CHART.'?.view?.width > 0 && document.fonts.status === "loaded"', 'the chart to draw')->settled();
     }
 
     /** Load the page again, as F5 does: the URL keeps what the chart wrote into it. */
@@ -85,24 +86,58 @@ class Chart
         return array_map(strval(...), (array) $this->script(self::CHART.'.bars.map((b) => b.id)'));
     }
 
-    /** Where a bar is drawn, in viewport pixels: x, y, width, height. */
-    public function box(Model|int|string $id, string $inside = ''): array
+    /**
+     * Where a bar is drawn, in viewport pixels: x, y, width, height. `hitAt`: the point
+     * across it (0 to 1) the mouse is about to press, which must be the bar's own.
+     */
+    public function box(Model|int|string $id, string $inside = '', ?float $hitAt = null): array
     {
         $selector = $this->selector($id).($inside !== '' ? ' '.$inside : '');
-        $this->script('document.querySelector('.json_encode($selector).').scrollIntoView({ block: "center", inline: "nearest" })');
-        $box = $this->script('(() => { const r = document.querySelector('.json_encode($selector).').getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height } })()');
-        Assert::assertIsArray($box, "No box for {$selector}.");
+        $this->script('document.querySelector('.json_encode($selector).').scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" })');
 
-        return $box;
+        return $this->steady('document.querySelector('.json_encode($selector).')', $selector, $hitAt);
+    }
+
+    /**
+     * Where an element is once it stays put: the same box on two reads a beat apart,
+     * and (with `hitAt`) the element itself under that point of it, not a modal, a
+     * toast or a bar lying over it. A slower machine is still laying the page out
+     * when the test measures.
+     */
+    private function steady(string $element, string $what, ?float $hitAt = 0.5): array
+    {
+        $hit = $hitAt === null ? 'true' : '(() => { const h = document.elementFromPoint(r.x + r.width * '.$hitAt.', r.y + r.height / 2); return !! h && (h === el || el.contains(h)) })()';
+        $read = '(() => { const el = '.$element.'; if (! el) return null; const r = el.getBoundingClientRect(); '
+            .'return { x: r.x, y: r.y, width: r.width, height: r.height, hit: '.$hit.' } })()';
+        $until = microtime(true) + 8;
+        $last = null;
+
+        while (true) {
+            $box = $this->script($read);
+
+            if (is_array($box) && $box['hit'] && $last === $box) {
+                unset($box['hit']);
+
+                return $box;
+            }
+
+            if (microtime(true) > $until) {
+                Assert::fail("{$what} did not hold still under the mouse: ".json_encode($box));
+            }
+
+            $last = $box;
+            delay(0.05);
+        }
     }
 
     /** The row with this label, in viewport pixels. */
     public function rowBox(string $label): array
     {
-        $box = $this->script('(() => { const row = [...document.querySelectorAll(".ps-gantt-row")].find((r) => r.querySelector(".ps-gantt-label-text")?.textContent.trim() === '.json_encode($label).'); if (! row) return null; const r = row.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height } })()');
-        Assert::assertIsArray($box, "No row labelled {$label}.");
+        $row = '[...document.querySelectorAll(".ps-gantt-row")].find((r) => r.querySelector(".ps-gantt-label-text")?.textContent.trim() === '.json_encode($label).')';
+        Assert::assertTrue((bool) $this->script('!! '.$row), "No row labelled {$label}.");
 
-        return $box;
+        // Not scrolled to (a drag may be under way) nor hit-tested (a dragged bar may lie over it).
+        return $this->steady($row, "The row {$label}", null);
     }
 
     /** What a bar's place in the drawn rows is right now (ms since the epoch), mid-drag included. */
@@ -139,7 +174,7 @@ class Chart
      */
     public function drag(Model|int|string $id, int $days = 0, ?string $edge = null, ?string $toRow = null, ?Closure $hold = null, bool $release = true, float $at = 0.5): static
     {
-        $box = $edge ? $this->box($id, ".ps-gantt-handle-{$edge}") : $this->box($id);
+        $box = $edge ? $this->box($id, ".ps-gantt-handle-{$edge}", 0.5) : $this->box($id, hitAt: $at);
         // `at`: how far along the bar it is grabbed (a parent's span has its children lying over it).
         $x = $box['x'] + $box['width'] * ($edge ? 0.5 : $at);
         $y = $box['y'] + $box['height'] / 2;
@@ -154,6 +189,12 @@ class Chart
 
         $this->mouse('mouseMove', ['x' => $x, 'y' => $y]);
         $this->mouse('mouseDown');
+        // What the press took hold of, when the chart took any (a read-only chart takes none).
+        $grabbed = $this->script('(() => { const p = '.self::CHART.'.pointer; return p ? { id: String(p.bar.src?.id ?? p.bar.id), edge: p.edge, narrow: '.self::CHART.'.narrow(p.bar) } : null })()');
+        if (is_array($grabbed)) {
+            Assert::assertSame((string) $this->idOf($id), $grabbed['id'], 'The press took hold of another bar.');
+            Assert::assertTrue($grabbed['narrow'] || $grabbed['edge'] === $edge, 'The press took hold of '.($grabbed['edge'] ?? 'the whole bar').' instead of '.($edge ?? 'the whole bar').'.');
+        }
         $this->mouse('mouseMove', ['x' => $toX, 'y' => $toY, 'steps' => 12]);
 
         if ($hold) {
@@ -174,7 +215,7 @@ class Chart
     /** A plain click on a bar: pressed, a beat, released (the chart tells a click from a drag by the travel). */
     public function clickBar(Model|int|string $id, string $button = 'left', ?float $at = null): static
     {
-        $box = $this->box($id);
+        $box = $this->box($id, hitAt: $at ?? 0.1);
         $this->mouse('mouseMove', ['x' => $box['x'] + ($at === null ? min(20, $box['width'] / 2) : $box['width'] * $at), 'y' => $box['y'] + $box['height'] / 2]);
         $this->mouse('mouseDown', ['button' => $button]);
         $this->mouse('mouseUp', ['button' => $button]);
