@@ -28,6 +28,8 @@ const TONES = {
 
 const MILESTONE_PX = 14
 const LONG_PRESS_MS = 450
+// What the window listens to for a drag whose element left the DOM (init()).
+const ORPHAN_EVENTS = ['pointermove', 'pointerup', 'pointercancel']
 // A bar narrower than this has no resize handles: the 8px handles would cover it,
 // so a drag anywhere on it moves it (resize it from the keyboard, or zoom in).
 const HANDLES_MIN_PX = 24
@@ -649,6 +651,19 @@ export default function packstubGantt(config) {
                 this.ui('root').style.setProperty('--ps-gantt-height', Math.max(320, window.innerHeight - top - footer - 24) + 'px')
             }
             window.addEventListener('resize', this.fit)
+
+            // The element a drag captured the pointer on can leave the DOM mid-drag (row windowing drops its row
+            // after a wheel scroll; a rebuild can replace it): its capture and its listeners go with it, and the
+            // release would land nowhere. The window hears the rest of that drag instead.
+            this.orphans = (event) => {
+                const p = this.pointer
+                if (! p || event.pointerId !== p.id || p.el?.isConnected !== false) return
+                if (event.type === 'pointermove') this.drag(event)
+                else if (event.type === 'pointerup') this.up(event)
+                else this.cancel(event)
+            }
+            for (const type of ORPHAN_EVENTS) window.addEventListener(type, this.orphans)
+
             this.$nextTick(() => {
                 this.fit()
                 this.scrollToToday(false, false)
@@ -681,6 +696,7 @@ export default function packstubGantt(config) {
 
         destroy() {
             window.removeEventListener('resize', this.fit)
+            for (const type of ORPHAN_EVENTS) window.removeEventListener(type, this.orphans)
             clearInterval(this.poller)
             clearTimeout(this.keyboard?.timer)
         },

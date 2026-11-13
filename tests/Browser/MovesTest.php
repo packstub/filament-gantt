@@ -145,3 +145,23 @@ it('drags the right way in a right-to-left panel', function () {
     expect($this->docs->fresh()->starts_on->toDateString())->toBe('2026-03-12')
         ->and($chart->box($this->docs)['x'])->toBeLessThan($before);
 });
+
+it('drops a bar whose row was scrolled out of the DOM mid-drag, released on an empty spot', function () {
+    // Over 200 rows only the ones in view are drawn: a wheel scroll during a drag drops the dragged bar's row.
+    Task::query()->insert(collect(range(1, 240))->map(fn ($i) => [
+        'title' => 'Filler '.$i, 'starts_on' => '2026-03-09', 'ends_on' => '2026-03-10', 'project_id' => $this->website->id,
+    ])->all());
+
+    $chart = chart(fn (Gantt $gantt) => $gantt->sortBy('id'))->drag($this->docs, days: 6, release: false);
+
+    $chart->script('(() => { const el = document.querySelector(".ps-gantt-scroll"); el.scrollTop = el.scrollHeight })()');
+    $chart->waitFor('! document.querySelector(\'.ps-gantt-bar[data-id="'.$this->docs->id.'"]\')', 'the dragged bar to leave the DOM');
+
+    // The release lands on an empty stretch of a row far below (the fillers end on the 10th): no bar hears it.
+    // drop() waits for the chart to let go of the pointer, which it never did before.
+    $chart->drop();
+
+    expect($this->docs->fresh()->starts_on->toDateString())->toBe('2026-03-15')
+        ->and($chart->script('document.querySelector(".ps-gantt").classList.contains("ps-gantt-is-dragging")'))->toBeFalse();
+    $chart->assertNoJavaScriptErrors();
+});
