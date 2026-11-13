@@ -21,6 +21,9 @@
 /pint.json          export-ignore
 /package.json       export-ignore
 /package-lock.json  export-ignore
+/build.mjs          export-ignore
+/resources/js       export-ignore
+/resources/css      export-ignore
 /.prettierrc        export-ignore
 /AGENTS.md          export-ignore
 /CLAUDE.md          export-ignore

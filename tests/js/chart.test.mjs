@@ -23,7 +23,7 @@ test('a config without a window (a chart that appeared after the component\'s fi
 })
 
 test('a swipe that starts on a bar scrolls the chart: the browser keeps panning on bars', async () => {
-    const css = await readFile(new URL('../../resources/dist/gantt.css', import.meta.url), 'utf8')
+    const css = await readFile(new URL('../../resources/css/gantt.css', import.meta.url), 'utf8')
     const block = /\.ps-gantt-bar \{[^}]*\}/.exec(css)[0]
 
     assert.match(block, /touch-action: manipulation;/)
@@ -413,7 +413,7 @@ test('a folded group\'s line says its dates, wears the group\'s colour and is ho
     c.createAt({ target: { closest: () => null }, currentTarget: { getBoundingClientRect: () => ({ left: 0, right: 1000 }) }, clientX: 50 }, row)
     assert.equal(c.wire.mounted.length, 1)
 
-    const css = await readFile(new URL('../../resources/dist/gantt.css', import.meta.url), 'utf8')
+    const css = await readFile(new URL('../../resources/css/gantt.css', import.meta.url), 'utf8')
     const rule = css.match(/\.ps-gantt-span \{[^}]*\}/)[0]
     assert.doesNotMatch(rule, /pointer-events: none/)
     assert.match(rule, /inset-block: 0/)

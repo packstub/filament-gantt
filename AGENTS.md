@@ -12,9 +12,11 @@ composer test:filter <name>
 composer test:js            # browser side: node --test tests/js (layout(), drag, menu; plain Node, no packages)
 composer test:browser       # the chart in headless Chromium (tests/Browser); once: npm install && npx playwright install chromium
 composer lint               # Pint
+npm run build               # resources/{js,css} → resources/dist (esbuild, minified); commit the result
+npm run dev                 # rebuild on change
 ```
 
-CI runs the first three on Laravel 12/13 × Filament 4.*/5.* (floor `^4.13`), the JS suite on a pinned Node 22 (`actions/setup-node`),
+CI runs the first three on Laravel 12/13 × Filament 4.*/5.* (floor `^4.13`), the JS suite on a pinned Node 22 (`actions/setup-node`), checks `resources/dist` is what `npm run build` makes,
 and the Pest suite again on MySQL 8.4 and PostgreSQL 17 (the `databases` job): SQLite accepts SQL they refuse. Locally:
 `DB_CONNECTION=pgsql DB_DATABASE=… DB_USERNAME=… vendor/bin/pest` (the TestCase drops all tables first on a real server).
 
@@ -25,11 +27,13 @@ and the Pest suite again on MySQL 8.4 and PostgreSQL 17 (the `databases` job): S
 - `src/Concerns/InteractsWithGantt.php` (the Livewire side), `src/Concerns/GanttActions.php` (bar and create actions wired
   into Filament's action system: record through the chart's query, hidden/mount/mutate/after chained onto the app's own),
   `src/Pages/Gantt{,Resource}Page.php`, `src/Widgets/GanttWidget.php` (read-only by default), `src/GanttPlugin.php`.
-- `resources/views/gantt.blade.php`, `resources/dist/gantt.{js,css}` — hand-written, no build step. `layout(bars, window,
+- `resources/views/gantt.blade.php`, `resources/js/gantt.js`, `resources/css/gantt.css` — hand-written, no framework;
+  `build.mjs` (esbuild) minifies them into `resources/dist/gantt.{js,css}`, which is committed (consumers run only
+  `filament:assets`; CI fails when `npm run build` changes it). Edit the sources, never `dist`. `layout(bars, window,
   scale)` in `gantt.js` is pure and exported; `tests/js/` (node:test, `harness.mjs` fakes the few globals the component
-  touches) covers it and the component's drag, menu and URL handling: add a case there for any change. After editing the
-  assets in a consuming app, run `php artisan filament:assets` there (assets are copied, not linked).
-- `tests/Browser/` — Pest's browser plugin (Playwright, the only npm package: `package.json` is dev-only) against the
+  touches) covers it and the component's drag, menu and URL handling (it imports the source): add a case there for any change. After editing the
+  sources, `npm run build`, then in a consuming app `php artisan filament:assets` (assets are copied, not linked).
+- `tests/Browser/` — Pest's browser plugin (Playwright; `package.json` is dev-only: it and esbuild) against the
   fixture panel, the app served from the test's own process (so SQLite in memory and the fixtures' statics reach it).
   `chart(fn (Gantt $gantt) => …)` opens `Fixtures/ChartPage.php` (`/admin/chart`, shaped by the closure) on four fixed
   weeks of March 2026 and returns `Browser/Chart.php`: `drag($task, days:, edge:, toRow:, at:, hold:, release:)` with a

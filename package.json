@@ -1,7 +1,13 @@
 {
     "private": true,
-    "description": "Dev only: Playwright for the browser tests in tests/Browser (composer test:browser). The chart itself has no build step.",
+    "type": "module",
+    "description": "Dev only: esbuild minifies resources/{js,css} into the committed resources/dist (npm run build); Playwright runs the browser tests in tests/Browser (composer test:browser).",
+    "scripts": {
+        "build": "node build.mjs",
+        "dev": "node build.mjs --watch"
+    },
     "devDependencies": {
+        "esbuild": "^0.28.2",
         "playwright": "^1.63.0"
     }
 }

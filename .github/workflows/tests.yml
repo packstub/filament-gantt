@@ -68,9 +68,18 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
+          cache: npm
 
       - name: Run browser-side tests
         run: composer test:js
+
+      # The committed, minified assets must be the ones the sources build:
+      # consumers run nothing but filament:assets.
+      - name: Check the built assets are committed
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+          git diff --exit-code -- resources/dist || (echo "::error::resources/dist is stale: run npm run build and commit it" && exit 1)
 
   browser:
     # The chart in a real browser (tests/Browser): real pointer drags and keys against

@@ -9,7 +9,7 @@ globalThis.window = { open() {}, location: { href: '' }, addEventListener() {}, 
 globalThis.document = { hidden: false, activeElement: null }
 globalThis.localStorage = { getItem: () => null, setItem() {} }
 
-const { default: packstubGantt, layout, arrows, parse, format, phpDate, pack, isoWeekday, isoDay, safeUrl, tone, DAY, HOUR } = await import('../../resources/dist/gantt.js')
+const { default: packstubGantt, layout, arrows, parse, format, phpDate, pack, isoWeekday, isoDay, safeUrl, tone, DAY, HOUR } = await import('../../resources/js/gantt.js')
 
 export { layout, arrows, parse, format, phpDate, pack, isoWeekday, isoDay, safeUrl, tone, DAY, HOUR }
 
