@@ -14,6 +14,7 @@ Run `php artisan filament:assets` after updating.
 - Parent tasks as rows: `rowBy('parent')` on a relation to the same model makes every task without a parent a titled row and its children the bars on it
 - A parent with dates draws its span behind its children: drag it to move them all together, resize it alone; `parentSpan()` picks its own dates, its children's extent or none, and the parent's actions are on the row's name
 - `keepInsideParent()` keeps children within their parent's dates, in a drag and in the forms; `writeSpanToParent()` writes the parent's dates from its children whenever one changes
+- `lineBy()` works inside a row of `rowBy()`: a split task's pieces share a lane, keep their joiner and move to another row together
 - Bars without a row share an Unassigned row at the end of their group; `unassignedRow('No machine')` names it and keeps it there to drop on
 
 ## 1.0.0-beta.2 - 2026-11-09

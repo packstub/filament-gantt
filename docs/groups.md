@@ -164,7 +164,24 @@ The column has to be nullable for that: taking a bar off its row writes `null`.
 A few things to know:
 
 - The column is yours: give it to the model's `$fillable` (like the group's foreign key), or a bar created on a row loses its row on save.
-- `rowBy()` does not go with `compact()` (that layout's rows are the groups) or `lineBy()`; the chart says so when it renders.
+- `rowBy()` does not go with `compact()` (that layout's rows are the groups); the chart says so when it renders.
+
+### Split tasks on a row
+
+`lineBy()` works inside a row: the pieces of a split task sit on their row, share a lane and keep the dotted joiner between them, next to the row's other bars.
+
+```php
+->rowBy('machine', label: 'machine.name')
+->lineBy('continues_id')      // the job this piece continues
+```
+
+| You do | What happens |
+| --- | --- |
+| Drag a line's first piece | The whole line moves along its row; the row's other bars are still in its way with `preventRowOverlap()`. |
+| Drag any other piece | It moves alone (the first one too, with `movePiecesAlone()`), and stops at the next piece of its line with `preventLineOverlap()`. |
+| Drag any piece onto another row, or ↑/↓ | The whole line lands there, every piece checked against that row. |
+
+Pieces that overlap each other take the lanes they find and are not joined. The two settings need a column each: with [parent tasks as rows](#parent-tasks-as-rows), the parent is `rowBy('parent')` and a split task names the piece it continues in another column.
 
 ## Parent tasks as rows
 

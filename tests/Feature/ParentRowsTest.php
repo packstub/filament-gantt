@@ -202,9 +202,9 @@ it('has no unassigned row: a task without a parent is a row', function () {
         ->and(parentsGantt()->unassignedRow('No parent')->showsUnassignedRow())->toBeFalse();
 });
 
-it('still refuses rowBy() with compact(), with lineBy(), or through a relation that is no BelongsTo', function () {
+it('still refuses rowBy() with compact(), or with a lineBy() on the parent\'s own column', function () {
     expect(fn () => parentsGantt()->compact()->getState())->toThrow(LogicException::class, 'Use one of them')
-        ->and(fn () => parentsGantt()->lineBy('parent_id')->getState())->toThrow(LogicException::class, 'do not work on one chart yet');
+        ->and(fn () => parentsGantt()->lineBy('parent_id')->getState())->toThrow(LogicException::class, 'read the same column');
 });
 
 /* ------------------------------------------------------------------ moving */
@@ -713,4 +713,49 @@ it('writes the parent\'s dates after the chart\'s create, edit and delete action
     Livewire::test(ParentGantt::class)->callAction('delete', arguments: ['ganttRecord' => (string) $design->id]);
 
     expect($dates())->toBe(['2026-10-12', '2026-10-14']);
+});
+
+it('moves split pieces under one parent together with preventLineOverlap(): they keep their places', function () {
+    $launch = task('Launch', '2026-10-05', '2026-10-20');
+    // a second self-reference for the line: Build continues Design (the column is only a key here)
+    $design = child($launch, 'Design', '2026-10-05', '2026-10-07');
+    $build = child($launch, 'Build', '2026-10-08', '2026-10-12', ['assignee_id' => $design->id]);
+
+    $gantt = fn () => parentsGantt()->lineBy('assignee_id')->preventLineOverlap();
+
+    // Design lands on the days Build had: both move, so the line never overlaps itself
+    $gantt()->moveParent((string) $launch->id, '2026-10-07');
+
+    expect($design->fresh()->starts_on->toDateString())->toBe('2026-10-07')
+        ->and($build->fresh()->starts_on->toDateString())->toBe('2026-10-10')
+        // alone, a piece still stops at the next one
+        ->and(parentRefusal(fn () => $gantt()->move((string) $design->id, '2026-10-09', '2026-10-12')))->toBe(__('packstub-gantt::gantt.overlaps'));
+});
+
+it('computes spans only for the parents of the last read', function () {
+    $launch = task('Launch');
+    child($launch, 'Design', '2026-10-05', '2026-10-07');
+    $ideas = task('Ideas');
+    child($ideas, 'Sketch', '2026-10-12', '2026-10-13');
+
+    $gantt = parentsGantt()->parentSpan(ParentSpan::FromChildren)->searchable(['title']);
+    $spans = fn (array $state) => array_column(array_filter($state['bars'], fn ($bar) => ! empty($bar['computed'])), 'id');
+
+    expect($spans(october($gantt)))->toBe([(string) $launch->id, (string) $ideas->id])
+        ->and($spans(october($gantt, search: 'sketch')))->toBe([(string) $ideas->id]);
+});
+
+it('gives a parent listed in rows() its computed span and its actions, under the name rows() gave it', function () {
+    $launch = task('Launch');
+    child($launch, 'Design', '2026-10-05', '2026-10-07');
+
+    $state = october(parentsGantt()
+        ->parentSpan(ParentSpan::FromChildren)
+        ->rows([Row::make($launch->id)->label('Pinned')])
+        ->resolveActionsUsing(fn (Task $task) => ['edit']));
+    $span = collect($state['bars'])->firstWhere('computed', true);
+
+    expect($state['rows'])->toHaveCount(1)
+        ->and($state['rows'][0])->toMatchArray(['label' => 'Pinned', 'listed' => true, 'actions' => ['edit']])
+        ->and($span)->toMatchArray(['id' => (string) $launch->id, 'row' => (string) $launch->id, 'start' => '2026-10-05 00:00']);
 });
