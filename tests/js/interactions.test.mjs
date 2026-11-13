@@ -1128,3 +1128,66 @@ test('a Ctrl+press (the Mac\'s right-click) starts no selection', () => {
     c.selectFrom({ button: 0, ctrlKey: true, pointerId: 9, clientX: 196, clientY: 60, pointerType: 'mouse', target: { closest: () => null }, currentTarget: element() }, c.view.rows[0])
     assert.equal(c.pointer, null)
 })
+
+/* ------------------------------------------------------------------ a drag whose element left the DOM */
+
+/** init() with the window's listeners recorded: `fire(type, event)` is the window hearing it. */
+function listening(c) {
+    const listeners = {}
+    const { addEventListener, removeEventListener } = globalThis.window
+    globalThis.window.addEventListener = (type, fn) => { (listeners[type] ||= []).push(fn) }
+    globalThis.window.removeEventListener = (type, fn) => { listeners[type] = (listeners[type] || []).filter((f) => f !== fn) }
+    try {
+        c.init()
+    } finally {
+        Object.assign(globalThis.window, { addEventListener, removeEventListener })
+    }
+
+    return {
+        listeners,
+        fire: (type, event) => (listeners[type] || []).forEach((fn) => fn({ type, ...event })),
+        destroy: () => {
+            globalThis.window.removeEventListener = (type, fn) => { listeners[type] = (listeners[type] || []).filter((f) => f !== fn) }
+            try { c.destroy() } finally { globalThis.window.removeEventListener = removeEventListener }
+        },
+    }
+}
+
+test('a bar whose row is windowed out mid-drag still drops where it is released', () => {
+    const c = chart({ bars: [bar()] })
+    const w = listening(c)
+    const el = { ...element(), isConnected: true }
+    const p = press(c, rowBar(c), { el })
+    p.move(96)
+
+    // Still in the DOM: the bar's own listeners have it, the window leaves it alone.
+    w.fire('pointerup', { pointerId: 7, clientX: 196, clientY: 50 })
+    assert.notEqual(c.pointer, null)
+
+    // A wheel scroll drops its row: the window carries the drag on and its release.
+    el.isConnected = false
+    w.fire('pointermove', { pointerId: 7, clientX: 244, clientY: 50 })
+    w.fire('pointermove', { pointerId: 8, clientX: 900, clientY: 50 }) // another finger: not ours
+    w.fire('pointerup', { pointerId: 7, clientX: 244, clientY: 900 })
+
+    assert.equal(c.pointer, null)
+    assert.equal(c.dragging, false)
+    assert.deepEqual(c.wire.moves.map((m) => m.slice(0, 3)), [['1', '2026-10-08 00:00', '2026-10-11 00:00']])
+
+    w.destroy()
+    assert.deepEqual([w.listeners.pointermove, w.listeners.pointerup, w.listeners.pointercancel], [[], [], []])
+})
+
+test('a selection whose row is windowed out ends on a cancel the window hears, and puts nothing back', () => {
+    const c = chart({ createAction: { name: 'create' }, bars: [bar()] })
+    const w = listening(c)
+    const el = { ...element(), isConnected: true, getBoundingClientRect: () => ({ left: 100, right: 1600 }) }
+    selecting(c, c.view.rows[0], { el }).move(96)
+
+    el.isConnected = false
+    w.fire('pointercancel', { pointerId: 9 })
+
+    assert.equal(c.pointer, null)
+    assert.deepEqual(c.wire.mounted, [])
+    w.destroy()
+})
