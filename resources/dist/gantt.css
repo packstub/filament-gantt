@@ -291,6 +291,9 @@
 /* The rows of the group a dragged bar would land in */
 .ps-gantt-row-target .ps-gantt-canvas { background: color-mix(in oklab, var(--primary-500) 10%, transparent); }
 .ps-gantt-row-target .ps-gantt-label { box-shadow: inset 3px 0 0 var(--primary-500); }
+/* preventRowOverlap(): the dragged bar is over another bar of that row (a release there puts it back). */
+.ps-gantt-row-blocked .ps-gantt-canvas { background: color-mix(in oklab, var(--danger-500) 10%, transparent); }
+.ps-gantt-row-blocked .ps-gantt-label { box-shadow: inset 3px 0 0 var(--danger-500); }
 
 .ps-gantt-label {
     position: sticky;
@@ -312,6 +315,10 @@
 .ps-gantt-row-group .ps-gantt-label { background: color-mix(in oklab, var(--ps-gantt-bg) 92%, var(--gray-500)); padding-inline-start: 0.35rem; }
 .dark .ps-gantt-row-group .ps-gantt-label { background: color-mix(in oklab, var(--ps-gantt-bg) 94%, #fff); }
 .ps-gantt-row-bar .ps-gantt-label { padding-inline-start: 1.5rem; }
+/* rowBy(): a row of several bars, its name at the top lane when overlapping bars make it taller. */
+.ps-gantt-row-row .ps-gantt-label { padding-inline-start: 1.5rem; align-items: flex-start; padding-top: 0.55rem; }
+/* The row of the bars without a row (unassignedRow()). */
+.ps-gantt-row-unassigned .ps-gantt-label-text { color: var(--ps-gantt-muted); font-style: italic; }
 .ps-gantt-is-compact .ps-gantt-row-lanes .ps-gantt-label { align-items: flex-start; padding-top: 0.55rem; }
 .ps-gantt-label-text { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .ps-gantt-label-group { font-weight: 600; }

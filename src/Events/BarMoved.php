@@ -12,7 +12,8 @@ use Illuminate\Foundation\Events\Dispatchable;
  * the 8th at 00:00 here. A milestone has start == end. They are wall-clock moments
  * in the app's timezone, the way Eloquent tags a record's dates, so a comparison
  * with now() reads naturally (see Gantt on time zones). The groups are the keys of
- * the group column or the related records (null when ungrouped, or not grouped).
+ * the group column or the related records (null when ungrouped, or not grouped), the
+ * rows those of rowBy() (null for a bar without a row, or a chart without rowBy()).
  */
 class BarMoved
 {
@@ -27,12 +28,20 @@ class BarMoved
         public readonly ?string $gantt = null,
         public readonly ?string $previousGroup = null,
         public readonly ?string $group = null,
+        public readonly ?string $previousRow = null,
+        public readonly ?string $row = null,
     ) {}
 
     /** Whether the bar landed in another group (another row). */
     public function isRegroup(): bool
     {
         return $this->group !== $this->previousGroup;
+    }
+
+    /** Whether the bar landed in another row of a chart with rowBy() (the row's key, null for none). */
+    public function isRowChange(): bool
+    {
+        return $this->row !== $this->previousRow;
     }
 
     /** Whether the duration changed (a resize) rather than the position (a move). */

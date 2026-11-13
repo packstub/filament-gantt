@@ -25,6 +25,12 @@ class Task extends Model
         return $this->belongsTo(Project::class);
     }
 
+    /** Who does it: a row of its own with rowBy('assignee'). */
+    public function assignee(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
+    }
+
     /** The record whose line this one joins (lineBy('parent')). */
     public function parent(): BelongsTo
     {

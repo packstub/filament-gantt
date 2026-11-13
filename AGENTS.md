@@ -79,6 +79,18 @@ and the Pest suite again on MySQL 8.4 and PostgreSQL 17 (the `databases` job): S
   it (`commitLine()` → `ganttMoveLine`), others move alone; `walls()` clamps with `preventLineOverlap`. The server
   checks overlap in `planMove()` (not along a line, not for a row change alone) and in the create/edit actions'
   `mutateDataUsing` (`ganttGuardOverlap()`: notification + `halt()`). `canCreateOnLine()` is the line's `canCreateIn()`.
+- Rows (`rowBy()`, issue #41 step 1): a column or a `BelongsTo` to another model (self-reference throws until step 2);
+  `hasRows()` throws with `compact()` or `lineBy()`. `presentBar()` adds `row` ('' for none), `getState()` adds `rows`
+  (`rows()` first with `listed: true`, then those met on bars with `listed: false`). In `layout()` a group holds its
+  listed rows (`group` null: every group), then met ones, then the unassigned row (`row` '': the bars without a
+  row; `unassignedRow()` names it and keeps it in every group, empty or not, which also makes '' a row
+  `knowsRowKey()` accepts). Every row of rowBy() is type `'row'` with `row` and `color`, keyed `r:<len>:<group>:<row>`. A drag targets view rows (`targetRow`), not
+  groups; `commit()` sends `ganttMove(id, s, e, group|null, row)`; ↑/↓ walk `rowTargets()`. A group change needs
+  `movesBetweenGroups()` (`groupMoves` in the config); a row change `isRegroupable()` and `knowsRowKey()`;
+  with a writable group, any change of group or row also needs `rowShowsIn()` (the row shows in the landing group:
+  listed for it or for all, or a bar of that group is in it), and so does `canCreateInRow()`.
+  `preventRowOverlap()` is per row key across groups (`overlapsRow()` in `planMove()` and `ganttGuardOverlap()`,
+  `rowWalls()` in the browser, `rowTaken()` for a bar carried to another row: `pointer.blocked`, no request on release); the closures and `BarMoved` get the rows after the groups.
 - Colours end up in a style attribute: `Bar::safeColor()` (PHP) and `tone()` (JS) keep colour shapes only, and the
   Blade binds `barStyle()`/`cell()` as objects, never concatenated strings.
 - `init()` sets `this.fit` (the height fitter on window resize): a method of that name is overwritten after init, so

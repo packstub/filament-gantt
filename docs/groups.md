@@ -114,4 +114,55 @@ public function gantt(Gantt $gantt): Gantt
 }
 ```
 
-Every room appears, empty or not; a click on an empty spot of a room's row opens the create form with the room and the dates already filled in ([Actions](actions.md)). Moving a bar to another row (another room) is not part of 1.0; the create and edit forms cover it.
+Every room appears, empty or not; a click on an empty spot of a room's row opens the create form with the room and the dates already filled in ([Actions](actions.md)), and a booking dragged onto another room's row moves there ([Moving to another row](moves.md#to-another-row)).
+
+## Rows under the groups
+
+The compact layout has one level: each group is a row. To keep a level above the rows (machines per department, people per project, rooms per floor), group the bars and give them rows of their own with `rowBy()`: the bars of a row sit side by side, overlapping ones stack into lanes, and the row grows as needed.
+
+```php
+use App\Models\Machine;
+use Packstub\Gantt\Row;
+
+->groupBy('department', label: 'department.name')     // optional: the level above
+->rowBy('machine', label: 'machine.name')             // a column, or a BelongsTo to another model
+->rows(fn () => Row::fromModels(Machine::query()->orderBy('name')->get(), group: 'department_id'))
+```
+
+Without `rows()`, the rows appear in the order of their first bar, inside the groups of their bars. List them to fix the order and show the empty ones, the way `groups()` does for groups:
+
+| `Row` method | What it does |
+| --- | --- |
+| `make($key)` | The value of the `rowBy()` column, or the related record's key. |
+| `label()` | The row's name (default: the key in headline case). |
+| `color()` | A dot before the name: what a bar's `color()` takes ([Bars](bars.md)), or a closure. |
+| `group()` | The group the row sits in, as `groupBy()` keys it. Without one, the row shows in every group: everyone can work on every project. |
+| `fromModels($records, $label = 'name', $color = null, $group = null)` | One row per model; `$group` is an attribute of the model (`department_id`) or a closure. |
+
+A listed row stays on the chart whatever the filters and the search leave, like a listed group; a row met on a bar shows while one of its bars is on the chart.
+
+Bars without a row (jobs nobody picked yet) share one row at the end of their group, called Unassigned, and stack into lanes like any other row. It shows while a bar of the group has no row. Name it with `unassignedRow()` and it stays in every group, empty or not, so a bar can always be dropped there:
+
+```php
+->unassignedRow('No machine')                  // always there: drop a bar on it to take it off its machine
+->unassignedRow('No machine', always: false)   // only the name: the row shows while a bar has no machine
+```
+
+The column has to be nullable for that: taking a bar off its row writes `null`.
+
+| You do | What happens |
+| --- | --- |
+| Drag a bar onto another row | It moves there: the `rowBy()` column, or the foreign key, is written with its dates ([Moving to another row](moves.md#to-another-row)). |
+| Drag it onto the same row in another group | It changes group and keeps its row. Only when the group can be written: `groupBy()` on a column or a `BelongsTo`. |
+| ↑/↓ on a focused bar | The previous or next row, across groups the same way. |
+| Drag it onto the unassigned row | It is taken off its row: the column is written `null`. |
+| Click or drag across a row | A new bar in that row and its group ([Actions](actions.md#create-on-an-empty-spot)); on the unassigned row, a bar without a row. |
+| Click a group's own row | A new bar in the group, without a row. |
+
+`->preventRowOverlap()` refuses a move, a resize or a new bar that would overlap another bar of the same row, in any group: a machine busy for one department is busy for all ([Rules](moves.md#rules)). Bars that touch, one ending as the next starts, never overlap; a bar without a row is never checked.
+
+A few things to know:
+
+- The column is yours: give it to the model's `$fillable` (like the group's foreign key), or a bar created on a row loses its row on save.
+- `rowBy()` does not go with `compact()` (that layout's rows are the groups) or `lineBy()`; the chart says so when it renders.
+- A relation to the chart's own model (parent tasks as rows) is not supported yet: it is the next step of [issue #41](https://github.com/packstub/filament-gantt/issues/41).

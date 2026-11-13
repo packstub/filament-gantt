@@ -188,15 +188,15 @@ trait InteractsWithGantt
      * @return array{ok: bool, bar?: array<string, mixed>, message?: string}
      */
     #[Renderless]
-    public function ganttMove(mixed $id, mixed $start, mixed $end = null, mixed $group = null): array
+    public function ganttMove(mixed $id, mixed $start, mixed $end = null, mixed $group = null, mixed $row = null): array
     {
         // A crafted request with another shape is refused like any other, not a 500 in the log.
-        if (! is_string($id) || ! is_string($start) || ($end !== null && ! is_string($end)) || ($group !== null && ! is_string($group))) {
+        if (! is_string($id) || ! is_string($start) || ($end !== null && ! is_string($end)) || ($group !== null && ! is_string($group)) || ($row !== null && ! is_string($row))) {
             return ['ok' => false, 'message' => __('packstub-gantt::gantt.failed')];
         }
 
         try {
-            $bar = $this->getGantt()->move($id, $start, $end, $group);
+            $bar = $this->getGantt()->move($id, $start, $end, $group, $row);
         } catch (MoveRejected $e) {
             return ['ok' => false, 'message' => $e->getMessage()];
         } catch (\Throwable $e) {
@@ -268,7 +268,7 @@ trait InteractsWithGantt
             $state = $gantt->getState();
             $this->ganttRendered = true;
         } else {
-            $state = ['window' => ['start' => null, 'end' => null], 'groups' => [], 'bars' => [], 'lines' => [], 'total' => 0];
+            $state = ['window' => ['start' => null, 'end' => null], 'groups' => [], 'bars' => [], 'lines' => [], 'rows' => [], 'total' => 0];
         }
 
         // Bar and create actions need Filament's action system on the component.
@@ -282,6 +282,7 @@ trait InteractsWithGantt
             'groups' => $state['groups'],
             'bars' => $state['bars'],
             'lines' => $state['lines'],
+            'rows' => $state['rows'],
             'total' => $state['total'],
             'grouped' => $gantt->isGrouped(),
             'compact' => $gantt->isCompact(),
@@ -289,6 +290,13 @@ trait InteractsWithGantt
             'lineLayout' => $gantt->showsLines(),
             'movePiecesAlone' => $gantt->movesPiecesAlone(),
             'preventLineOverlap' => $gantt->preventsLineOverlap(),
+            // rowBy(): rows that hold several bars, whether a bar may land on another one of its row, and whether a drag may change the group too.
+            'rowLayout' => $gantt->hasRows(),
+            'preventRowOverlap' => $gantt->preventsRowOverlap(),
+            'groupMoves' => $gantt->movesBetweenGroups(),
+            // The row of the bars without a row: its name, and whether it shows in every group, empty or not.
+            'unassignedLabel' => $gantt->hasRows() ? $gantt->getUnassignedRowLabel() : null,
+            'unassignedRow' => $gantt->showsUnassignedRow(),
             'scale' => $gantt->getScale()->value,
             'unit' => $gantt->getUnit()->value,
             'minMinutes' => $gantt->getMinMinutes(),
