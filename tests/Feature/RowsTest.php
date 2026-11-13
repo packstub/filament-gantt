@@ -140,7 +140,7 @@ it('loads the row\'s relation once, not once per bar', function () {
     DB::enableQueryLog();
     gantt()->rowBy('assignee')->getBars();
 
-    expect(collect(DB::getQueryLog())->filter(fn ($q) => str_contains($q['query'], '"users"'))->count())->toBe(1);
+    expect(collect(DB::getQueryLog())->filter(fn ($q) => preg_match('/["`]users["`]/', $q['query']) === 1)->count())->toBe(1);
 });
 
 it('refuses rowBy() with compact(), with lineBy(), to the chart\'s own model, or through a relation that is no BelongsTo', function (Closure $define, string $message) {
