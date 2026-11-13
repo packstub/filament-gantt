@@ -1882,8 +1882,13 @@ class Gantt
      */
     protected function parentRows(array $rows, array $bars, array $filters, string $search): array
     {
+        // Only the parents of this read have a computed span (see childSpanBars()).
+        $this->parentModels = [];
+
         foreach ($this->parentRecords($filters, $search) as $parent) {
-            $rows[(string) $parent->getKey()] ??= $this->presentParentRow($parent, listed: true);
+            // One listed in rows() keeps what the app said of it, and gets the parent's actions.
+            $key = (string) $parent->getKey();
+            $rows[$key] = [...$this->presentParentRow($parent, listed: true), ...($rows[$key] ?? [])];
         }
 
         $met = [];
@@ -2723,8 +2728,9 @@ class Gantt
             throw new MoveRejected($reason);
         }
 
-        // A piece moving with its whole line keeps its place among the others.
-        if (! $together && ($startChanged || $endChanged) && $this->preventsLineOverlap() && $this->overlapsLine($record, $newStart, $newEnd)) {
+        // A piece moving with its whole line keeps its place among the others, and so
+        // do the pieces that move along under one parent.
+        if (! $together && ($startChanged || $endChanged) && $this->preventsLineOverlap() && $this->overlapsLine($record, $newStart, $newEnd, $moving)) {
             throw new MoveRejected(__('packstub-gantt::gantt.overlaps'));
         }
 
@@ -2803,8 +2809,14 @@ class Gantt
         return $this->overlapsLine($record, $span[0], $span[1]);
     }
 
-    /** Whether [start, end) overlaps another piece of the record's line (a milestone inside a piece does; edges that touch do not). */
-    protected function overlapsLine(Model $record, CarbonImmutable $start, CarbonImmutable $end): bool
+    /**
+     * Whether [start, end) overlaps another piece of the record's line (a milestone
+     * inside a piece does; edges that touch do not), the pieces that move along with it
+     * (`$except`, by key) aside.
+     *
+     * @param  list<string>  $except
+     */
+    protected function overlapsLine(Model $record, CarbonImmutable $start, CarbonImmutable $end, array $except = []): bool
     {
         $line = $this->lineKey($record);
 
@@ -2815,7 +2827,7 @@ class Gantt
         $self = $record->getKey() === null ? null : (string) $record->getKey();
 
         foreach ($this->linePieces($line) as $piece) {
-            if ($self !== null && (string) $piece->getKey() === $self) {
+            if (($self !== null && (string) $piece->getKey() === $self) || in_array((string) $piece->getKey(), $except, true)) {
                 continue;
             }
 
