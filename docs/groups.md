@@ -165,4 +165,27 @@ A few things to know:
 
 - The column is yours: give it to the model's `$fillable` (like the group's foreign key), or a bar created on a row loses its row on save.
 - `rowBy()` does not go with `compact()` (that layout's rows are the groups) or `lineBy()`; the chart says so when it renders.
-- A relation to the chart's own model (parent tasks as rows) is not supported yet: it is the next step of [issue #41](https://github.com/packstub/filament-gantt/issues/41).
+
+## Parent tasks as rows
+
+Point `rowBy()` at a `BelongsTo` to the chart's own model and the parents become the rows: every record without a parent is a titled row, and the records with a parent are the bars on it.
+
+```php
+// Task::parent() is a BelongsTo to Task
+->groupBy('project', label: 'project.name')   // optional
+->rowBy('parent')
+```
+
+| What | How it shows |
+| --- | --- |
+| A task without a parent | A row, named by the chart's `label()` and dotted with its `color()`, in its own group. It is there with or without children, so a new parent is an empty row to click on. |
+| A task with a parent | A bar on its parent's row. Overlapping children stack into lanes. |
+| A child of a child | A bar on its parent's row, which is appended to the group of its bars. One level is what the layout is made for. |
+
+Name the rows differently with `label:`, an attribute of the parent or a closure that takes it: `->rowBy('parent', label: fn (Task $parent) => "#{$parent->id} {$parent->title}")`.
+
+The rows follow the chart's order (`sortBy()`, or by start with the parents without dates last). A parent's row stays while the parent matches the filters and the search, or while one of its children does: a search for "launch" shows the Launch row even when no child matches, and a child that matches brings its parent's row with it. Rows listed with `rows()` come first and always stay.
+
+A drag to another row gives the bar another parent, under the same rules as any row ([Moving to another row](moves.md#to-another-row)); a click or a drag across a parent's row creates a child of it, and a click on a group's own row creates a task without a parent, so a new row. There is no unassigned row on such a chart, and a task never lands under itself or under one of its own descendants.
+
+A parent's own dates draw nothing yet: the parent's span, and the settings around it, are the next steps of [issue #41](https://github.com/packstub/filament-gantt/issues/41).

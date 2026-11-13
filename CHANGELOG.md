@@ -11,6 +11,7 @@ Run `php artisan filament:assets` after updating.
 - Creating on a line's row adds a piece to that line; `preventLineOverlap()` keeps the pieces of a line apart
 - Rows that hold several bars: `rowBy('machine')` gives machines, people or rooms a row of their own under each group, `rows()` lists them in order, empty ones included
 - A bar dragged onto another row (or carried with ↑/↓) moves there; a click on a row creates in it; `preventRowOverlap()` keeps a row's bars apart
+- Parent tasks as rows: `rowBy('parent')` on a relation to the same model makes every task without a parent a titled row and its children the bars on it
 - Bars without a row share an Unassigned row at the end of their group; `unassignedRow('No machine')` names it and keeps it there to drop on
 
 ## 1.0.0-beta.2 - 2026-11-09
