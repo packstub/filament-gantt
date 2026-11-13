@@ -187,6 +187,8 @@ Pieces that overlap each other take the lanes they find and are not joined. The 
 
 Point `rowBy()` at a `BelongsTo` to the chart's own model and the parents become the rows: every record without a parent is a titled row, and the records with a parent are the bars on it.
 
+![Parent tasks as rows: every task a row with its own dates as a faint span, its subtasks on top of it, the two pieces of a split subtask joined on one lane](https://raw.githubusercontent.com/packstub/art/main/filament-gantt/docs/parent-rows.png)
+
 ```php
 // Task::parent() is a BelongsTo to Task
 ->groupBy('project', label: 'project.name')   // optional
@@ -237,3 +239,8 @@ use Packstub\Gantt\Enums\ParentSpan;
 A child still moves on its own, to another parent too. With `preventRowOverlap()` the span never counts: only the children of a row keep apart.
 
 The two rules answer two ways of working. With `keepInsideParent()` the parent is the plan and its children fit inside it: the browser stops a drag at the parent's dates, and the server refuses whatever gets past it, a form included (the modal stays open with a notification). With `writeSpanToParent()` the children are the plan and the parent follows: its columns always say what its children span, which is what `ParentSpan::FromChildren` draws without storing anything. For a save of your own, `Gantt::outsideParent($record)` gives the reason a record does not fit, or null.
+
+`writeSpanToParent()` reads the children through the chart's query and saves the parent as part of the child's change, so two things are worth knowing before you turn it on:
+
+- The dates come from the children the chart's query shows. On a chart whose query is narrowed per user (my tasks only), a parent would get the span of that user's children: use it on charts that show every child of a parent.
+- The parent is saved because its child changed, without asking the parent's own move rules (`movable()`, `canMove()`, the policy): whoever may move a child changes the parent's dates through it. `BarMoved` and `afterMove()` are for the child that moved.

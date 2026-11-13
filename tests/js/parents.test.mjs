@@ -435,3 +435,34 @@ test('with writeSpanToParent() a child\'s move reloads the chart for its parent\
     await tick()
     assert.equal(c.wire.refreshes.length, 1)
 })
+
+test('a span that is the first piece of a split line still moves as a parent: its children follow, by drag and by keys', () => fakeTimers((timers) => {
+    // Launch continues on Ideas' row (line 10): the span's children are what it carries, not the line
+    const split = () => {
+        const c = parentChart({
+            lineLayout: true,
+            lines: [{ key: '10', label: 'Launch', pieces: [
+                { id: '10', group: '', row: '10', start: '2026-10-05 00:00', end: '2026-10-21 00:00', allDay: true, milestone: false, movable: true, regroupable: false },
+                { id: '21', group: '', row: '20', start: '2026-10-12 00:00', end: '2026-10-14 00:00', allDay: true, milestone: false, movable: true, regroupable: true },
+            ] }],
+        })
+        for (const b of c.bars) b.line = b.id === '21' ? '10' : b.id
+        c.rebuild()
+        return c
+    }
+
+    let c = split()
+    const p = press(c, rowBar(c, '10'))
+    p.move(96)
+    assert.deepEqual(['10', '11', '12', '21'].map((id) => c.dates(rowBar(c, id))), ['Oct 7, 2026 – Oct 22, 2026', 'Oct 7, 2026 – Oct 9, 2026', 'Oct 9, 2026 – Oct 11, 2026', 'Oct 12, 2026 – Oct 13, 2026'])
+    p.up(96)
+    assert.deepEqual(c.wire.parents, [['10', '2026-10-07 00:00']])
+    assert.deepEqual(c.wire.lines ?? [], [])
+
+    c = split()
+    key(c, rowBar(c, '10'), 'ArrowRight')
+    assert.deepEqual(['10', '11', '12', '21'].map((id) => c.dates(rowBar(c, id))), ['Oct 6, 2026 – Oct 21, 2026', 'Oct 6, 2026 – Oct 8, 2026', 'Oct 8, 2026 – Oct 10, 2026', 'Oct 12, 2026 – Oct 13, 2026'])
+    fire(timers)
+    assert.deepEqual(c.wire.parents, [['10', '2026-10-06 00:00']])
+    assert.deepEqual(c.wire.lines ?? [], [])
+}))
