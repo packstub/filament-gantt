@@ -109,6 +109,29 @@ test('a met row shows only in the groups of its bars, a listed one in its group 
     assert.equal(new Set(view.rows.map((r) => r.key)).size, view.rows.length)
 })
 
+test('parent tasks as rows: a listed row with a group sits in that group only, with or without bars', () => {
+    const view = layout([bar({ id: '3', group: 'a', row: '1', start: '2026-10-05', end: '2026-10-08' }), bar({ id: '5', group: 'a', row: '9', start: '2026-10-05', end: '2026-10-08' })], {
+        start: '2026-10-01', end: '2026-10-31', today: '2026-10-14', pxPerDay: 48, rowHeight: 36, grouped: true, rowLayout: true,
+        groups: [{ key: 'a', label: 'A' }, { key: '', label: 'Ungrouped' }],
+        rows: [
+            { key: '1', label: 'Launch', color: 'sky', group: 'a', listed: true },
+            { key: '2', label: 'Ideas', color: null, group: 'a', listed: true },
+            { key: '4', label: 'Loose', color: null, group: '', listed: true },
+            // a parent the filters left out: only where its bar is
+            { key: '9', label: 'Filtered out', color: null, group: null, listed: false },
+        ],
+    }, 'day')
+
+    assert.deepEqual(view.rows.map((r) => [r.label, r.row, r.bars.map((b) => b.id).join(',')]), [
+        ['A', undefined, ''],
+        ['Launch', '1', '3'],
+        ['Ideas', '2', ''],
+        ['Filtered out', '9', '5'],
+        ['Ungrouped', undefined, ''],
+        ['Loose', '4', ''],
+    ])
+})
+
 test('the label column shows a row\'s own colour, and the count only on a group\'s row', () => {
     const c = rowChart()
 

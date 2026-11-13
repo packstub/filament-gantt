@@ -79,7 +79,12 @@ and the Pest suite again on MySQL 8.4 and PostgreSQL 17 (the `databases` job): S
   it (`commitLine()` → `ganttMoveLine`), others move alone; `walls()` clamps with `preventLineOverlap`. The server
   checks overlap in `planMove()` (not along a line, not for a row change alone) and in the create/edit actions'
   `mutateDataUsing` (`ganttGuardOverlap()`: notification + `halt()`). `canCreateOnLine()` is the line's `canCreateIn()`.
-- Rows (`rowBy()`, issue #41 step 1): a column or a `BelongsTo` to another model (self-reference throws until step 2);
+- Parent rows (issue #41 step 2): `rowBy()` through a `BelongsTo` to the chart's own model (`hasParentRows()`) makes
+  the parents the rows: `windowQuery()` and `spanOf()` keep only the records with a parent, `parentRows()` lists the
+  records without one that `filteredQuery()` leaves (`listed: true`, each in its own group, which `getGroups()` adds)
+  and names the parents met on a bar only through `baseQuery()` (never the bar's relation); no unassigned row
+  (`knowsRowKey('')` is false), `descendsFrom()` refuses a loop in `planMove()`. The browser needs nothing for it.
+- Rows (`rowBy()`, issue #41 step 1): a column or a `BelongsTo`;
   `hasRows()` throws with `compact()` or `lineBy()`. `presentBar()` adds `row` ('' for none), `getState()` adds `rows`
   (`rows()` first with `listed: true`, then those met on bars with `listed: false`). In `layout()` a group holds its
   listed rows (`group` null: every group), then met ones, then the unassigned row (`row` '': the bars without a

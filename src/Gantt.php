@@ -114,6 +114,9 @@ class Gantt
     /** getRowForeignKey(), resolved once per instance: every bar asks. */
     protected ?string $rowForeignKeyCache = null;
 
+    /** hasParentRows(), resolved once per instance. */
+    protected ?bool $parentRowsCache = null;
+
     protected bool|Closure $preventRowOverlap = false;
 
     protected ?bool $preventRowOverlapCache = null;
@@ -411,12 +414,19 @@ class Gantt
      * A bar dragged (or carried with ↑/↓) onto another row gets that row's key written,
      * in the same transaction as its dates; a click on a row creates a bar in it. Not
      * with compact() (its rows are groups) or lineBy().
+     *
+     * Through a BelongsTo to the chart's own model (`rowBy('parent')`) the parents are
+     * the rows: every record of the chart's query without a parent is a row, named by
+     * label() (or `$label`: an attribute of the parent, or a closure taking it), empty
+     * until a child is added, and the records with a parent are the bars. Such a row
+     * stays while the parent matches the filters and the search, or a bar on it does.
      */
     public function rowBy(?string $attribute, string|Closure|null $label = null): static
     {
         $this->rowAttribute = $attribute;
         $this->rowLabel = $label;
         $this->rowForeignKeyCache = null;
+        $this->parentRowsCache = null;
 
         return $this;
     }
@@ -469,6 +479,7 @@ class Gantt
      * that group has no row. Give it a name (`'No machine'`, or a closure returning one)
      * and it stays in every group, empty or not: a bar dropped on it is taken off its
      * row, a click on it creates a bar without one. `always: false` only renames it.
+     * Not on a chart whose rows are parent tasks: a record without a parent is a row there.
      */
     public function unassignedRow(string|Closure|null $label = null, bool $always = true): static
     {
@@ -1025,7 +1036,7 @@ class Gantt
     /** Whether the row without a row shows in every group, empty or not (see unassignedRow()). */
     public function showsUnassignedRow(): bool
     {
-        return $this->hasRows() && $this->unassignedRowAlways;
+        return $this->hasRows() && $this->unassignedRowAlways && ! $this->hasParentRows();
     }
 
     /**
@@ -1042,7 +1053,7 @@ class Gantt
      *
      * @internal
      *
-     * @throws LogicException for a relation that is no BelongsTo to another model
+     * @throws LogicException for a relation that is no BelongsTo
      */
     public function getRowForeignKey(): ?string
     {
@@ -1062,7 +1073,7 @@ class Gantt
     /**
      * The rowBy() relation, or null for a column.
      *
-     * @throws LogicException for anything but a BelongsTo to another model
+     * @throws LogicException for anything but a BelongsTo
      */
     protected function rowRelation(): ?BelongsTo
     {
@@ -1078,11 +1089,26 @@ class Gantt
             throw new LogicException("The Gantt's rowBy() takes a column or a BelongsTo relation: [{$this->rowAttribute}] is neither. A row is keyed by the related record's key.");
         }
 
-        if ($relation->getRelated()::class === $model::class) {
-            throw new LogicException("The Gantt's rowBy() does not take a relation to the chart's own model yet: parent tasks as rows come with issue #41. For a task split into pieces, see lineBy().");
+        return $relation;
+    }
+
+    /**
+     * Whether the rows are the chart's own records: rowBy() through a BelongsTo to the
+     * same model, so a record without a parent is a row and its children are the bars.
+     */
+    public function hasParentRows(): bool
+    {
+        if ($this->parentRowsCache !== null) {
+            return $this->parentRowsCache;
         }
 
-        return $relation;
+        if (! $this->hasRows()) {
+            return $this->parentRowsCache = false;
+        }
+
+        $relation = $this->rowRelation();
+
+        return $this->parentRowsCache = $relation !== null && $relation->getRelated()::class === $this->newModel()::class;
     }
 
     /**
@@ -1533,13 +1559,14 @@ class Gantt
         $records = (clone $query)->limit($limit + 1)->get();
         $total = $records->count() > $limit ? (clone $query)->toBase()->getCountForPagination() : $records->count();
         $bars = $this->presentBars($records->take($limit));
+        $rows = $this->getRows($bars, $filters, $search);
 
         return [
             'window' => ['start' => $window['start']->toDateString(), 'end' => $window['end']->toDateString()],
-            'groups' => $this->getGroups($bars),
+            'groups' => $this->getGroups($bars, $rows),
             'bars' => $bars,
             'lines' => $this->getLines($bars),
-            'rows' => $this->getRows($bars),
+            'rows' => $rows,
             // More than max_bars in the window: the first ones are drawn and the toolbar says so.
             'total' => $total,
         ];
@@ -1582,6 +1609,11 @@ class Gantt
 
         $query->whereNotNull($start);
 
+        // Parent tasks as rows: the bars are the records with a parent.
+        if ($this->hasParentRows()) {
+            $query->whereNotNull($query->qualifyColumn($this->getRowForeignKey()));
+        }
+
         if ($from !== null && $until !== null) {
             // Overlapping the window: starts before the day after its last day, and
             // ends on or after its first day (a milestone has no end: its start
@@ -1598,11 +1630,10 @@ class Gantt
 
         // The group's label reads the relation on every bar: loaded once, not per bar
         // (and never lazily, which strict mode forbids). The predecessors relation too.
-        if ($this->groupRelation() !== null && ! $this->groupLabel instanceof Closure && ! array_key_exists($this->groupAttribute, $query->getEagerLoads())) {
-            $query->with($this->groupAttribute);
-        }
+        $this->withGroupRelation($query);
 
-        if ($this->hasRows() && $this->rowRelation() !== null && ! $this->rowLabel instanceof Closure && ! array_key_exists($this->rowAttribute, $query->getEagerLoads())) {
+        // A parent's row is named through the chart's query (see parentRows()), never from a bar.
+        if ($this->hasRows() && ! $this->hasParentRows() && $this->rowRelation() !== null && ! $this->rowLabel instanceof Closure && ! array_key_exists($this->rowAttribute, $query->getEagerLoads())) {
             $query->with($this->rowAttribute);
         }
 
@@ -1617,6 +1648,14 @@ class Gantt
             ->orderBy($query->getModel()->getQualifiedKeyName());
     }
 
+    /** The groupBy() relation, loaded with the query unless the app already loads it or labels the groups itself. */
+    protected function withGroupRelation(Builder $query): void
+    {
+        if ($this->groupRelation() !== null && ! $this->groupLabel instanceof Closure && ! array_key_exists($this->groupAttribute, $query->getEagerLoads())) {
+            $query->with($this->groupAttribute);
+        }
+    }
+
     /**
      * The groups in order: the definition's, plus any met on a bar that was not
      * listed, or the bars' in order of first appearance.
@@ -1624,9 +1663,10 @@ class Gantt
      * @internal
      *
      * @param  list<array<string, mixed>>  $bars
+     * @param  list<array<string, mixed>>  $rows  getRows(): a parent's row brings its group, bars or not
      * @return list<array<string, mixed>>
      */
-    public function getGroups(array $bars): array
+    public function getGroups(array $bars, array $rows = []): array
     {
         $groups = [];
 
@@ -1639,6 +1679,16 @@ class Gantt
 
             if (! array_key_exists($key, $groups)) {
                 $groups[$key] = Group::make($key)->label($this->groupLabels[$key] ?? null)->toArray();
+            }
+        }
+
+        if ($this->isGrouped() && $this->hasParentRows()) {
+            foreach ($rows as $row) {
+                $key = $row['group'] ?? null;
+
+                if ($key !== null && ! array_key_exists($key, $groups)) {
+                    $groups[$key] = Group::make($key)->label($this->groupLabels[$key] ?? null)->toArray();
+                }
             }
         }
 
@@ -1657,12 +1707,17 @@ class Gantt
      * row without a group shows in every group; a row met on a bar only in the groups
      * of its bars.
      *
+     * Parent tasks as rows: after the listed ones, every record without a parent the
+     * filters and the search leave, in the chart's order and in its own group (`listed`
+     * too: the row is there with or without bars), then the parents met on a bar only.
+     *
      * @internal
      *
      * @param  list<array<string, mixed>>  $bars
+     * @param  array<string, mixed>  $filters
      * @return list<array{key: string, label: string, color: ?string, group: ?string, listed: bool}>
      */
-    public function getRows(array $bars): array
+    public function getRows(array $bars, array $filters = [], string $search = ''): array
     {
         if (! $this->hasRows()) {
             return [];
@@ -1682,6 +1737,10 @@ class Gantt
             $rows[$row->getKey()] ??= [...$row->toArray(), ...($grouped ? [] : ['group' => null]), 'listed' => true];
         }
 
+        if ($this->hasParentRows()) {
+            return array_values($this->parentRows($rows, $bars, $filters, $search));
+        }
+
         foreach ($bars as $bar) {
             $key = (string) ($bar['row'] ?? '');
 
@@ -1691,6 +1750,106 @@ class Gantt
         }
 
         return array_values($rows);
+    }
+
+    /**
+     * The rows of a chart whose rows are parent tasks, added to the listed ones: the
+     * records without a parent that match (each in its own group), then the parents
+     * the bars name that did not: a parent the filters left out, or a record that has
+     * a parent itself. Every one is read through the chart's query, so a record the
+     * user may not see never names a row (its key does).
+     *
+     * @param  array<string, array<string, mixed>>  $rows
+     * @param  list<array<string, mixed>>  $bars
+     * @param  array<string, mixed>  $filters
+     * @return array<string, array<string, mixed>>
+     */
+    protected function parentRows(array $rows, array $bars, array $filters, string $search): array
+    {
+        foreach ($this->parentRecords($filters, $search) as $parent) {
+            $rows[(string) $parent->getKey()] ??= $this->presentParentRow($parent, listed: true);
+        }
+
+        $met = [];
+
+        foreach ($bars as $bar) {
+            $key = (string) ($bar['row'] ?? '');
+
+            if ($key !== '' && ! array_key_exists($key, $rows)) {
+                $met[$key] = true;
+            }
+        }
+
+        if ($met === []) {
+            return $rows;
+        }
+
+        $query = $this->baseQuery();
+        $this->withGroupRelation($query);
+        $found = $query->whereKey(array_values(array_filter(array_keys($met), fn ($key) => $this->keyShaped((string) $key))))->get()->keyBy(fn (Model $record) => (string) $record->getKey());
+
+        foreach (array_keys($met) as $key) {
+            $key = (string) $key;
+            $rows[$key] = $found->has($key)
+                ? $this->presentParentRow($found->get($key), listed: false)
+                : [...Row::make($key)->toArray(), 'group' => null, 'listed' => false];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * The records without a parent the filters and the search leave, in the chart's
+     * order (without sortBy(): by start, the ones without dates last, on every
+     * database), at most `max_bars` of them.
+     *
+     * @param  array<string, mixed>  $filters
+     * @return Collection<int, Model>
+     */
+    protected function parentRecords(array $filters, string $search): Collection
+    {
+        $query = $this->filteredQuery($filters, $search);
+        $query->whereNull($query->qualifyColumn($this->getRowForeignKey()));
+        $this->withGroupRelation($query);
+
+        if ($this->sort === null) {
+            $start = $query->getGrammar()->wrap($query->qualifyColumn($this->startAttribute));
+            $query->orderByRaw("case when {$start} is null then 1 else 0 end")->orderBy($query->qualifyColumn($this->startAttribute));
+        } else {
+            $query->orderBy($query->qualifyColumn($this->sort[0]), $this->sort[1]);
+        }
+
+        return $query
+            ->orderBy($query->getModel()->getQualifiedKeyName())
+            ->limit(max(1, (int) config('filament-gantt.max_bars', 2000)))
+            ->get();
+    }
+
+    /**
+     * A parent task as a row: named by label() (or rowBy()'s label), with color() as
+     * its dot. A listed one sits in its own group; one met on a bar only where its bars are.
+     *
+     * @return array{key: string, label: string, color: ?string, group: ?string, listed: bool}
+     */
+    protected function presentParentRow(Model $parent, bool $listed): array
+    {
+        $group = $this->isGrouped() ? $this->groupKey($parent) ?? '' : null;
+
+        if ($group !== null && $group !== '' && ! isset($this->groupLabels[$group])) {
+            $this->groupLabels[$group] = $this->groupLabelFor($parent, $group);
+        }
+
+        return [
+            'key' => (string) $parent->getKey(),
+            'label' => match (true) {
+                $this->rowLabel instanceof Closure => static::text(($this->rowLabel)($parent)),
+                is_string($this->rowLabel) => static::text(data_get($parent, $this->rowLabel) ?? $parent->getKey()),
+                default => $this->labelOf($parent),
+            },
+            'color' => $this->color === null ? null : Bar::colorName($this->read($this->color, $parent)),
+            'group' => $listed ? $group : null,
+            'listed' => $listed,
+        ];
     }
 
     /**
@@ -1769,7 +1928,7 @@ class Gantt
             $row = $this->rowKey($record);
             $bar['row'] = $row ?? '';
 
-            if ($row !== null && ! isset($this->rowLabels[$row])) {
+            if ($row !== null && ! isset($this->rowLabels[$row]) && ! $this->hasParentRows()) {
                 $this->rowLabels[$row] = $this->rowLabelFor($record, $row);
             }
         }
@@ -2130,6 +2289,11 @@ class Gantt
             }
 
             if (! $this->knowsRowKey($row)) {
+                throw new MoveRejected(__('packstub-gantt::gantt.unknown_group'));
+            }
+
+            // Parent tasks as rows: never under itself, or under a record that descends from it.
+            if ($newRow !== null && $this->hasParentRows() && $this->descendsFrom($newRow, $record)) {
                 throw new MoveRejected(__('packstub-gantt::gantt.unknown_group'));
             }
         }
@@ -2705,7 +2869,9 @@ class Gantt
     /**
      * Whether a row key names a row on the chart (see rowBy()): one listed in rows(),
      * or one a bar of the chart's query is in; '' (the unassigned row) when
-     * unassignedRow() keeps it on the chart or there is a bar without a row. A related record that exists but has no row on the chart is not one.
+     * unassignedRow() keeps it on the chart or there is a bar without a row. A related
+     * record that exists but has no row on the chart is not one. Parent tasks as rows:
+     * a record of the chart's query without a parent, or one a bar names as its parent.
      */
     protected function knowsRowKey(?string $row): bool
     {
@@ -2717,7 +2883,8 @@ class Gantt
         $column = $query->qualifyColumn($this->getRowForeignKey());
 
         if ($row === '') {
-            return $this->unassignedRowAlways || $query->whereNull($column)->exists();
+            // Parent tasks as rows: a record without a parent is a row, there is no row for "none".
+            return ! $this->hasParentRows() && ($this->unassignedRowAlways || $query->whereNull($column)->exists());
         }
 
         foreach ($this->definedRows() as $defined) {
@@ -2726,7 +2893,47 @@ class Gantt
             }
         }
 
-        return $this->rowKeyShaped($row) && $query->where($column, $row)->exists();
+        if (! $this->rowKeyShaped($row)) {
+            return false;
+        }
+
+        // A parent is a row with or without bars, as long as the chart's query shows it.
+        if ($this->hasParentRows() && (clone $query)->whereKey($row)->whereNull($column)->exists()) {
+            return true;
+        }
+
+        return $query->where($column, $row)->exists();
+    }
+
+    /**
+     * Whether a record (by key) is another one or descends from it, following the
+     * rowBy() parent upwards, scopes aside: a parent the user cannot see still closes
+     * a loop. A chain longer than 32 counts as one.
+     */
+    protected function descendsFrom(string $key, Model $ancestor): bool
+    {
+        $attribute = $this->getRowForeignKey();
+        $target = (string) $ancestor->getKey();
+
+        for ($depth = 0; $depth < 32; $depth++) {
+            if ($key === $target) {
+                return true;
+            }
+
+            if (! $this->keyShaped($key)) {
+                return false;
+            }
+
+            $parent = $ancestor->newQueryWithoutScopes()->whereKey($key)->value($attribute);
+
+            if ($parent === null || $parent === '') {
+                return false;
+            }
+
+            $key = (string) $parent;
+        }
+
+        return true;
     }
 
     /**
@@ -2738,6 +2945,11 @@ class Gantt
      */
     protected function rowShowsIn(?string $row, ?string $group): bool
     {
+        // Parent tasks as rows: there is no row for the records without a parent.
+        if ($row === null && $this->hasParentRows()) {
+            return false;
+        }
+
         if ($row === null && $this->unassignedRowAlways) {
             return true;
         }
@@ -2764,6 +2976,16 @@ class Gantt
         $query = $this->baseQuery();
         $rowColumn = $query->qualifyColumn($this->getRowForeignKey());
         $groupColumn = $query->qualifyColumn($this->getGroupForeignKey());
+
+        // A parent's row sits in the parent's own group, bars or not.
+        if ($row !== null && $this->hasParentRows()) {
+            $parent = (clone $query)->whereKey($row)->whereNull($rowColumn);
+            $group === null ? $parent->whereNull($groupColumn) : $parent->where($groupColumn, $group);
+
+            if ($parent->exists()) {
+                return true;
+            }
+        }
 
         $row === null ? $query->whereNull($rowColumn) : $query->where($rowColumn, $row);
         $group === null ? $query->whereNull($groupColumn) : $query->where($groupColumn, $group);
@@ -2859,6 +3081,11 @@ class Gantt
         $query = $this->filteredQuery($filters, $search);
         $start = $query->qualifyColumn($this->startAttribute);
         $end = $query->qualifyColumn($this->endAttribute);
+
+        // Parent tasks as rows: only the bars count, a parent's own dates draw nothing.
+        if ($this->hasParentRows()) {
+            $query->whereNotNull($query->qualifyColumn($this->getRowForeignKey()));
+        }
 
         // The two columns alone, from a subquery: whatever the chart's query selects
         // (withCount, addSelect, a join) never sits next to an aggregate without a
