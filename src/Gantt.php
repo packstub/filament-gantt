@@ -21,6 +21,7 @@ use Illuminate\Support\Traits\Conditionable;
 use InvalidArgumentException;
 use LogicException;
 use Packstub\Gantt\Enums\FiltersLayout;
+use Packstub\Gantt\Enums\ParentSpan;
 use Packstub\Gantt\Enums\Scale;
 use Packstub\Gantt\Enums\Unit;
 use Packstub\Gantt\Events\BarMoved;
@@ -116,6 +117,13 @@ class Gantt
 
     /** hasParentRows(), resolved once per instance. */
     protected ?bool $parentRowsCache = null;
+
+    protected ParentSpan $parentSpan = ParentSpan::Own;
+
+    protected bool $moveChildrenWithParent = true;
+
+    /** @var array<string, Model> the parents without a parent of their own met while the rows were read, by key */
+    protected array $parentModels = [];
 
     protected bool|Closure $preventRowOverlap = false;
 
@@ -442,6 +450,37 @@ class Gantt
     {
         $this->rows = $rows;
         $this->definedRowsCache = null;
+
+        return $this;
+    }
+
+    /**
+     * What a parent task draws on its row, on a chart whose rows are parent tasks
+     * (rowBy() through a BelongsTo to the chart's own model): its own dates
+     * (`ParentSpan::Own`, the default), the extent of its children
+     * (`ParentSpan::FromChildren`: computed from the children the chart's query shows,
+     * nothing stored, never resized, so a parent without dates has one too) or nothing
+     * (`ParentSpan::None`). The span is drawn faint behind the children, over the
+     * row's whole height; dragging it moves the parent and its children together (see
+     * moveChildrenWithParent()), resizing it changes the parent's dates only.
+     */
+    public function parentSpan(ParentSpan|string $span = ParentSpan::Own): static
+    {
+        $this->parentSpan = $span instanceof ParentSpan
+            ? $span
+            : (ParentSpan::tryFrom($span) ?? throw new InvalidArgumentException("[{$span}] is not a parent span: own, children or none."));
+
+        return $this;
+    }
+
+    /**
+     * Whether dragging a parent's span moves every child by the same amount (the
+     * default), or the parent alone. With `ParentSpan::FromChildren` the span is its
+     * children: without this it cannot be dragged at all.
+     */
+    public function moveChildrenWithParent(bool $condition = true): static
+    {
+        $this->moveChildrenWithParent = $condition;
 
         return $this;
     }
@@ -1048,6 +1087,26 @@ class Gantt
         return $this->getGroupForeignKey() !== null;
     }
 
+    public function getParentSpan(): ParentSpan
+    {
+        return $this->parentSpan;
+    }
+
+    public function movesChildrenWithParent(): bool
+    {
+        return $this->moveChildrenWithParent;
+    }
+
+    /**
+     * Whether a record is a row of a chart whose rows are parent tasks: it has no parent.
+     *
+     * @internal
+     */
+    public function isParentRecord(Model $record): bool
+    {
+        return $this->hasParentRows() && $this->rowKey($record) === null;
+    }
+
     /**
      * The attribute a bar's row is written to: the column, or the BelongsTo's foreign key.
      *
@@ -1212,7 +1271,8 @@ class Gantt
     /** Whether this record may be dragged to another row: the chart groups (or rows, see rowBy()) by something writable, and the rules allow it. */
     public function isRegroupable(Model $record): bool
     {
-        return ($this->getGroupForeignKey() !== null || $this->hasRows()) && ! $this->isReadOnly() && $this->canMoveRecord($record) && (bool) $this->evaluate($this->regroupable, $record);
+        // A parent is its row: it is never carried to another one, nor to another group without its children.
+        return ($this->getGroupForeignKey() !== null || $this->hasRows()) && ! $this->isReadOnly() && ! $this->isParentRecord($record) && $this->canMoveRecord($record) && (bool) $this->evaluate($this->regroupable, $record);
     }
 
     public function getMinMinutes(): int
@@ -1560,10 +1620,16 @@ class Gantt
         $total = $records->count() > $limit ? (clone $query)->toBase()->getCountForPagination() : $records->count();
         $bars = $this->presentBars($records->take($limit));
         $rows = $this->getRows($bars, $filters, $search);
+        $groups = $this->getGroups($bars, $rows);
+
+        // ParentSpan::FromChildren: each parent's span, computed, after the bars it is made of.
+        if ($this->hasParentRows() && $this->parentSpan === ParentSpan::FromChildren) {
+            $bars = [...$bars, ...$this->childSpanBars($window['start'], $window['end'])];
+        }
 
         return [
             'window' => ['start' => $window['start']->toDateString(), 'end' => $window['end']->toDateString()],
-            'groups' => $this->getGroups($bars, $rows),
+            'groups' => $groups,
             'bars' => $bars,
             'lines' => $this->getLines($bars),
             'rows' => $rows,
@@ -1609,8 +1675,9 @@ class Gantt
 
         $query->whereNotNull($start);
 
-        // Parent tasks as rows: the bars are the records with a parent.
-        if ($this->hasParentRows()) {
+        // Parent tasks as rows: the bars are the records with a parent, and with
+        // ParentSpan::Own the parents that have dates (their span).
+        if ($this->hasParentRows() && $this->parentSpan !== ParentSpan::Own) {
             $query->whereNotNull($query->qualifyColumn($this->getRowForeignKey()));
         }
 
@@ -1839,6 +1906,10 @@ class Gantt
             $this->groupLabels[$group] = $this->groupLabelFor($parent, $group);
         }
 
+        if ($this->rowKey($parent) === null) {
+            $this->parentModels[(string) $parent->getKey()] = $parent;
+        }
+
         return [
             'key' => (string) $parent->getKey(),
             'label' => match (true) {
@@ -1849,17 +1920,150 @@ class Gantt
             'color' => $this->color === null ? null : Bar::colorName($this->read($this->color, $parent)),
             'group' => $listed ? $group : null,
             'listed' => $listed,
+            // The parent's actions, on the row's name: a span covered by its children stays reachable.
+            ...($this->actionsResolver ? ['actions' => $this->actionsOf($parent)] : []),
         ];
+    }
+
+    /**
+     * The actions this user may run on a record, within those its Bar offers (see presentBar()).
+     *
+     * @return list<string>
+     */
+    protected function actionsOf(Model $record): array
+    {
+        $allowed = $this->actionsResolver ? ($this->actionsResolver)($record) : [];
+        $custom = $this->bar ? ($this->bar)($record) : null;
+        $offered = $custom instanceof Bar ? ($custom->toArray()['actions'] ?? null) : null;
+
+        return array_values($offered === null ? $allowed : array_intersect($offered, $allowed));
+    }
+
+    /**
+     * ParentSpan::FromChildren: the span of every parent met while the rows were read
+     * (see parentRows()) whose children reach into the window, as bars.
+     *
+     * @return list<array<string, mixed>>
+     */
+    protected function childSpanBars(CarbonInterface $from, CarbonInterface $until): array
+    {
+        $first = $from->toImmutable()->startOfDay();
+        $after = $until->toImmutable()->startOfDay()->addDay();
+        $bars = [];
+
+        foreach ($this->childSpans(array_keys($this->parentModels)) as $key => [$start, $end]) {
+            if ($start < $after && $end >= $first) {
+                $bars[] = $this->presentSpanBar($this->parentModels[$key], $start, $end);
+            }
+        }
+
+        return $bars;
+    }
+
+    /**
+     * From the earliest start to the latest end among the children of each parent, as
+     * the chart's query shows them (the filters aside: a filter never shrinks a
+     * parent). One query for all of them.
+     *
+     * @param  list<string|int>  $keys
+     * @return array<string, array{0: CarbonImmutable, 1: CarbonImmutable}>
+     */
+    protected function childSpans(array $keys): array
+    {
+        $keys = array_values(array_filter(array_map('strval', $keys), fn (string $key) => $key !== '' && $this->keyShaped($key)));
+
+        if ($keys === []) {
+            return [];
+        }
+
+        $query = $this->baseQuery();
+        $parent = $query->qualifyColumn($this->getRowForeignKey());
+        $start = $query->qualifyColumn($this->startAttribute);
+        $end = $query->qualifyColumn($this->endAttribute);
+
+        $query->whereIn($parent, $keys)->whereNotNull($start);
+
+        // As spanOf(): the columns alone from a subquery, then the aggregate.
+        $inner = $query->toBase();
+        $inner = ($inner->limit === null && $inner->offset === null ? $inner->cloneWithout(['columns', 'orders'])->cloneWithoutBindings(['select', 'order']) : $inner->cloneWithout(['columns'])->cloneWithoutBindings(['select']))
+            ->select(["{$parent} as gantt_parent", "{$start} as gantt_start", "{$end} as gantt_end"]);
+
+        $rows = $inner->newQuery()
+            ->fromSub($inner, 'gantt_children')
+            ->selectRaw('gantt_parent, min(gantt_start) as gantt_min, max(gantt_end) as gantt_max, max(gantt_start) as gantt_max_start')
+            ->groupBy('gantt_parent')
+            ->get();
+
+        $dateOnly = $this->isDateOnly($this->newModel());
+        $spans = [];
+
+        foreach ($rows as $row) {
+            $min = $this->toCarbon($row->gantt_min ?? null);
+
+            if ($min === null) {
+                continue;
+            }
+
+            // A date-only end is its last day: the chart's end is the day after it.
+            $max = $this->toCarbon($row->gantt_max ?? null);
+            $lastStart = $this->toCarbon($row->gantt_max_start ?? null);
+
+            if ($dateOnly) {
+                $min = $min->startOfDay();
+                $max = $max?->startOfDay()->addDay();
+                $lastStart = $lastStart?->startOfDay();
+            }
+
+            $spans[(string) $row->gantt_parent] = [$min, collect([$max, $lastStart, $min])->filter()->max()];
+        }
+
+        return $spans;
+    }
+
+    /**
+     * A parent's computed span as a bar: never resized, moved only with its children.
+     *
+     * @return array<string, mixed>
+     */
+    protected function presentSpanBar(Model $parent, CarbonImmutable $start, CarbonImmutable $end): array
+    {
+        $bar = $this->presentBar($parent, [$start, $end, $end <= $start]);
+
+        return [
+            ...$bar,
+            'allDay' => $this->isDateOnly($this->newModel()),
+            'computed' => true,
+            'resizable' => false,
+            'movable' => $bar['movable'] && $this->moveChildrenWithParent,
+        ];
+    }
+
+    /**
+     * A parent's bar as the chart draws it now: its own span, or with
+     * ParentSpan::FromChildren the one computed from its children; null without one.
+     *
+     * @return array<string, mixed>|null
+     */
+    protected function parentBar(Model $parent): ?array
+    {
+        if ($this->parentSpan === ParentSpan::Own) {
+            return $this->presentBar($parent);
+        }
+
+        $span = $this->childSpans([$parent->getKey()])[(string) $parent->getKey()] ?? null;
+
+        return $span === null || $this->parentSpan === ParentSpan::None ? null : $this->presentSpanBar($parent, $span[0], $span[1]);
     }
 
     /**
      * @internal
      *
+     * @param  array{0: CarbonImmutable, 1: CarbonImmutable, 2: bool}|null  $span  instead of the record's own (a parent's computed span)
      * @return array<string, mixed>|null null when the record has no start
      */
-    public function presentBar(Model $record): ?array
+    public function presentBar(Model $record, ?array $span = null): ?array
     {
-        $span = $this->span($record);
+        $span ??= $this->span($record);
 
         if ($span === null) {
             return null;
@@ -1928,7 +2132,13 @@ class Gantt
             $row = $this->rowKey($record);
             $bar['row'] = $row ?? '';
 
-            if ($row !== null && ! isset($this->rowLabels[$row]) && ! $this->hasParentRows()) {
+            if ($this->hasParentRows()) {
+                // A parent's own bar is its span: on its own row, behind its children.
+                if ($row === null) {
+                    $bar['row'] = (string) $record->getKey();
+                    $bar['parent'] = true;
+                }
+            } elseif ($row !== null && ! isset($this->rowLabels[$row])) {
                 $this->rowLabels[$row] = $this->rowLabelFor($record, $row);
             }
         }
@@ -2202,7 +2412,7 @@ class Gantt
             [$from, $until, $milestone] = $span;
 
             try {
-                $plan = $this->planMove($piece, $from->addMinutes($delta), $milestone ? null : $until->addMinutes($delta), $group, alongLine: true);
+                $plan = $this->planMove($piece, $from->addMinutes($delta), $milestone ? null : $until->addMinutes($delta), $group, together: true);
             } catch (MoveRejected $e) {
                 // The bar that was dragged says why; another piece is named.
                 throw (string) $piece->getKey() === $key ? $e : new MoveRejected(__('packstub-gantt::gantt.line_part', ['label' => $this->labelOf($piece), 'reason' => $e->getMessage()]));
@@ -2229,17 +2439,115 @@ class Gantt
     }
 
     /**
+     * Move a parent's span and its children together (see moveChildrenWithParent()):
+     * the parent of bar $id (its own dates with ParentSpan::Own) and every child the
+     * chart's query shows shift so that the span starts at `$start`, by whole days when
+     * any of them is date-only. Each is checked as a move of its own, and one refusal
+     * refuses them all; the children keep their places among each other. Returns the
+     * parent's bar (when it has one) and every child's, as they look afterwards.
+     *
+     * @return list<array<string, mixed>>
+     *
+     * @throws MoveRejected
+     */
+    public function moveParent(string $id, string $start): array
+    {
+        $record = $this->findRecord($id)
+            ?? throw new MoveRejected(__('packstub-gantt::gantt.missing'));
+
+        if (! $this->isParentRecord($record) || ! $this->moveChildrenWithParent || $this->parentSpan === ParentSpan::None) {
+            throw new MoveRejected(__('packstub-gantt::gantt.failed'));
+        }
+
+        if ($this->isReadOnly()) {
+            throw new MoveRejected(__('packstub-gantt::gantt.read_only'));
+        }
+
+        $own = $this->parentSpan === ParentSpan::Own;
+        $key = (string) $record->getKey();
+        $children = $this->childrenOf($record);
+
+        [$previousStart] = ($own ? $this->span($record) : ($this->childSpans([$key])[$key] ?? null))
+            ?? throw new MoveRejected(__('packstub-gantt::gantt.missing'));
+
+        // A computed span is no record: the parent's own rules decide whether it may be dragged.
+        if (! $own && ! $this->isMovable($record)) {
+            throw new MoveRejected(__($this->canMoveRecord($record) ? 'packstub-gantt::gantt.not_movable' : 'packstub-gantt::gantt.not_allowed'));
+        }
+
+        $unit = $this->isDateOnly($record) || $children->contains(fn (Model $child) => $this->isDateOnly($child)) ? Unit::Day : $this->unit;
+        $delta = $this->minutes($previousStart, $unit->snapFrom($this->parse($start), $previousStart));
+
+        $plans = [];
+
+        foreach ($own ? [$record, ...$children] : $children as $piece) {
+            if (($span = $this->span($piece)) === null) {
+                continue;
+            }
+
+            [$from, $until, $milestone] = $span;
+
+            try {
+                $plan = $this->planMove($piece, $from->addMinutes($delta), $milestone ? null : $until->addMinutes($delta), null, together: true);
+            } catch (MoveRejected $e) {
+                // The parent says why itself; a child is named.
+                throw $piece === $record ? $e : new MoveRejected(__('packstub-gantt::gantt.child_part', ['label' => $this->labelOf($piece), 'reason' => $e->getMessage()]));
+            }
+
+            if ($plan !== null) {
+                $plans[] = $plan;
+            }
+        }
+
+        return $record->getConnection()->transaction(function () use ($plans, $children, $record, $own) {
+            $moved = [];
+
+            foreach ($plans as $plan) {
+                $moved[(string) $plan['record']->getKey()] = $this->applyMove($plan);
+            }
+
+            $parent = $own ? ($moved[(string) $record->getKey()] ?? $this->presentBar($record)) : $this->parentBar($record);
+
+            return collect([$parent])
+                ->concat($children->map(fn (Model $child) => $moved[(string) $child->getKey()] ?? $this->presentBar($child)))
+                ->filter()
+                ->values()
+                ->all();
+        });
+    }
+
+    /**
+     * The children of a parent the chart's query shows, in key order.
+     *
+     * @return Collection<int, Model>
+     */
+    protected function childrenOf(Model $parent): Collection
+    {
+        $query = $this->baseQuery();
+
+        return $query
+            ->where($query->qualifyColumn($this->getRowForeignKey()), $parent->getKey())
+            ->orderBy($query->getModel()->getQualifiedKeyName())
+            ->get();
+    }
+
+    /**
      * Every rule of a move, checked without writing anything: what applyMove() is to
      * do, or null when the bar would stay as it is. Dates as the browser sends them
-     * (strings) or already read; `$alongLine` when the piece moves with its whole line
+     * (strings) or already read; `$together` when the bar moves with its whole line or with every bar of its parent
      * (see moveLine()); `$row` the row it lands in (rowBy(): null keeps it, '' is no row).
      *
      * @return array<string, mixed>|null
      *
      * @throws MoveRejected
      */
-    protected function planMove(Model $record, CarbonImmutable|string $start, CarbonImmutable|string|null $end, ?string $group, bool $alongLine = false, ?string $row = null): ?array
+    protected function planMove(Model $record, CarbonImmutable|string $start, CarbonImmutable|string|null $end, ?string $group, bool $together = false, ?string $row = null): ?array
     {
+        // A parent's own dates move only while they are what the chart draws.
+        if ($this->parentSpan !== ParentSpan::Own && $this->isParentRecord($record)) {
+            throw new MoveRejected(__('packstub-gantt::gantt.not_movable'));
+        }
+
         if ($this->isReadOnly()) {
             throw new MoveRejected(__('packstub-gantt::gantt.read_only'));
         }
@@ -2355,12 +2663,13 @@ class Gantt
         }
 
         // A piece moving with its whole line keeps its place among the others.
-        if (! $alongLine && ($startChanged || $endChanged) && $this->preventsLineOverlap() && $this->overlapsLine($record, $newStart, $newEnd)) {
+        if (! $together && ($startChanged || $endChanged) && $this->preventsLineOverlap() && $this->overlapsLine($record, $newStart, $newEnd)) {
             throw new MoveRejected(__('packstub-gantt::gantt.overlaps'));
         }
 
         // rowBy(): a bar may not land on another bar of its row, the one it moves to included.
-        if (($startChanged || $endChanged || $rowChange) && $newRow !== null && $this->preventsRowOverlap() && $this->overlapsRow($record, $newRow, $newStart, $newEnd)) {
+        // Moving with every bar of its parent, it keeps its place among them too.
+        if (! $together && ($startChanged || $endChanged || $rowChange) && $newRow !== null && $this->preventsRowOverlap() && $this->overlapsRow($record, $newRow, $newStart, $newEnd)) {
             throw new MoveRejected(__('packstub-gantt::gantt.row_overlaps'));
         }
 
@@ -3082,8 +3391,8 @@ class Gantt
         $start = $query->qualifyColumn($this->startAttribute);
         $end = $query->qualifyColumn($this->endAttribute);
 
-        // Parent tasks as rows: only the bars count, a parent's own dates draw nothing.
-        if ($this->hasParentRows()) {
+        // Parent tasks as rows: a parent's own dates count only when they are drawn (ParentSpan::Own).
+        if ($this->hasParentRows() && $this->parentSpan !== ParentSpan::Own) {
             $query->whereNotNull($query->qualifyColumn($this->getRowForeignKey()));
         }
 

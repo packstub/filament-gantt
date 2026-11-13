@@ -178,7 +178,7 @@ Point `rowBy()` at a `BelongsTo` to the chart's own model and the parents become
 
 | What | How it shows |
 | --- | --- |
-| A task without a parent | A row, named by the chart's `label()` and dotted with its `color()`, in its own group. It is there with or without children, so a new parent is an empty row to click on. |
+| A task without a parent | A row, named by the chart's `label()` and dotted with its `color()`, in its own group. It is there with or without children, so a new parent is an empty row to click on. With dates of its own it also draws its span. |
 | A task with a parent | A bar on its parent's row. Overlapping children stack into lanes. |
 | A child of a child | A bar on its parent's row, which is appended to the group of its bars. One level is what the layout is made for. |
 
@@ -188,4 +188,31 @@ The rows follow the chart's order (`sortBy()`, or by start with the parents with
 
 A drag to another row gives the bar another parent, under the same rules as any row ([Moving to another row](moves.md#to-another-row)); a click or a drag across a parent's row creates a child of it, and a click on a group's own row creates a task without a parent, so a new row. There is no unassigned row on such a chart, and a task never lands under itself or under one of its own descendants.
 
-A parent's own dates draw nothing yet: the parent's span, and the settings around it, are the next steps of [issue #41](https://github.com/packstub/filament-gantt/issues/41).
+### The parent's span
+
+A parent with dates is a summary task: its span is drawn faint behind its children, in the parent's colour, over the whole height of the row. It takes no lane, so the children sit on top of it, and they are free to start before it or end after it.
+
+```php
+use Packstub\Gantt\Enums\ParentSpan;
+
+->rowBy('parent')
+->parentSpan(ParentSpan::FromChildren)   // default: ParentSpan::Own
+->moveChildrenWithParent(false)          // default: on
+```
+
+| Setting | What it does | Default |
+| --- | --- | --- |
+| `parentSpan(ParentSpan::Own)` | The parent's own start and end. A parent without dates is a titled row only. | yes |
+| `parentSpan(ParentSpan::FromChildren)` | From the earliest child's start to the latest child's end. Computed from every child the chart's query shows (a filter never shrinks it), nothing is stored, so a parent without dates has a span too. It has no edges to resize. | |
+| `parentSpan(ParentSpan::None)` | No span: a titled row, whatever dates the parent has. | |
+| `moveChildrenWithParent()` | Dragging the span moves the parent and every child by the same amount, in one save. Off, the span moves alone; a computed span then stays where its children are. | on |
+
+| You do | What happens |
+| --- | --- |
+| Drag the span | The parent and its children move together, the children outside the window too. Each one is checked as a move of its own ([Rules](moves.md#rules)); one refusal refuses them all and names the child. |
+| Drag an edge of the span | The parent's dates change, the children stay. |
+| ←/→ on a focused span, Shift or Alt for an edge | The same with the keyboard. |
+| Click the span | A new child at that day, where the chart has a [create action](actions.md#create-on-an-empty-spot): the span lies over the row, so it is the row's click. Without one, the parent opens. |
+| Click the parent's name | The parent's click action ([Actions](actions.md)); a right-click on the name or on the span opens its menu. A parent covered by its children stays reachable that way. |
+
+A child still moves on its own, to another parent too. With `preventRowOverlap()` the span never counts: only the children of a row keep apart.

@@ -3,7 +3,11 @@
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Livewire\Livewire;
+use Packstub\Gantt\Bar;
+use Packstub\Gantt\Enums\ParentSpan;
+use Packstub\Gantt\Events\BarMoved;
 use Packstub\Gantt\Exceptions\MoveRejected;
 use Packstub\Gantt\Filter;
 use Packstub\Gantt\Gantt;
@@ -18,6 +22,9 @@ beforeEach(function () {
     TaskGantt::$movable = null;
     TaskGantt::$readOnly = false;
     TaskGantt::$moved = [];
+    TaskGantt::$bar = null;
+    ParentGantt::$span = ParentSpan::Own;
+    ParentGantt::$together = true;
 });
 
 afterEach(fn () => CarbonImmutable::setTestNow());
@@ -63,7 +70,7 @@ it('makes every task without a parent a row, and the tasks with one the bars on 
     $design = child($launch, 'Design', '2026-10-05', '2026-10-07');
     $build = child($launch, 'Build', '2026-10-08', '2026-10-12');
 
-    $state = october(parentsGantt());
+    $state = october(parentsGantt()->parentSpan(ParentSpan::None));
 
     expect(array_column($state['bars'], 'id'))->toBe([(string) $design->id, (string) $build->id])
         ->and(array_column($state['bars'], 'row'))->toBe([(string) $launch->id, (string) $launch->id])
@@ -111,8 +118,8 @@ it('keeps a parent\'s row only while the parent matches the filters and the sear
     // Ideas matches (its bar does not); Launch does not, and comes after it for its bar Design
     expect(array_column($todo['bars'], 'id'))->toBe([(string) $design->id])
         ->and(array_map(fn ($row) => [$row['label'], $row['listed']], $todo['rows']))->toBe([['Ideas', true], ['Launch', false]])
-        // the parent matches, its children do not: an empty row
-        ->and($search['bars'])->toBe([])
+        // the parent matches, its children do not: its row, with its own span alone
+        ->and(array_column($search['bars'], 'id'))->toBe([(string) $launch->id])
         ->and(array_column($search['rows'], 'label'))->toBe(['Launch']);
 });
 
@@ -172,11 +179,14 @@ it('reads the parents in one query, and never loads a bar\'s parent one by one',
     expect(collect(DB::getQueryLog())->filter(fn ($q) => preg_match('/from ["`]tasks["`]/', $q['query']) === 1)->count())->toBe(2);
 });
 
-it('fits the chart to the bars, not to a parent\'s own dates', function () {
+it('fits the chart to the bars, and to a parent\'s own dates only while they are drawn', function () {
     $launch = task('Launch', '2026-09-01', '2026-12-20');
     child($launch, 'Design', '2026-10-05', '2026-10-07');
 
-    expect(parentsGantt()->getSpan())->toBe(['start' => '2026-10-05', 'end' => '2026-10-07']);
+    expect(parentsGantt()->parentSpan(ParentSpan::None)->getSpan())->toBe(['start' => '2026-10-05', 'end' => '2026-10-07'])
+        ->and(parentsGantt()->parentSpan(ParentSpan::FromChildren)->getSpan())->toBe(['start' => '2026-10-05', 'end' => '2026-10-07'])
+        // its own dates are on the chart when they are what the parent draws
+        ->and(parentsGantt()->getSpan())->toBe(['start' => '2026-09-01', 'end' => '2026-12-20']);
 });
 
 it('has no unassigned row: a task without a parent is a row', function () {
@@ -296,4 +306,232 @@ it('creates only on a parent the chart shows, in the group it sits in', function
         ->assertActionHidden('create', ['ganttStart' => '2026-10-12 00:00', 'ganttGroup' => (string) $beta->id, 'ganttRow' => (string) $launch->id])
         ->assertActionHidden('create', ['ganttStart' => '2026-10-12 00:00', 'ganttGroup' => (string) $acme->id, 'ganttRow' => '999'])
         ->assertActionHidden('create', ['ganttStart' => '2026-10-12 00:00', 'ganttGroup' => (string) $acme->id, 'ganttRow' => 'abc']);
+});
+
+/* ------------------------------------------------------------------ the parent's span */
+
+it('draws a parent\'s own dates as its span: a bar on its own row, never carried to another', function () {
+    $launch = task('Launch', '2026-10-05', '2026-10-20');
+    task('Ideas');
+    $design = child($launch, 'Design', '2026-10-05', '2026-10-07');
+
+    $state = october(parentsGantt());
+    $bars = collect($state['bars'])->keyBy('id');
+
+    expect(array_column($state['bars'], 'id'))->toBe([(string) $launch->id, (string) $design->id])
+        ->and($bars[(string) $launch->id])->toMatchArray(['row' => (string) $launch->id, 'parent' => true, 'start' => '2026-10-05 00:00', 'end' => '2026-10-21 00:00', 'movable' => true, 'resizable' => true, 'regroupable' => false])
+        ->and($bars[(string) $launch->id])->not->toHaveKey('computed')
+        ->and($bars[(string) $design->id])->not->toHaveKey('parent')
+        // a parent without dates has no span, only its row
+        ->and(array_column($state['rows'], 'label'))->toBe(['Launch', 'Ideas'])
+        ->and($state['total'])->toBe(2);
+});
+
+it('computes the span from the children with ParentSpan::FromChildren, for a parent without dates too', function () {
+    $launch = task('Launch', '2026-01-01', '2026-01-02');
+    $ideas = task('Ideas');
+    task('Empty');
+    child($launch, 'Design', '2026-10-05', '2026-10-07');
+    child($launch, 'Build', '2026-10-08', '2026-10-12', ['status' => 'done']);
+    child($ideas, 'Sketch', '2026-10-20');
+    // out of the window, still part of its parent's extent
+    child($ideas, 'Later', '2026-11-10', '2026-11-12');
+
+    $gantt = fn () => parentsGantt()->parentSpan(ParentSpan::FromChildren)->filters([Filter::select('status')->options(['todo' => 'To do', 'done' => 'Done'])]);
+    $spans = fn (array $state) => collect($state['bars'])->filter(fn ($bar) => $bar['parent'] ?? false)->mapWithKeys(fn ($bar) => [$bar['label'] => [$bar['start'], $bar['end']]])->all();
+
+    $state = october($gantt());
+    $span = collect($state['bars'])->firstWhere('id', (string) $launch->id);
+
+    expect($spans($state))->toBe(['Launch' => ['2026-10-05 00:00', '2026-10-13 00:00'], 'Ideas' => ['2026-10-20 00:00', '2026-11-13 00:00']])
+        ->and($span)->toMatchArray(['row' => (string) $launch->id, 'parent' => true, 'computed' => true, 'movable' => true, 'resizable' => false, 'regroupable' => false, 'allDay' => true, 'milestone' => false])
+        // the spans are not records: the count is the bars'
+        ->and($state['total'])->toBe(3)
+        // a filter never shrinks a parent
+        ->and($spans(october($gantt(), ['status' => 'done']))['Launch'])->toBe(['2026-10-05 00:00', '2026-10-13 00:00'])
+        // and a span outside the window is not sent
+        ->and($spans($gantt()->getState([], '2026-12-01', '2026-12-31', exact: true)))->toBe([]);
+});
+
+it('computes every span in one query', function () {
+    foreach (['Launch', 'Ideas', 'Later'] as $title) {
+        child(task($title), 'Step', '2026-10-05', '2026-10-07');
+    }
+
+    DB::enableQueryLog();
+    october(parentsGantt()->parentSpan(ParentSpan::FromChildren));
+
+    expect(collect(DB::getQueryLog())->filter(fn ($q) => str_contains($q['query'], 'gantt_children'))->count())->toBe(1);
+});
+
+it('reads a span of datetimes to the minute, and a lone milestone child as a point', function () {
+    $night = shift('Night');
+    $solo = shift('Solo');
+    shift('First', '2026-10-14 09:00', '2026-10-14 11:00', ['parent_id' => $night->id]);
+    shift('Second', '2026-10-14 13:30', '2026-10-14 15:00', ['parent_id' => $night->id]);
+    shift('Ping', '2026-10-14 10:00', null, ['parent_id' => $solo->id]);
+
+    $bars = collect(october(shifts()->groupBy(null)->rowBy('parent')->parentSpan(ParentSpan::FromChildren))['bars'])->keyBy('id');
+
+    expect($bars[(string) $night->id])->toMatchArray(['start' => '2026-10-14 09:00', 'end' => '2026-10-14 15:00', 'allDay' => false, 'milestone' => false])
+        ->and($bars[(string) $solo->id])->toMatchArray(['start' => '2026-10-14 10:00', 'end' => '2026-10-14 10:00', 'milestone' => true]);
+});
+
+it('draws no span with ParentSpan::None, and tells the browser which span it draws', function () {
+    $launch = task('Launch', '2026-10-05', '2026-10-20');
+    child($launch, 'Design', '2026-10-05', '2026-10-07');
+
+    $config = fn () => Livewire::test(ParentGantt::class)->instance()->getGanttConfig(withState: true);
+
+    expect($config())->toMatchArray(['parentSpan' => 'own', 'moveChildren' => true])
+        ->and(Livewire::test(TaskGantt::class)->instance()->getGanttConfig())->toMatchArray(['parentSpan' => null, 'moveChildren' => false]);
+
+    ParentGantt::$span = ParentSpan::None;
+    ParentGantt::$together = false;
+
+    expect($config())->toMatchArray(['parentSpan' => 'none', 'moveChildren' => false])
+        ->and(array_column($config()['bars'], 'label'))->toBe(['Design'])
+        ->and(parentsGantt()->parentSpan('children')->getParentSpan())->toBe(ParentSpan::FromChildren)
+        ->and(fn () => parentsGantt()->parentSpan('nope'))->toThrow(InvalidArgumentException::class, 'own, children or none');
+});
+
+it('puts the parent\'s actions on its row, as its bar would offer them', function () {
+    $launch = task('Launch', null, null, ['progress' => 100]);
+    $ideas = task('Ideas');
+    TaskGantt::$bar = fn (Task $task) => $task->title === 'Ideas' ? Bar::make()->actions(['edit']) : null;
+
+    $rows = collect(Livewire::test(ParentGantt::class)->instance()->getGanttConfig(withState: true)['rows'])->keyBy('key');
+
+    // Delete is hidden for a finished task; Ideas offers Edit alone
+    expect($rows[(string) $launch->id]['actions'])->toBe(['edit', 'bump'])
+        ->and($rows[(string) $ideas->id]['actions'])->toBe(['edit'])
+        // without bar actions a row says nothing about them
+        ->and(october(parentsGantt())['rows'][0])->not->toHaveKey('actions');
+
+    Livewire::test(ParentGantt::class)
+        ->callAction('bump', arguments: ['ganttRecord' => (string) $launch->id]);
+
+    expect($launch->fresh()->progress)->toBe(110);
+});
+
+/* ------------------------------------------------------------------ moving the span */
+
+it('moves a parent and every child by the same amount, in one go', function () {
+    Event::fake([BarMoved::class]);
+    $launch = task('Launch', '2026-10-05', '2026-10-20');
+    $design = child($launch, 'Design', '2026-10-05', '2026-10-07');
+    $build = child($launch, 'Build', '2026-10-08', '2026-10-12');
+    // out of any window, a child all the same; one without dates stays as it is
+    $later = child($launch, 'Later', '2026-12-01', '2026-12-02');
+    $idea = child($launch, 'Idea');
+    $other = child(task('Ideas'), 'Sketch', '2026-10-05', '2026-10-06');
+
+    $bars = parentsGantt()->moveParent((string) $launch->id, '2026-10-07');
+
+    expect(array_column($bars, 'start', 'id'))->toBe([
+        (string) $launch->id => '2026-10-07 00:00',
+        (string) $design->id => '2026-10-07 00:00',
+        (string) $build->id => '2026-10-10 00:00',
+        (string) $later->id => '2026-12-03 00:00',
+    ])
+        ->and($bars[0])->toMatchArray(['parent' => true, 'end' => '2026-10-23 00:00'])
+        ->and($launch->fresh()->ends_on->toDateString())->toBe('2026-10-22')
+        ->and($build->fresh()->ends_on->toDateString())->toBe('2026-10-14')
+        ->and($idea->fresh()->starts_on)->toBeNull()
+        ->and($other->fresh()->starts_on->toDateString())->toBe('2026-10-05');
+
+    Event::assertDispatchedTimes(BarMoved::class, 4);
+});
+
+it('moves the children of a computed span, and leaves the parent\'s own dates alone', function () {
+    $launch = task('Launch', '2026-01-01', '2026-01-02');
+    $design = child($launch, 'Design', '2026-10-05', '2026-10-07');
+    $build = child($launch, 'Build', '2026-10-08', '2026-10-12');
+
+    $gantt = fn () => parentsGantt()->parentSpan(ParentSpan::FromChildren);
+    $bars = $gantt()->moveParent((string) $launch->id, '2026-10-03');
+
+    expect(array_map(fn ($bar) => [$bar['id'], $bar['start'], $bar['end']], $bars))->toBe([
+        [(string) $launch->id, '2026-10-03 00:00', '2026-10-11 00:00'],
+        [(string) $design->id, '2026-10-03 00:00', '2026-10-06 00:00'],
+        [(string) $build->id, '2026-10-06 00:00', '2026-10-11 00:00'],
+    ])
+        ->and($bars[0])->toMatchArray(['computed' => true, 'parent' => true])
+        ->and($launch->fresh()->starts_on->toDateString())->toBe('2026-01-01')
+        // its own dates are not what the chart draws: they never move on their own
+        ->and(parentRefusal(fn () => $gantt()->move((string) $launch->id, '2026-01-05')))->toBe('This bar cannot be moved.')
+        ->and(parentRefusal(fn () => parentsGantt()->parentSpan(ParentSpan::None)->move((string) $launch->id, '2026-01-05')))->toBe('This bar cannot be moved.');
+});
+
+it('refuses the whole move when one child may not move, and names it', function () {
+    $launch = task('Launch', '2026-10-05', '2026-10-20');
+    $design = child($launch, 'Design', '2026-10-05', '2026-10-07');
+    child($launch, 'Build', '2026-10-08', '2026-10-12');
+
+    $gantt = fn () => parentsGantt()->movable(fn (Task $task) => $task->title !== 'Build');
+
+    expect(parentRefusal(fn () => $gantt()->moveParent((string) $launch->id, '2026-10-07')))->toBe('Build, under this parent: This bar cannot be moved.')
+        ->and($launch->fresh()->starts_on->toDateString())->toBe('2026-10-05')
+        ->and($design->fresh()->starts_on->toDateString())->toBe('2026-10-05')
+        // the parent itself says why in its own words
+        ->and(parentRefusal(fn () => parentsGantt()->movable(fn (Task $task) => $task->title !== 'Launch')->moveParent((string) $launch->id, '2026-10-07')))->toBe('This bar cannot be moved.')
+        ->and(parentRefusal(fn () => parentsGantt()->parentSpan(ParentSpan::FromChildren)->movable(fn (Task $task) => $task->title !== 'Launch')->moveParent((string) $launch->id, '2026-10-07')))->toBe('This bar cannot be moved.');
+});
+
+it('keeps the children\'s places among each other with preventRowOverlap()', function () {
+    $launch = task('Launch', '2026-10-05', '2026-10-20');
+    $design = child($launch, 'Design', '2026-10-05', '2026-10-07');
+    $build = child($launch, 'Build', '2026-10-08', '2026-10-12');
+
+    // Design lands where Build was: they move together, so nothing overlaps
+    parentsGantt()->preventRowOverlap()->moveParent((string) $launch->id, '2026-10-08');
+
+    expect($design->fresh()->starts_on->toDateString())->toBe('2026-10-08')
+        ->and($build->fresh()->starts_on->toDateString())->toBe('2026-10-11');
+});
+
+it('moves a span with its children only for a parent, and only while the chart says so', function () {
+    $launch = task('Launch', '2026-10-05', '2026-10-20');
+    $design = child($launch, 'Design', '2026-10-05', '2026-10-07');
+
+    $failed = 'The change did not go through.';
+
+    expect(parentRefusal(fn () => parentsGantt()->moveParent((string) $design->id, '2026-10-07')))->toBe($failed)
+        ->and(parentRefusal(fn () => parentsGantt()->moveChildrenWithParent(false)->moveParent((string) $launch->id, '2026-10-07')))->toBe($failed)
+        ->and(parentRefusal(fn () => parentsGantt()->parentSpan(ParentSpan::None)->moveParent((string) $launch->id, '2026-10-07')))->toBe($failed)
+        ->and(parentRefusal(fn () => gantt()->moveParent((string) $launch->id, '2026-10-07')))->toBe($failed)
+        ->and(parentRefusal(fn () => parentsGantt()->readOnly()->moveParent((string) $launch->id, '2026-10-07')))->toBe('This chart is read-only.')
+        ->and(parentRefusal(fn () => parentsGantt()->moveParent('999', '2026-10-07')))->toBe('This bar is no longer on the chart. Refresh to see the latest.')
+        ->and($design->fresh()->starts_on->toDateString())->toBe('2026-10-05');
+});
+
+it('moves or resizes a parent alone through an ordinary move, and never to another row or group', function () {
+    $acme = project('Acme');
+    $beta = project('Beta');
+    $launch = task('Launch', '2026-10-05', '2026-10-20', ['project_id' => $acme->id]);
+    $ideas = task('Ideas', null, null, ['project_id' => $acme->id]);
+    task('Other', null, null, ['project_id' => $beta->id]);
+    $design = child($launch, 'Design', '2026-10-05', '2026-10-07');
+
+    // a resize: the parent's dates only
+    $bar = parentsGantt()->move((string) $launch->id, '2026-10-05', '2026-10-25');
+
+    expect($bar)->toMatchArray(['end' => '2026-10-25 00:00', 'parent' => true])
+        ->and($design->fresh()->ends_on->toDateString())->toBe('2026-10-07')
+        ->and(parentRefusal(fn () => parentsGantt()->move((string) $launch->id, '2026-10-05', null, row: (string) $ideas->id)))->toBe('This bar cannot be moved to another row.')
+        ->and(parentRefusal(fn () => parentsGantt()->move((string) $launch->id, '2026-10-05', null, (string) $beta->id)))->toBe('This bar cannot be moved to another row.')
+        ->and($launch->fresh())->parent_id->toBeNull()->project_id->toBe($acme->id);
+});
+
+it('takes a span\'s move through Livewire, and tells the hook about every record that moved', function () {
+    $launch = task('Launch', '2026-10-05', '2026-10-20');
+    $design = child($launch, 'Design', '2026-10-05', '2026-10-07');
+
+    $result = Livewire::test(ParentGantt::class)->instance()->ganttMoveParent((string) $launch->id, '2026-10-07');
+
+    expect($result['ok'])->toBeTrue()
+        ->and(array_column($result['bars'], 'id'))->toBe([(string) $launch->id, (string) $design->id])
+        ->and(array_column(TaskGantt::$moved, 0))->toBe([$launch->id, $design->id])
+        ->and(Livewire::test(ParentGantt::class)->instance()->ganttMoveParent(['x'], '2026-10-07'))->toBe(['ok' => false, 'message' => 'The change did not go through.'])
+        ->and(Livewire::test(ParentGantt::class)->instance()->ganttMoveParent((string) $design->id, '2026-10-07')['ok'])->toBeFalse();
 });

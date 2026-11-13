@@ -53,6 +53,7 @@ return [
     'overlaps' => 'Это наложится на другую часть той же строки.',
     'row_overlaps' => 'Это наложится на другую полосу в том же ряду.',
     'line_part' => ':label (та же строка): :reason',
+    'child_part' => ':label (под этим родителем): :reason',
     'offline' => 'Сервер недоступен. Полоса вернулась на место.',
     'days' => ':count день|:count дня|:count дней',
     'hours' => ':count час|:count часа|:count часов',

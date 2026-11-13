@@ -51,6 +51,7 @@ return [
     'overlaps' => 'This would overlap another part of the same line.',
     'row_overlaps' => 'This would overlap another bar in the same row.',
     'line_part' => ':label, on the same line: :reason',
+    'child_part' => ':label, under this parent: :reason',
     'offline' => 'Could not reach the server. The bar is back where it was.',
     'days' => '{1} :count day|[2,*] :count days',
     'hours' => '{1} :count hour|[2,*] :count hours',

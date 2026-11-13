@@ -20,7 +20,7 @@ and the Pest suite again on MySQL 8.4 and PostgreSQL 17 (the `databases` job): S
 ## Layout
 
 - `src/Gantt.php` (definition + `getBars()`/`getState()` reads, `searchable()`/`applySearch()`, the server-side `move()`
-  rules), `Bar.php`, `Group.php`, `Filter.php`, `Enums/{Scale,Unit,FiltersLayout}.php`, `Events/BarMoved.php`, `Exceptions/MoveRejected.php`.
+  rules), `Bar.php`, `Group.php`, `Filter.php`, `Enums/{Scale,Unit,FiltersLayout,ParentSpan}.php`, `Events/BarMoved.php`, `Exceptions/MoveRejected.php`.
 - `src/Concerns/InteractsWithGantt.php` (the Livewire side), `src/Concerns/GanttActions.php` (bar and create actions wired
   into Filament's action system: record through the chart's query, hidden/mount/mutate/after chained onto the app's own),
   `src/Pages/Gantt{,Resource}Page.php`, `src/Widgets/GanttWidget.php` (read-only by default), `src/GanttPlugin.php`.
@@ -84,6 +84,17 @@ and the Pest suite again on MySQL 8.4 and PostgreSQL 17 (the `databases` job): S
   records without one that `filteredQuery()` leaves (`listed: true`, each in its own group, which `getGroups()` adds)
   and names the parents met on a bar only through `baseQuery()` (never the bar's relation); no unassigned row
   (`knowsRowKey('')` is false), `descendsFrom()` refuses a loop in `planMove()`. The browser needs nothing for it.
+- The parent's span (issue #41 step 3): `parentSpan()` (`Enums\ParentSpan`: Own / FromChildren / None). Own: a parent
+  with dates is a bar like any other with `parent: true` and `row` = its own key (`presentBar()`); FromChildren:
+  `childSpanBars()` appends one bar per parent from `childSpans()` (one grouped query over `baseQuery()`, filters
+  aside; `computed: true`, never resizable, not in `total` or a group's count); None: only the rows. A parent is
+  never regroupable (`isParentRecord()` in `isRegroupable()`), and `planMove()` refuses its own dates unless Own.
+  `moveParent()` / `ganttMoveParent` is `moveLine()` for a parent and its children (`planMove(together: true)` skips
+  both overlap checks, a child's refusal is `child_part`). In the browser the span is `row.bars[0]`, in no lane
+  (`bar.lanes`), drawn by `barStyle()` over the row's height with `.ps-gantt-bar-span`; a whole drag or ←/→ shifts
+  the children as `mates` (`p.family` / `k.family`) and ends in `commitFamily()`; `rowWalls()` / `rowTaken()` skip
+  `bar.parent`; a click on the span is `createUnder()` when the chart creates; a row's `actions` (the parent's) are
+  on its name (`rowRecord()`, `openRow()`, `rowMenu()`); after a child's move in `children` mode, `refresh(true)`.
 - Rows (`rowBy()`, issue #41 step 1): a column or a `BelongsTo`;
   `hasRows()` throws with `compact()` or `lineBy()`. `presentBar()` adds `row` ('' for none), `getState()` adds `rows`
   (`rows()` first with `listed: true`, then those met on bars with `listed: false`). In `layout()` a group holds its

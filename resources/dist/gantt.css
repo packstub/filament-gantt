@@ -454,6 +454,24 @@
 .ps-gantt-bar-carried { z-index: 4; }
 .ps-gantt-bar-picked { z-index: 3; box-shadow: 0 8px 18px -6px rgb(0 0 0 / 0.45), 0 0 0 2px var(--ps-bar); }
 
+/* A parent task's span (rowBy() to the chart's own model): faint, behind its children, over the row's whole height. */
+.ps-gantt-bar-span {
+    min-width: 3px;
+    padding: 0;
+    border-inline-start-width: 2px;
+    border-inline-end: 2px solid var(--ps-bar);
+    background: color-mix(in oklab, var(--ps-bar) 12%, transparent);
+}
+.ps-gantt-bar-span:hover { z-index: auto; box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ps-bar) 55%, transparent); }
+.ps-gantt-bar-span.ps-gantt-bar-picked { z-index: auto; box-shadow: inset 0 0 0 2px var(--ps-bar); }
+.ps-gantt-bar-span .ps-gantt-bar-label, .ps-gantt-bar-span .ps-gantt-progress { display: none; }
+.ps-gantt-bar-span .ps-gantt-handle-start { inset-inline-start: -2px; }
+.ps-gantt-bar-span .ps-gantt-handle-end { inset-inline-end: -2px; }
+/* The parent's actions on its row's name. */
+.ps-gantt-label-action { cursor: pointer; border-radius: 0.25rem; }
+.ps-gantt-label-action:hover { text-decoration: underline; }
+.ps-gantt-label-action:focus-visible { outline: 2px solid var(--ps-gantt-ring); outline-offset: 1px; }
+
 .ps-gantt-handle {
     position: absolute;
     top: 0;

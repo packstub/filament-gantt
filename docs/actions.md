@@ -69,6 +69,8 @@ With [`lineBy()`](groups.md#several-bars-on-one-line), a click or a drag across 
 
 With [`rowBy()`](groups.md#rows-under-the-groups), a click or a drag across a row creates in that row: the row goes to the `rowBy()` column or foreign key, preselected or added on save the same way, along with the row's group. A group's own row and the unassigned row create a bar without a row. The server takes a row listed in `rows()` or one a bar of the chart is in, under the group that shows it (`Gantt::canCreateInRow()`); `->creatableInRow(fn (string $row, ?string $group) => ...)` decides instead. With `preventRowOverlap()`, a new or edited bar that overlaps another bar of its row is not saved: the modal stays open with a notification.
 
+On a chart whose rows are [parent tasks](groups.md#parent-tasks-as-rows), each row's name carries the parent's actions: a click runs `barAction()` (or opens the menu when the parent does not offer it), a right-click opens the menu, with the same visibility and authorization as on a bar. A click on the parent's span creates a child at that day; a click on a group's own row creates a task without a parent.
+
 Only what the form has no field for is filled in on save. A field the form does have belongs to the user: a `project_id` Select they cleared stays empty, the clicked row does not put it back.
 
 ### Which groups a click may create in
