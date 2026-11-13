@@ -167,15 +167,20 @@ export function timePattern(pattern) {
  *   compact               one row per group, overlapping bars stacked in lanes
  *   lineLayout            lineBy(): the bars of one line (bar.line) share a row, overlapping ones stacked
  *   lines                 Map of line key → { key, label, pieces } for the lines holding several pieces
+ *   rowLayout             rowBy(): the bars of one row (bar.row) share it, overlapping ones stacked
+ *   rows                  [{ key, label, color, group, listed }] the rows in order: listed ones (rows(); group null: in every group), then those met on the bars
+ *   unassignedLabel       the name of the row holding the bars without a row
+ *   unassignedRow         that row shows in every group, empty or not (default: only where a bar has no row)
  *   collapsed             { [group key]: bool } overriding the groups' own flag
  * }
  * scale:  'hour' | 'day' | 'week' | 'month' | 'year'
  *
  * Returns { start, days, width, pxPerDay, rowHeight, columns, top, shades, todayX, rows } where
- * rows are { type: 'group' | 'bar' | 'lanes', key, group, label, height, collapsed, bars, span, line }
+ * rows are { type: 'group' | 'bar' | 'lanes' | 'row', key, group, label, height, collapsed, bars, span, line, row }
  * and each row bar is the source bar plus { s, e, x, w, lane, src }. A line's row is a
  * 'bar' row holding its pieces, `line` its key (every 'bar' row has one in the line
- * layout: creating there adds a piece). An axis label that does not fit its cell is empty. A folded group's `span` is
+ * layout: creating there adds a piece). A row of rowBy() is a 'row' row, `row` its key and
+ * `color` its dot; the bars without a row share the unassigned row, the group's last (`row` ''). An axis label that does not fit its cell is empty. A folded group's `span` is
  * { x, w, s, e, allDay, milestone }: the line from its first bar to its last, so the
  * row still shows where the group sits. Open groups, and groups with no bars, have none.
  */
@@ -345,6 +350,59 @@ export function layout(bars, window, scale) {
         return out
     }
 
+    // rowBy(): a group's rows, each holding its bars side by side, overlapping ones in
+    // lanes: the listed rows of the group (and those listed without one) in their order,
+    // then the rows met on its bars, then the unassigned row: the bars without a row.
+    const rowIndex = new Map((window.rows || []).map((r) => [String(r.key), r]))
+    const rowRows = (own, group) => {
+        const buckets = new Map()
+        const loose = []
+        for (const bar of own) {
+            const key = String(bar.row ?? '')
+            if (key === '') {
+                loose.push(bar)
+                continue
+            }
+            if (! buckets.has(key)) buckets.set(key, [])
+            buckets.get(key).push(bar)
+        }
+
+        const order = []
+        for (const r of window.rows || []) {
+            if (r.listed && (r.group === null || r.group === undefined || String(r.group) === group.key)) order.push(String(r.key))
+        }
+        for (const key of buckets.keys()) {
+            if (! order.includes(key)) order.push(key)
+        }
+
+        const keys = [...new Set(order)]
+        // '' is no row: never a listed one's key.
+        if (loose.length || window.unassignedRow) keys.push('')
+
+        const out = []
+        for (const key of keys) {
+            const bucket = key === '' ? loose : (buckets.get(key) || [])
+            const meta = key === '' ? { label: window.unassignedLabel ?? '', color: null } : rowIndex.get(key)
+            const lanes = bucket.length ? pack(bucket) : 1
+            out.push({
+                type: 'row',
+                // The group's key may hold a colon: its length keeps two rows apart.
+                key: 'r:' + group.key.length + ':' + group.key + ':' + key,
+                group,
+                label: meta?.label ?? key,
+                color: meta?.color ?? null,
+                height: lanes * rowHeight,
+                collapsed: false,
+                bars: bucket,
+                span: null,
+                line: null,
+                row: key,
+            })
+        }
+
+        return out
+    }
+
     const rows = []
     for (const group of groups) {
         const own = placed.filter((b) => String(b.group ?? '') === group.key)
@@ -361,7 +419,9 @@ export function layout(bars, window, scale) {
         }
 
         if (! collapsed || ! window.grouped) {
-            if (window.lineLayout) {
+            if (window.rowLayout) {
+                rows.push(...rowRows(own, group))
+            } else if (window.lineLayout) {
                 rows.push(...lineRows(own, group))
             } else {
                 for (const bar of own) {
@@ -462,6 +522,8 @@ export default function packstubGantt(config) {
         lineIndex: new Map((config.lines || []).map((line) => [String(line.key), line])),
         total: config.total ?? config.bars.length,
         groups: config.groups,
+        // rowBy(): the rows in order, listed ones first, each { key, label, color, group }.
+        rows: config.rows || [],
         period: config.window,
         range: { ...config.window },
         // A config rendered after the chart's first render carries no filters: they
@@ -496,6 +558,8 @@ export default function packstubGantt(config) {
         keyboard: null,
         // The group a dragged bar would land in, when it is not its own (its rows light up).
         target: null,
+        // rowBy(): the row (its view key) a dragged bar would land on, when it is not its own.
+        targetRow: null,
         swallowClick: false,
         pressed: null,
         autoScrolling: false,
@@ -658,6 +722,10 @@ export default function packstubGantt(config) {
                 compact: config.compact,
                 lineLayout: this.lineDrags,
                 lines: this.lineIndex,
+                rowLayout: !! config.rowLayout,
+                rows: this.rows,
+                unassignedLabel: config.unassignedLabel ?? this.t.unassigned ?? '',
+                unassignedRow: !! config.unassignedRow,
                 collapsed: this.collapsed,
             }
         },
@@ -814,9 +882,14 @@ export default function packstubGantt(config) {
          * one (data from outside the chart: the server decides).
          */
         walls(line, bar) {
+            return this.wallsOf(line.pieces, bar)
+        },
+
+        /** walls() among any bars ({ id, start, end, milestone }, as the server sends them). */
+        wallsOf(pieces, bar) {
             let left = -Infinity
             let right = Infinity
-            for (const piece of line.pieces) {
+            for (const piece of pieces) {
                 if (String(piece.id) === String(bar.id)) continue
                 const s = parse(piece.start)
                 const e = piece.milestone ? s : parse(piece.end)
@@ -832,6 +905,55 @@ export default function packstubGantt(config) {
                 left: left === -Infinity ? left : bar.s + Math.ceil((left - bar.s) / unit) * unit,
                 right: right === Infinity ? right : bar.e + Math.floor((right - bar.e) / unit) * unit,
             }
+        },
+
+        /**
+         * rowBy() with preventRowOverlap(): how far a bar may go before it meets another
+         * bar of its row (any group: the row is the resource), as walls() says; null
+         * without the rule or without a row. Only the window's bars: the server checks the rest.
+         */
+        rowWalls(bar) {
+            if (! config.rowLayout || ! config.preventRowOverlap || ! bar.row) return null
+            return this.wallsOf(this.bars.filter((b) => String(b.row ?? '') === String(bar.row)), bar)
+        },
+
+        /** A row's name (rowBy()), for the hints; the unassigned row's for no row. */
+        rowLabel(key) {
+            if (! key) return config.unassignedLabel ?? this.t.unassigned ?? ''
+            return this.rows.find((r) => String(r.key) === String(key))?.label ?? String(key)
+        },
+
+        /** Where a drag or the keys would put a bar, when it is not where it was: ' · group · row'. */
+        placeHint(state) {
+            const parts = []
+            if (state.g !== state.g0) parts.push(this.groupLabel(state.g))
+            if (config.rowLayout && state.r !== state.r0) parts.push(this.rowLabel(state.r))
+            const text = parts.filter(Boolean).join(' · ')
+            return text ? ' · ' + text : ''
+        },
+
+        /** The dot before a row's name: its group's colour on a group's row, its own on a row of rowBy(). */
+        labelColor(row) {
+            if (row.type === 'row') return row.color || null
+            return row.type === 'bar' ? null : (row.group.color || null)
+        },
+
+        /**
+         * rowBy(): every row a bar may land on with ↑/↓, in the chart's order, folded
+         * groups included (a fold opens when the bar gets there); only its own group's
+         * when the group cannot be written. The rows as they were when the keys began:
+         * a row that only this bar was in is still there to come back to.
+         */
+        rowTargets(k) {
+            const bars = this.bars.map((b) => (b.id === k.id ? { ...b, group: k.g0, row: k.r0 } : b))
+            const view = layout(bars, { ...this.axis(), collapsed: {} }, this.scale)
+            const out = []
+            for (const row of view.rows) {
+                if (row.type === 'group') continue
+                if (! config.groupMoves && String(row.group.key) !== k.g0) continue
+                out.push({ g: String(row.group.key), r: String(row.row ?? '') })
+            }
+            return out
         },
 
         /** The other pieces of the line on the dragged bar's row, where they were: they follow when the line moves. */
@@ -1263,8 +1385,8 @@ export default function packstubGantt(config) {
             const entry = this.lineOf(bar)
             const line = this.lineDrags && ! edge ? entry : null
             const together = !! line && this.carriesLine(bar)
-            // A whole bar on a grouped chart may be carried to another row, even one whose dates are fixed.
-            const rows = ! edge && !! config.grouped && (line ? this.lineRegroupable(line) : !! bar.regroupable)
+            // A whole bar on a grouped chart (or one with rowBy()) may be carried to another row, even one whose dates are fixed.
+            const rows = ! edge && (!! config.grouped || !! config.rowLayout) && (line ? this.lineRegroupable(line) : !! bar.regroupable)
             const allowed = edge ? this.resizes(bar, edge) : ((together ? this.lineMovable(line) : bar.movable) || rows)
             const touch = event.pointerType === 'touch' || event.pointerType === 'pen'
 
@@ -1273,12 +1395,13 @@ export default function packstubGantt(config) {
                 id: event.pointerId, bar, edge, allowed, touch, picked: false, moved: false, press: null,
                 x0: event.clientX, y0: event.clientY, cx: event.clientX, cy: event.clientY,
                 s: bar.s, e: bar.e, sl0: this.ui('refs').scroll?.scrollLeft || 0,
-                rows, g0: String(bar.group ?? ''), g: String(bar.group ?? ''), dy: 0,
+                rows, g0: String(bar.group ?? ''), g: String(bar.group ?? ''), r0: String(bar.row ?? ''), r: String(bar.row ?? ''), dy: 0,
                 dir: this.rtl() ? -1 : 1, el: event.currentTarget,
                 line: line ? String(line.key) : null, together, lineMoves: !! line && this.lineMovable(line),
                 mates: line ? this.matesOf(bar) : [], shift: 0,
-                // preventLineOverlap(): a piece moved or resized alone stops at the next piece of its line.
-                walls: config.preventLineOverlap && entry && ! together ? this.walls(entry, bar) : null,
+                // preventLineOverlap(): a piece moved or resized alone stops at the next piece of its line;
+                // preventRowOverlap(): a bar at the next bar of its row.
+                walls: config.preventLineOverlap && entry && ! together ? this.walls(entry, bar) : this.rowWalls(bar),
             }
             // From here on the reactive copy: it is what this.pointer returns (an
             // identity check against the plain object would never match), and a
@@ -1333,7 +1456,19 @@ export default function packstubGantt(config) {
             const bar = p.bar
 
             // The row first: over another group, a line's piece carries its whole line.
-            if (p.rows) {
+            if (p.rows && config.rowLayout) {
+                // rowBy(): any row but its own, in another group only when the group may be written.
+                const at = this.rowAt(p.cy)
+                const own = this.view.rows.findIndex((row) => row.bars.includes(bar))
+                const row = at !== null ? this.view.rows[at] : null
+                const g = row ? String(row.group.key) : p.g0
+                const r = row ? String(row.row ?? '') : p.r0
+                const other = !! row && row.type !== 'group' && (g === p.g0 || !! config.groupMoves) && (g !== p.g0 || r !== p.r0)
+                this.targetRow = other ? row.key : null
+                p.g = other ? g : p.g0
+                p.r = other ? r : p.r0
+                p.dy = other && own >= 0 ? this.offsets[at] - this.offsets[own] : 0
+            } else if (p.rows) {
                 const at = this.rowAt(p.cy)
                 const own = this.view.rows.findIndex((row) => row.bars.includes(bar))
                 const other = at !== null && this.view.rows[at].group.key !== p.g0
@@ -1350,7 +1485,8 @@ export default function packstubGantt(config) {
             // A whole bar (or line) with fixed dates only changes rows; an edge moves whenever it was allowed.
             const moves = p.edge ? true : carried ? p.lineMoves : bar.movable
             let delta = moves ? Math.round(dx / this.view.pxPerDay * DAY / unit) * unit : 0
-            const walls = carried ? null : p.walls
+            // On another row, the walls of the row it left are not its own (the server checks the new one).
+            const walls = carried || p.r !== p.r0 ? null : p.walls
 
             if (p.edge === 'start') {
                 bar.s = Math.max(Math.min(p.s + delta, p.e - min), p.e - max, walls?.left ?? -Infinity)
@@ -1367,7 +1503,7 @@ export default function packstubGantt(config) {
             this.place(bar)
             if (p.mates.length) this.shiftMates(p, carried ? bar.s - p.s : 0)
 
-            this.hint = this.dates(bar) + (p.g !== p.g0 ? ' · ' + this.groupLabel(p.g) : '')
+            this.hint = this.dates(bar) + this.placeHint(p)
             this.autoScroll(p)
         },
 
@@ -1437,7 +1573,7 @@ export default function packstubGantt(config) {
                 if (p.moved) {
                     // Dragged back to where it was pressed, its click looks like a plain one.
                     this.swallowClick = true
-                    this.mountCreate(p.s, p.e, p.group, p.line)
+                    this.mountCreate(p.s, p.e, p.group, p.line, p.row)
                 }
 
                 return
@@ -1452,14 +1588,14 @@ export default function packstubGantt(config) {
                 return this.open(p.bar, event)
             }
 
-            if (! p.allowed || (p.bar.s === p.s && p.bar.e === p.e && p.g === p.g0)) return
+            if (! p.allowed || (p.bar.s === p.s && p.bar.e === p.e && p.g === p.g0 && p.r === p.r0)) return
 
             // The line's first piece, or any piece carried to another group: the whole line.
             if (p.line && (p.together || p.g !== p.g0)) {
                 return this.commitLine(p.bar.id, p.line, p.bar.s - p.s, p.g !== p.g0 ? p.g : null)
             }
 
-            this.commit(p.bar, p.s, p.e, p.g !== p.g0 ? p.g : null, p.g0)
+            this.commit(p.bar, p.s, p.e, p.g !== p.g0 ? p.g : null, p.g0, p.r !== p.r0 ? p.r : null, p.r0)
         },
 
         /**
@@ -1487,6 +1623,7 @@ export default function packstubGantt(config) {
             this.dragging = false
             this.hint = null
             this.target = null
+            this.targetRow = null
             clearTimeout(p.press)
             try { p.el.releasePointerCapture?.(p.id) } catch (e) {}
         },
@@ -1506,7 +1643,7 @@ export default function packstubGantt(config) {
             const line = this.lineDrags && ! edge ? entry : null
             const together = !! line && (vertical || this.carriesLine(bar))
             const allowed = vertical
-                ? !! config.grouped && (line ? this.lineRegroupable(line) : !! bar.regroupable)
+                ? (config.rowLayout ? !! bar.regroupable : !! config.grouped && (line ? this.lineRegroupable(line) : !! bar.regroupable))
                 : edge ? this.resizes(bar, edge) : (together ? this.lineMovable(line) : bar.movable)
 
             if (! allowed) {
@@ -1521,16 +1658,29 @@ export default function packstubGantt(config) {
             }
             // The reactive copy, never the plain object just assigned (see down()).
             this.keyboard ??= {
-                id: bar.id, s0: bar.s, e0: bar.e, s: bar.s, e: bar.e, g0: String(bar.group ?? ''), g: String(bar.group ?? ''), timer: null,
+                id: bar.id, s0: bar.s, e0: bar.e, s: bar.s, e: bar.e, g0: String(bar.group ?? ''), g: String(bar.group ?? ''), r0: String(bar.row ?? ''), r: String(bar.row ?? ''), timer: null,
                 line: key,
                 mates: key ? this.matesOf(bar) : [],
                 // Where every piece was, for Escape and a refusal.
                 groups0: key ? new Map(this.bars.filter((b) => String(b.line) === key).map((b) => [b.id, b.group])) : null,
-                walls: config.preventLineOverlap && entry && ! together ? this.walls(entry, bar) : null,
+                walls: config.preventLineOverlap && entry && ! together ? this.walls(entry, bar) : this.rowWalls(bar),
             }
             const k = this.keyboard
 
-            if (vertical) {
+            if (vertical && config.rowLayout) {
+                // rowBy(): the previous or next row in the chart's order, across groups when they may change.
+                const targets = this.rowTargets(k)
+                const at = targets.findIndex((t) => t.g === k.g && t.r === k.r)
+                const next = at < 0 ? undefined : targets[at + (event.key === 'ArrowDown' ? 1 : -1)]
+                if (next === undefined) return
+                k.g = next.g
+                k.r = next.r
+                if (this.collapsed[next.g]) {
+                    this.collapsed[next.g] = false
+                    this.persist()
+                }
+                this.regroup(bar.src, next.g, next.r)
+            } else if (vertical) {
                 // The previous or next group in the chart's order; at either end the bar stays.
                 const keys = this.groups.map((g) => String(g.key))
                 const next = keys[keys.indexOf(k.g) + (event.key === 'ArrowDown' ? 1 : -1)]
@@ -1548,7 +1698,7 @@ export default function packstubGantt(config) {
                 const unit = k.line ? this.lineUnit(k.line) : this.unitFor(bar)
                 const { min, max } = this.limitsFor(bar)
                 const d = forward ? unit : -unit
-                const walls = k.walls
+                const walls = k.r !== k.r0 ? null : k.walls
 
                 if (edge === 'end') {
                     k.e = Math.min(Math.max(k.e + d, k.s + min), k.s + max, walls?.right ?? Infinity)
@@ -1566,7 +1716,7 @@ export default function packstubGantt(config) {
                 if (k.mates.length) this.shiftMates(k, k.s - k.s0)
             }
 
-            this.hint = this.dates(this.rowBar(k.id) || bar) + (k.g !== k.g0 ? ' · ' + this.groupLabel(k.g) : '')
+            this.hint = this.dates(this.rowBar(k.id) || bar) + this.placeHint(k)
             this.say(this.hint)
 
             clearTimeout(k.timer)
@@ -1574,13 +1724,14 @@ export default function packstubGantt(config) {
         },
 
         /**
-         * Put a bar in another group in the browser (optimistically, or back): its row
+         * Put a bar in another group (and with rowBy() another row) in the browser (optimistically, or back): its row
          * changes, so the chart is rebuilt and, when the bar had the focus, the new
          * element takes it.
          */
-        regroup(src, group) {
+        regroup(src, group, row = undefined) {
             const focused = typeof document !== 'undefined' && document.activeElement?.dataset?.id === src.id
             src.group = group
+            if (row !== undefined) src.row = row
             this.groups = this.recount()
             this.rebuild()
             if (focused) {
@@ -1620,30 +1771,37 @@ export default function packstubGantt(config) {
             // The row bar, or the source bar when its row is not drawn (a group folded meanwhile).
             const src = this.bars.find((b) => b.id === k.id)
             const bar = this.rowBar(k.id) ?? (src && { ...src, src, s: k.s, e: k.e })
-            if (! bar || (k.s === k.s0 && k.e === k.e0 && k.g === k.g0)) return
+            if (! bar || (k.s === k.s0 && k.e === k.e0 && k.g === k.g0 && k.r === k.r0)) return
             bar.s = k.s
             bar.e = k.e
-            this.commit(bar, k.s0, k.e0, k.g !== k.g0 ? k.g : null, k.g0)
+            this.commit(bar, k.s0, k.e0, k.g !== k.g0 ? k.g : null, k.g0, k.r !== k.r0 ? k.r : null, k.r0)
         },
 
-        /** Send a move: new dates (and, with a group, a new row) against where the bar was; the server's answer, or the bar back. */
-        commit(bar, s0, e0, group = null, g0 = null) {
+        /**
+         * Send a move: new dates (and, with a group, a new group; with a row, rowBy()'s
+         * new row) against where the bar was; the server's answer, or the bar back.
+         */
+        commit(bar, s0, e0, group = null, g0 = null, row = null, r0 = null) {
             const src = bar.src
+            const relocate = group !== null || row !== null
             src._pending = true
             this.pending++
-            if (group !== null) {
+            if (relocate) {
                 // The chart is rebuilt from the source bars for the new row (now, or on
                 // a rebuild while the move is pending): the new dates go on the source
                 // too, or the bar would jump back in time until the server answers.
                 src.start = format(bar.s)
                 src.end = format(bar.e)
-                if (String(src.group ?? '') !== group) this.regroup(src, group)
+                if ((group !== null && String(src.group ?? '') !== group) || (row !== null && String(src.row ?? '') !== row)) {
+                    this.regroup(src, group ?? src.group, row ?? undefined)
+                }
             }
 
             const undo = (message) => {
                 src._pending = false
-                if (group !== null) {
-                    src.group = g0
+                if (relocate) {
+                    if (group !== null) src.group = g0
+                    if (row !== null) src.row = r0
                     src.start = format(s0)
                     src.end = format(e0)
                 }
@@ -1654,7 +1812,8 @@ export default function packstubGantt(config) {
             }
 
             const args = [bar.id, format(bar.s), bar.milestone ? null : format(bar.e)]
-            if (group !== null) args.push(group)
+            if (relocate) args.push(group)
+            if (row !== null) args.push(row)
 
             this.ui('wire').ganttMove(...args)
                 .then((result) => {
@@ -1869,7 +2028,7 @@ export default function packstubGantt(config) {
                 this.hint = null
                 if (k.line) return this.regroupLine(k.line, k.groups0, k.id)
                 const src = this.bars.find((b) => b.id === k.id)
-                if (src && k.g !== k.g0) return this.regroup(src, k.g0)
+                if (src && (k.g !== k.g0 || k.r !== k.r0)) return this.regroup(src, k.g0, config.rowLayout ? k.r0 : undefined)
                 return this.rebuild()
             }
             if (this.menu) this.closeMenu(true)
@@ -1903,7 +2062,12 @@ export default function packstubGantt(config) {
 
             const start = this.spotAt(event.clientX, event.currentTarget)
 
-            this.mountCreate(start, start + this.unitDays * DAY, row.group.key || null, this.lineAt(row))
+            this.mountCreate(start, start + this.unitDays * DAY, row.group.key || null, this.lineAt(row), this.rowOf(row))
+        },
+
+        /** The row a create on this row lands in (rowBy()): its key, '' on the unassigned row; nothing on a group's own row. */
+        rowOf(row) {
+            return config.rowLayout && row.type !== 'group' ? String(row.row ?? '') : null
         },
 
         /** The line a create on this row adds a piece to: a line's row (lineBy()), never a group's own row. */
@@ -1911,13 +2075,14 @@ export default function packstubGantt(config) {
             return row.type === 'bar' && row.line !== null && row.line !== undefined ? String(row.line) : null
         },
 
-        mountCreate(start, end, group, line = null) {
+        mountCreate(start, end, group, line = null, row = null) {
             const args = {
                 ganttStart: format(start),
                 ganttEnd: format(end),
                 ganttGroup: group,
             }
             if (line !== null) args.ganttLine = line
+            if (row !== null && row !== undefined) args.ganttRow = row
 
             this.ui('wire').mountAction(this.createAction.name, args)
         },
@@ -1944,7 +2109,7 @@ export default function packstubGantt(config) {
             this.menu = null
             this.pointer = {
                 select: true, id: event.pointerId, el: event.currentTarget, key: row.key,
-                group: row.group.key || null, line: this.lineAt(row), overlaps: false,
+                group: row.group.key || null, line: this.lineAt(row), row: this.rowOf(row), overlaps: false,
                 from, s: from, e: from + this.unitDays * DAY,
                 allowed: true, moved: false, touch: false, press: null, rows: false, dy: 0,
                 x0: event.clientX, y0: event.clientY, cx: event.clientX, cy: event.clientY,
@@ -1964,16 +2129,25 @@ export default function packstubGantt(config) {
             p.e = Math.max(p.from, at) + this.unitDays * DAY
 
             p.overlaps = this.selectionOverlaps(p)
-            this.hint = this.dates({ s: p.s, e: p.e, allDay: this.unitDays >= 1 }) + (p.group ? ' · ' + this.groupLabel(p.group) : '')
+            this.hint = this.dates({ s: p.s, e: p.e, allDay: this.unitDays >= 1 }) + (p.group ? ' · ' + this.groupLabel(p.group) : '') + (p.row ? ' · ' + this.rowLabel(p.row) : '')
             this.autoScroll(p)
         },
 
         /**
          * With preventLineOverlap(), whether the period being selected on a line's row
-         * overlaps a piece of that line: the band says so before the form opens (the
+         * overlaps a piece of that line (with preventRowOverlap(), a bar of that row): the band says so before the form opens (the
          * server still decides when it saves).
          */
         selectionOverlaps(p) {
+            // rowBy() with preventRowOverlap(): any bar of the row, in any group (the window's; the server checks the rest).
+            if (config.preventRowOverlap && p.row) {
+                return this.bars.some((b) => {
+                    if (String(b.row ?? '') !== p.row) return false
+                    const s = parse(b.start)
+                    const e = b.milestone ? s : parse(b.end)
+                    return s < p.e && p.s < e
+                })
+            }
             if (! config.preventLineOverlap || p.line === null) return false
             const line = this.lineIndex.get(p.line)
             const pieces = line
@@ -2133,6 +2307,7 @@ export default function packstubGantt(config) {
             this.groups = result.groups
             this.bars = result.bars
             this.setLines(result.lines)
+            this.rows = result.rows || []
             this.total = result.total ?? result.bars.length
             for (const group of this.groups) {
                 if (! (group.key in this.collapsed)) this.collapsed[group.key] = !! group.collapsed

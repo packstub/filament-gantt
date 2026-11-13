@@ -101,6 +101,32 @@ class Gantt
 
     protected bool $movePiecesAlone = false;
 
+    protected ?string $rowAttribute = null;
+
+    protected string|Closure|null $rowLabel = null;
+
+    /** @var list<Row>|Closure|null */
+    protected array|Closure|null $rows = null;
+
+    /** @var list<Row>|null rows() evaluated, once per instance */
+    protected ?array $definedRowsCache = null;
+
+    /** getRowForeignKey(), resolved once per instance: every bar asks. */
+    protected ?string $rowForeignKeyCache = null;
+
+    protected bool|Closure $preventRowOverlap = false;
+
+    protected ?bool $preventRowOverlapCache = null;
+
+    protected ?Closure $creatableInRow = null;
+
+    protected string|Closure|null $unassignedRowLabel = null;
+
+    protected bool $unassignedRowAlways = false;
+
+    /** @var array<string, string> labels of the rows met while reading, by key */
+    protected array $rowLabels = [];
+
     /** @var array{0: string, 1: string}|null */
     protected ?array $sort = null;
 
@@ -373,6 +399,85 @@ class Gantt
         return $this;
     }
 
+    /**
+     * Rows that hold several bars (issue #41): a machine's jobs, a person's tasks, a
+     * room's bookings, side by side on one row, overlapping ones stacked in lanes. A
+     * column (`room`) or a BelongsTo relation to another model (`machine`); the label
+     * is a dotted path (`machine.name`) or `fn (Model $record): string`. Works under
+     * groupBy() (a level above the rows) or without it. Without rows() the rows appear
+     * in the order of their first bar; the bars without a row share one row at the end
+     * of their group (see unassignedRow()).
+     *
+     * A bar dragged (or carried with ↑/↓) onto another row gets that row's key written,
+     * in the same transaction as its dates; a click on a row creates a bar in it. Not
+     * with compact() (its rows are groups) or lineBy().
+     */
+    public function rowBy(?string $attribute, string|Closure|null $label = null): static
+    {
+        $this->rowAttribute = $attribute;
+        $this->rowLabel = $label;
+        $this->rowForeignKeyCache = null;
+
+        return $this;
+    }
+
+    /**
+     * The rows, in order, empty ones included: a list of Row (see Row::fromModels())
+     * or a closure returning one. A Row's group() puts it in its group; one without
+     * a group shows in every group. A listed row stays whatever the filters leave.
+     *
+     * @param  list<Row>|Closure|null  $rows
+     */
+    public function rows(array|Closure|null $rows): static
+    {
+        $this->rows = $rows;
+        $this->definedRowsCache = null;
+
+        return $this;
+    }
+
+    /**
+     * Refuse a move, a resize or a new bar that would overlap another bar of the same
+     * row (a room booked twice, a machine on two jobs): default, they stack in lanes.
+     * Checked across every group the row shows in, on the server when a bar moves and
+     * when the create and edit actions save; the browser stops a drag at the next bar.
+     * A bar without a row is never checked.
+     */
+    public function preventRowOverlap(bool|Closure $condition = true): static
+    {
+        $this->preventRowOverlap = $condition;
+        $this->preventRowOverlapCache = null;
+
+        return $this;
+    }
+
+    /**
+     * Which rows a click may create in: `fn (string $row, ?string $group): bool`. By
+     * default a row the chart knows: one listed in rows() or one a bar of the chart
+     * is in; a related record that exists but has no row on the chart is refused.
+     */
+    public function creatableInRow(?Closure $callback): static
+    {
+        $this->creatableInRow = $callback;
+
+        return $this;
+    }
+
+    /**
+     * The row of the bars without a row (see rowBy()): a job nobody picked yet. By
+     * default it is called "Unassigned" and shows at the end of a group while a bar of
+     * that group has no row. Give it a name (`'No machine'`, or a closure returning one)
+     * and it stays in every group, empty or not: a bar dropped on it is taken off its
+     * row, a click on it creates a bar without one. `always: false` only renames it.
+     */
+    public function unassignedRow(string|Closure|null $label = null, bool $always = true): static
+    {
+        $this->unassignedRowLabel = $label;
+        $this->unassignedRowAlways = $always;
+
+        return $this;
+    }
+
     /** Order of the bars inside a group (default: by start). */
     public function sortBy(string $column, string $direction = 'asc'): static
     {
@@ -454,10 +559,10 @@ class Gantt
     }
 
     /**
-     * Whether a bar may be dragged to another row (another group): a bool or
-     * `fn (Model $record): bool`. Only on a chart grouped by a column or a BelongsTo,
-     * and for a user authorizeMoves() allows; `groups()` and the rows on the chart
-     * are the only targets.
+     * Whether a bar may be dragged to another row (another group, or with rowBy()
+     * another row): a bool or `fn (Model $record): bool`. Only on a chart grouped by a
+     * column or a BelongsTo (or with rowBy()), and for a user authorizeMoves() allows;
+     * `groups()`, `rows()` and the rows on the chart are the only targets.
      */
     public function regroupable(bool|Closure $condition = true): static
     {
@@ -524,7 +629,8 @@ class Gantt
     /**
      * A last check before a move is saved: `fn (Model $record, CarbonImmutable $start,
      * CarbonImmutable $end, CarbonImmutable $previousStart, CarbonImmutable $previousEnd): bool|string`.
-     * Return false to refuse, or a string to refuse with that message.
+     * Return false to refuse, or a string to refuse with that message. Then come the
+     * group and the previous group, and with rowBy() the row and the previous row.
      */
     public function canMove(?Closure $callback): static
     {
@@ -549,7 +655,8 @@ class Gantt
     /**
      * What a move does: `fn (Model $record, CarbonImmutable $start, CarbonImmutable $end,
      * CarbonImmutable $previousStart, CarbonImmutable $previousEnd, ?string $group,
-     * ?string $previousGroup): void` (the groups only when the chart is grouped). Throw
+     * ?string $previousGroup, ?string $row, ?string $previousRow): void` (the groups only
+     * when the chart is grouped, the rows only with rowBy()). Throw
      * MoveRejected to refuse it with a message the user sees; any other exception
      * is reported and the user sees "The change did not go through." Default: write
      * the start and end attributes and save. The dates are the chart's half-open
@@ -870,6 +977,135 @@ class Gantt
         return $key === null || $key === '' ? null : (string) $key;
     }
 
+    public function getRowAttribute(): ?string
+    {
+        return $this->rowAttribute;
+    }
+
+    /**
+     * Whether the rows hold several bars (see rowBy()).
+     *
+     * @throws LogicException with compact() or lineBy(), which lay the rows out their own way
+     */
+    public function hasRows(): bool
+    {
+        if ($this->rowAttribute === null) {
+            return false;
+        }
+
+        if ($this->compact) {
+            throw new LogicException("The Gantt's rowBy() and compact() each decide what a row is: compact() makes a group one row, rowBy() puts rows inside the groups. Use one of them.");
+        }
+
+        if ($this->lineAttribute !== null) {
+            throw new LogicException("The Gantt's rowBy() and lineBy() do not work on one chart yet (issue #41): use one of them.");
+        }
+
+        return true;
+    }
+
+    /** Evaluated once per instance, like readOnly(). */
+    public function preventsRowOverlap(): bool
+    {
+        if (! $this->hasRows()) {
+            return false;
+        }
+
+        return $this->preventRowOverlapCache ??= (bool) ($this->preventRowOverlap instanceof Closure ? app()->call($this->preventRowOverlap) : $this->preventRowOverlap);
+    }
+
+    /** The name of the row that holds the bars without a row (see unassignedRow()). */
+    public function getUnassignedRowLabel(): string
+    {
+        $label = $this->unassignedRowLabel instanceof Closure ? app()->call($this->unassignedRowLabel) : $this->unassignedRowLabel;
+
+        return filled($label) ? static::text($label) : __('packstub-gantt::gantt.unassigned');
+    }
+
+    /** Whether the row without a row shows in every group, empty or not (see unassignedRow()). */
+    public function showsUnassignedRow(): bool
+    {
+        return $this->hasRows() && $this->unassignedRowAlways;
+    }
+
+    /**
+     * Whether a bar's group may be written: the chart groups by a column or a
+     * BelongsTo. On a chart with rowBy(), a drag to a row of another group needs it.
+     */
+    public function movesBetweenGroups(): bool
+    {
+        return $this->getGroupForeignKey() !== null;
+    }
+
+    /**
+     * The attribute a bar's row is written to: the column, or the BelongsTo's foreign key.
+     *
+     * @internal
+     *
+     * @throws LogicException for a relation that is no BelongsTo to another model
+     */
+    public function getRowForeignKey(): ?string
+    {
+        if ($this->rowAttribute === null) {
+            return null;
+        }
+
+        if ($this->rowForeignKeyCache !== null) {
+            return $this->rowForeignKeyCache;
+        }
+
+        $relation = $this->rowRelation();
+
+        return $this->rowForeignKeyCache = $relation === null ? $this->rowAttribute : $relation->getForeignKeyName();
+    }
+
+    /**
+     * The rowBy() relation, or null for a column.
+     *
+     * @throws LogicException for anything but a BelongsTo to another model
+     */
+    protected function rowRelation(): ?BelongsTo
+    {
+        $model = $this->newModel();
+
+        if ($this->rowAttribute === null || ! $model->isRelation($this->rowAttribute)) {
+            return null;
+        }
+
+        $relation = $model->{$this->rowAttribute}();
+
+        if (! $relation instanceof BelongsTo || $relation instanceof MorphTo) {
+            throw new LogicException("The Gantt's rowBy() takes a column or a BelongsTo relation: [{$this->rowAttribute}] is neither. A row is keyed by the related record's key.");
+        }
+
+        if ($relation->getRelated()::class === $model::class) {
+            throw new LogicException("The Gantt's rowBy() does not take a relation to the chart's own model yet: parent tasks as rows come with issue #41. For a task split into pieces, see lineBy().");
+        }
+
+        return $relation;
+    }
+
+    /**
+     * The row a record is on: the column's value or the related record's key; null
+     * when it has none (the bar sits on the unassigned row).
+     *
+     * @internal
+     */
+    public function rowKey(Model $record): ?string
+    {
+        if ($this->rowAttribute === null) {
+            return null;
+        }
+
+        $value = $record->getAttribute($this->getRowForeignKey());
+
+        if ($value instanceof BackedEnum) {
+            $value = $value->value;
+        }
+
+        return $value === null || $value === '' ? null : (string) $value;
+    }
+
     public function getScale(): Scale
     {
         $scale = $this->scale ?? Scale::fromName(config('filament-gantt.default_scale'));
@@ -947,10 +1183,10 @@ class Gantt
         return ! $this->isReadOnly() && $this->canMoveRecord($record) && (bool) $this->evaluate($this->resizable, $record);
     }
 
-    /** Whether this record may be dragged to another row: the chart groups by something writable, and the rules allow it. */
+    /** Whether this record may be dragged to another row: the chart groups (or rows, see rowBy()) by something writable, and the rules allow it. */
     public function isRegroupable(Model $record): bool
     {
-        return $this->getGroupForeignKey() !== null && ! $this->isReadOnly() && $this->canMoveRecord($record) && (bool) $this->evaluate($this->regroupable, $record);
+        return ($this->getGroupForeignKey() !== null || $this->hasRows()) && ! $this->isReadOnly() && $this->canMoveRecord($record) && (bool) $this->evaluate($this->regroupable, $record);
     }
 
     public function getMinMinutes(): int
@@ -1100,6 +1336,34 @@ class Gantt
             ->where($parent, $line)
             ->orWhere(fn (Builder $root) => $root->where($key, $line)->whereNull($parent)))
             ->exists();
+    }
+
+    /**
+     * Whether a new bar may be created in a row (see rowBy()), as the browser sends it
+     * from the row that was clicked; null or '' is a bar without a row. Checked on the
+     * server whatever the browser sent: an unknown key never reaches the record.
+     */
+    public function canCreateInRow(mixed $row, mixed $group = null): bool
+    {
+        if (! $this->canCreate() || ! $this->hasRows()) {
+            return false;
+        }
+
+        if ($row === null || $row === '') {
+            return true;
+        }
+
+        if (! is_string($row) && ! is_int($row)) {
+            return false;
+        }
+
+        $row = (string) $row;
+
+        if ($this->creatableInRow) {
+            return (bool) ($this->creatableInRow)($row, is_string($group) && $group !== '' ? $group : null);
+        }
+
+        return $this->knowsRowKey($row);
     }
 
     /** @return list<string> */
@@ -1270,6 +1534,7 @@ class Gantt
             'groups' => $this->getGroups($bars),
             'bars' => $bars,
             'lines' => $this->getLines($bars),
+            'rows' => $this->getRows($bars),
             // More than max_bars in the window: the first ones are drawn and the toolbar says so.
             'total' => $total,
         ];
@@ -1332,6 +1597,10 @@ class Gantt
             $query->with($this->groupAttribute);
         }
 
+        if ($this->hasRows() && $this->rowRelation() !== null && ! $this->rowLabel instanceof Closure && ! array_key_exists($this->rowAttribute, $query->getEagerLoads())) {
+            $query->with($this->rowAttribute);
+        }
+
         if (is_string($this->dependencies) && $query->getModel()->isRelation($this->dependencies) && ! array_key_exists($this->dependencies, $query->getEagerLoads())) {
             $query->with($this->dependencies);
         }
@@ -1375,6 +1644,48 @@ class Gantt
         $counts = array_count_values(array_map(fn ($bar) => (string) ($bar['group'] ?? ''), $bars));
 
         return array_values(array_map(fn (array $group) => [...$group, 'count' => $counts[$group['key']] ?? 0], $groups));
+    }
+
+    /**
+     * The rows in order (see rowBy()): the definition's (`listed`), whatever the bars,
+     * then any met on a bar that was not listed, in order of first appearance. A listed
+     * row without a group shows in every group; a row met on a bar only in the groups
+     * of its bars.
+     *
+     * @internal
+     *
+     * @param  list<array<string, mixed>>  $bars
+     * @return list<array{key: string, label: string, color: ?string, group: ?string, listed: bool}>
+     */
+    public function getRows(array $bars): array
+    {
+        if (! $this->hasRows()) {
+            return [];
+        }
+
+        $rows = [];
+
+        // Without groups there is one implicit group: a listed row's own group means nothing there.
+        $grouped = $this->isGrouped();
+
+        foreach ($this->definedRows() as $row) {
+            // '' is the unassigned row's key, never a listed row's.
+            if ($row->getKey() === '') {
+                continue;
+            }
+
+            $rows[$row->getKey()] ??= [...$row->toArray(), ...($grouped ? [] : ['group' => null]), 'listed' => true];
+        }
+
+        foreach ($bars as $bar) {
+            $key = (string) ($bar['row'] ?? '');
+
+            if ($key !== '' && ! array_key_exists($key, $rows)) {
+                $rows[$key] = [...Row::make($key)->label($this->rowLabels[$key] ?? null)->toArray(), 'group' => null, 'listed' => false];
+            }
+        }
+
+        return array_values($rows);
     }
 
     /**
@@ -1447,6 +1758,15 @@ class Gantt
 
         if ($this->hasLines()) {
             $bar['line'] = $this->lineKey($record);
+        }
+
+        if ($this->hasRows()) {
+            $row = $this->rowKey($record);
+            $bar['row'] = $row ?? '';
+
+            if ($row !== null && ! isset($this->rowLabels[$row])) {
+                $this->rowLabels[$row] = $this->rowLabelFor($record, $row);
+            }
         }
 
         return $bar;
@@ -1618,7 +1938,8 @@ class Gantt
      * Move or resize a bar, enforcing every rule on the server whatever the browser
      * claimed. Dates are the chart's half-open range as `Y-m-d H:i` (seconds allowed,
      * a date alone too); without an end the duration is kept; with a group (a row's
-     * key, '' for the ungrouped row) the bar lands in that group too. Returns the bar
+     * key, '' for the ungrouped row) the bar lands in that group too, and with a row
+     * (rowBy(): the row's key, '' for no row) in that row. Returns the bar
      * as it looks afterwards. A refused move throws MoveRejected; an exception thrown
      * while saving (the database's, moveUsing()'s) propagates as it is.
      *
@@ -1626,12 +1947,12 @@ class Gantt
      *
      * @throws MoveRejected
      */
-    public function move(string $id, string $start, ?string $end = null, ?string $group = null): array
+    public function move(string $id, string $start, ?string $end = null, ?string $group = null, ?string $row = null): array
     {
         $record = $this->findRecord($id)
             ?? throw new MoveRejected(__('packstub-gantt::gantt.missing'));
 
-        $plan = $this->planMove($record, $start, $end, $group);
+        $plan = $this->planMove($record, $start, $end, $group, row: $row);
 
         if ($plan === null) {
             return $this->presentBar($record);
@@ -1747,13 +2068,13 @@ class Gantt
      * Every rule of a move, checked without writing anything: what applyMove() is to
      * do, or null when the bar would stay as it is. Dates as the browser sends them
      * (strings) or already read; `$alongLine` when the piece moves with its whole line
-     * (see moveLine()).
+     * (see moveLine()); `$row` the row it lands in (rowBy(): null keeps it, '' is no row).
      *
      * @return array<string, mixed>|null
      *
      * @throws MoveRejected
      */
-    protected function planMove(Model $record, CarbonImmutable|string $start, CarbonImmutable|string|null $end, ?string $group, bool $alongLine = false): ?array
+    protected function planMove(Model $record, CarbonImmutable|string $start, CarbonImmutable|string|null $end, ?string $group, bool $alongLine = false, ?string $row = null): ?array
     {
         if ($this->isReadOnly()) {
             throw new MoveRejected(__('packstub-gantt::gantt.read_only'));
@@ -1784,7 +2105,7 @@ class Gantt
         $regroup = $newGroup !== $previousGroup;
 
         if ($regroup) {
-            if (! $this->isRegroupable($record)) {
+            if (! $this->isRegroupable($record) || ! $this->movesBetweenGroups()) {
                 throw new MoveRejected(__('packstub-gantt::gantt.not_regroupable'));
             }
 
@@ -1793,7 +2114,24 @@ class Gantt
             }
         }
 
-        if ($newStart->equalTo($previousStart) && $newEnd->equalTo($previousEnd) && ! $regroup) {
+        // rowBy(): the row it lands in, the same way (a listed row, or one a bar is in).
+        $previousRow = $this->hasRows() ? $this->rowKey($record) : null;
+        $newRow = $row === null || ! $this->hasRows() ? $previousRow : ($row === '' ? null : $row);
+        $rowChange = $newRow !== $previousRow;
+
+        if ($rowChange) {
+            if (! $this->isRegroupable($record)) {
+                throw new MoveRejected(__('packstub-gantt::gantt.not_regroupable'));
+            }
+
+            if (! $this->knowsRowKey($row)) {
+                throw new MoveRejected(__('packstub-gantt::gantt.unknown_group'));
+            }
+        }
+
+        $relocate = $regroup || $rowChange;
+
+        if ($newStart->equalTo($previousStart) && $newEnd->equalTo($previousEnd) && ! $relocate) {
             return null;
         }
 
@@ -1803,7 +2141,7 @@ class Gantt
 
         // Classified by the edges, not by the duration alone: a bar that changed its
         // length and both its edges was moved as well as resized, and needs both rights.
-        // A change of row alone needs neither: regroupable() decided above.
+        // A change of row (or group) alone needs neither: regroupable() decided above.
         if ($minutes === $previousMinutes) {
             if (($startChanged || $endChanged) && ! $this->isMovable($record)) {
                 throw new MoveRejected(__('packstub-gantt::gantt.not_movable'));
@@ -1833,7 +2171,7 @@ class Gantt
             // it happened. One that started before it keeps its start.
             $past = $this->endedBefore($previousStart, $previousEnd, $lock);
 
-            if (($past && ($startChanged || $endChanged || $regroup)) || ($startChanged && ($newStart < $lock || $previousStart < $lock)) || ($endChanged && $newEnd < $lock)) {
+            if (($past && ($startChanged || $endChanged || $relocate)) || ($startChanged && ($newStart < $lock || $previousStart < $lock)) || ($endChanged && $newEnd < $lock)) {
                 // A lock at midnight reads as a date; one during the day (now()) says the time too.
                 $format = $lock->isStartOfDay() ? static::dateFormat() : static::dateTimeFormat();
 
@@ -1846,6 +2184,11 @@ class Gantt
             throw new MoveRejected(__('packstub-gantt::gantt.overlaps'));
         }
 
+        // rowBy(): a bar may not land on another bar of its row, the one it moves to included.
+        if (($startChanged || $endChanged || $rowChange) && $newRow !== null && $this->preventsRowOverlap() && $this->overlapsRow($record, $newRow, $newStart, $newEnd)) {
+            throw new MoveRejected(__('packstub-gantt::gantt.row_overlaps'));
+        }
+
         // The closures and the event see the same wall-clock moments in the app's
         // timezone, the tag Eloquent gives a record's dates, so now() and isPast()
         // read naturally; the maths above and the save below keep the UTC-tagged ones.
@@ -1856,10 +2199,10 @@ class Gantt
         }
 
         if ($this->canMove) {
-            $this->verdict(($this->canMove)($record, $start, $end, $from, $until, $newGroup, $previousGroup));
+            $this->verdict(($this->canMove)($record, $start, $end, $from, $until, $newGroup, $previousGroup, $newRow, $previousRow));
         }
 
-        return compact('record', 'newStart', 'newEnd', 'milestone', 'previousStart', 'start', 'end', 'from', 'until', 'regroup', 'newGroup', 'previousGroup');
+        return compact('record', 'newStart', 'newEnd', 'milestone', 'previousStart', 'start', 'end', 'from', 'until', 'regroup', 'newGroup', 'previousGroup', 'rowChange', 'newRow', 'previousRow');
     }
 
     /**
@@ -1874,18 +2217,18 @@ class Gantt
      */
     protected function applyMove(array $plan): array
     {
-        ['record' => $record, 'start' => $start, 'end' => $end, 'from' => $from, 'until' => $until, 'newGroup' => $newGroup, 'previousGroup' => $previousGroup] = $plan;
+        ['record' => $record, 'start' => $start, 'end' => $end, 'from' => $from, 'until' => $until, 'newGroup' => $newGroup, 'previousGroup' => $previousGroup, 'newRow' => $newRow, 'previousRow' => $previousRow] = $plan;
 
         if ($this->moveUsing) {
-            ($this->moveUsing)($record, $start, $end, $from, $until, $newGroup, $previousGroup);
+            ($this->moveUsing)($record, $start, $end, $from, $until, $newGroup, $previousGroup, $newRow, $previousRow);
         } else {
-            $this->store($record, $plan['newStart'], $plan['newEnd'], $plan['milestone'], $plan['previousStart'], $plan['regroup'] ? [$newGroup] : null);
+            $this->store($record, $plan['newStart'], $plan['newEnd'], $plan['milestone'], $plan['previousStart'], $plan['regroup'] ? [$newGroup] : null, $plan['rowChange'] ? [$newRow] : null);
         }
 
-        BarMoved::dispatch($record, $from, $until, $start, $end, $this->key, $previousGroup, $newGroup);
+        BarMoved::dispatch($record, $from, $until, $start, $end, $this->key, $previousGroup, $newGroup, $previousRow, $newRow);
 
         if ($this->afterMove) {
-            ($this->afterMove)($record, $start, $end, $from, $until, $newGroup, $previousGroup);
+            ($this->afterMove)($record, $start, $end, $from, $until, $newGroup, $previousGroup, $newRow, $previousRow);
         }
 
         unset($this->records[(string) $record->getKey()]);
@@ -1934,6 +2277,63 @@ class Gantt
     }
 
     /**
+     * Whether a record's dates overlap another bar of its row (see preventRowOverlap()):
+     * a saved record as it is, or a new or edited one with the form's values filled in
+     * (its row is read from it too). For an app's own forms; false without a row.
+     */
+    public function overlapsOnRow(Model $record): bool
+    {
+        if (($span = $this->span($record)) === null || ($row = $this->rowKey($record)) === null) {
+            return false;
+        }
+
+        return $this->overlapsRow($record, $row, $span[0], $span[1]);
+    }
+
+    /**
+     * Whether [start, end) overlaps another bar of a row (a milestone inside a bar does;
+     * edges that touch do not), in any group: the row is the resource, a machine busy
+     * for one project is busy for all. Only the bars near the range are read.
+     */
+    protected function overlapsRow(Model $record, string $row, CarbonImmutable $start, CarbonImmutable $end): bool
+    {
+        if (! $this->rowKeyShaped($row)) {
+            return false;
+        }
+
+        $query = $this->baseQuery();
+        $startColumn = $query->qualifyColumn($this->startAttribute);
+        $endColumn = $query->qualifyColumn($this->endAttribute);
+        // Whole days around the range: a date-only end is stored as its last day, and
+        // the exact test below decides.
+        $first = $start->subDay()->toDateString();
+        $after = $end->addDays(2)->toDateString();
+
+        $query
+            ->where($query->qualifyColumn($this->getRowForeignKey()), $row)
+            ->whereNotNull($startColumn)
+            ->where($startColumn, '<', $after)
+            ->where(fn (Builder $q) => $q->whereNull($endColumn)->orWhere($endColumn, '>=', $first));
+
+        if ($record->getKey() !== null) {
+            $query->whereKeyNot($record->getKey());
+        }
+
+        foreach ($query->get() as $other) {
+            if (($span = $this->span($other)) === null) {
+                continue;
+            }
+
+            // The rule of overlapsLine(): a milestone strictly inside a bar overlaps it.
+            if ($span[0] < $end && $start < $span[1]) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Every piece of a line the chart's query shows, in key order.
      *
      * @return Collection<int, Model>
@@ -1961,13 +2361,13 @@ class Gantt
     /**
      * Turn a chart range into the values a create form should show for the start
      * and end attributes (a date-only record's end day is the day before the
-     * chart's end), and the group and line the row that was clicked stands for.
+     * chart's end), and the group, line and row the row that was clicked stands for.
      *
      * @internal
      *
      * @return array<string, string>
      */
-    public function prefill(?string $start, ?string $end, ?string $group = null, ?string $line = null): array
+    public function prefill(?string $start, ?string $end, ?string $group = null, ?string $line = null, ?string $row = null): array
     {
         $data = [];
         $model = $this->newModel();
@@ -1998,6 +2398,11 @@ class Gantt
         // The line the same way (see canCreateOnLine()): a new piece of a line on the chart, or nothing.
         if ($line !== null && $line !== '' && ($attribute = $this->getLineForeignKey()) && $this->canCreateOnLine($line)) {
             $data[$attribute] = $line;
+        }
+
+        // And the row (see canCreateInRow()).
+        if ($row !== null && $row !== '' && $this->hasRows() && $this->canCreateInRow($row, $group)) {
+            $data[$this->getRowForeignKey()] = $row;
         }
 
         return $data;
@@ -2179,13 +2584,22 @@ class Gantt
     }
 
     /**
-     * Write the dates (and, when a one-element list is given, the group) and save.
+     * Write the dates (and, when a one-element list is given, the group or the row) and save.
      *
      * @param  array{0: ?string}|null  $group
+     * @param  array{0: ?string}|null  $row
      */
-    protected function store(Model $record, CarbonImmutable $start, CarbonImmutable $end, bool $milestone, CarbonImmutable $previousStart, ?array $group = null): void
+    protected function store(Model $record, CarbonImmutable $start, CarbonImmutable $end, bool $milestone, CarbonImmutable $previousStart, ?array $group = null, ?array $row = null): void
     {
         $dateOnly = $this->isDateOnly($record);
+
+        if ($row !== null) {
+            $record->setAttribute($this->getRowForeignKey(), $row[0]);
+            // The loaded relation would still say the old row (its label).
+            if ($record->isRelation($this->rowAttribute)) {
+                $record->unsetRelation($this->rowAttribute);
+            }
+        }
 
         if ($group !== null) {
             $record->setAttribute($this->getGroupForeignKey(), $group[0]);
@@ -2275,6 +2689,85 @@ class Gantt
         // A related record that exists but has no bar on the chart is no row the user
         // could click: accepting it would let a crafted request park a record under it.
         return $this->baseQuery()->where($relation->getQualifiedForeignKeyName(), $group)->exists();
+    }
+
+    /**
+     * Whether a row key names a row on the chart (see rowBy()): one listed in rows(),
+     * or one a bar of the chart's query is in; '' (the unassigned row) when
+     * unassignedRow() keeps it on the chart or there is a bar without a row. A related record that exists but has no row on the chart is not one.
+     */
+    protected function knowsRowKey(?string $row): bool
+    {
+        if (! $this->hasRows() || $row === null) {
+            return false;
+        }
+
+        $query = $this->baseQuery();
+        $column = $query->qualifyColumn($this->getRowForeignKey());
+
+        if ($row === '') {
+            return $this->unassignedRowAlways || $query->whereNull($column)->exists();
+        }
+
+        foreach ($this->definedRows() as $defined) {
+            if ($defined->getKey() === $row) {
+                return true;
+            }
+        }
+
+        return $this->rowKeyShaped($row) && $query->where($column, $row)->exists();
+    }
+
+    /** Whether a string may be a key of the rowBy() relation's model (an integer key never matches 'abc'; PostgreSQL throws). */
+    protected function rowKeyShaped(string $row): bool
+    {
+        $relation = $this->rowRelation();
+
+        return $relation === null || $relation->getRelated()->getKeyType() !== 'int' || ctype_digit($row);
+    }
+
+    /**
+     * The rows() list, evaluated once per instance.
+     *
+     * @return list<Row>
+     */
+    protected function definedRows(): array
+    {
+        if ($this->definedRowsCache !== null) {
+            return $this->definedRowsCache;
+        }
+
+        $rows = $this->rows instanceof Closure ? app()->call($this->rows) : $this->rows;
+
+        return $this->definedRowsCache = array_values(array_filter($rows ?? [], fn ($r) => $r instanceof Row));
+    }
+
+    /** A row's label as its first bar reads it: rowBy()'s label, the related record's name, or the value. */
+    protected function rowLabelFor(Model $record, string $key): string
+    {
+        if ($this->rowLabel instanceof Closure) {
+            return static::text(($this->rowLabel)($record));
+        }
+
+        if (is_string($this->rowLabel)) {
+            return static::text(data_get($record, $this->rowLabel) ?? $key);
+        }
+
+        if ($record->isRelation($this->rowAttribute)) {
+            $related = $record->getRelationValue($this->rowAttribute);
+
+            foreach (['name', 'title', 'label'] as $attribute) {
+                if ($related !== null && filled($related->getAttribute($attribute))) {
+                    return (string) $related->getAttribute($attribute);
+                }
+            }
+
+            return $key;
+        }
+
+        $value = $record->getAttribute($this->rowAttribute);
+
+        return $value instanceof HasLabel ? (string) $value->getLabel() : $key;
     }
 
     /**

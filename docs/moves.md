@@ -23,6 +23,8 @@ On a grouped chart a bar dragged up or down is carried to another group: the row
 
 A change of row alone asks `regroupable()` and `canRegroup()`, not `movable()`: the dates did not change. A chart grouped by a relation it cannot write (a `HasOne`, say), or not grouped at all, never offers it.
 
+With [`rowBy()`](groups.md#rows-under-the-groups), the rows inside the groups are targets too: the row under the pointer lights up, and on release the bar's `rowBy()` column (or foreign key) is written with its dates. A row of another group changes both, when the group can be written; otherwise only the rows of the bar's own group are targets. Only a row on the chart is accepted: one listed in `rows()`, one a bar of the chart's query is in, or the unassigned row (which takes the bar off its row) while the chart shows it: a bar without a row is on the chart, or [`unassignedRow()`](groups.md#rows-under-the-groups) keeps it there. `regroupable()` decides here too; `canRegroup()` is asked only when the group changes, and `canMove()`, `moveUsing()`, `afterMove()` get the new and the previous row after the groups. `BarMoved` has `$row`, `$previousRow` and `isRowChange()`.
+
 ### A line of pieces
 
 With [`lineBy()`](groups.md#several-bars-on-one-line), the pieces of a split task share a row, and a drag follows the convention of Microsoft Project and most Gantt tools:
@@ -113,20 +115,22 @@ Every rule takes a boolean or a closure that receives the record, and is checked
 | `authorizeMoves()` | Any move or resize by a user it does not allow (default: the policy's `update`). |
 | `movable()` | A change of position (same duration), any move of a milestone, and a change of both edges together with the duration (that is a move as well as a resize, so it needs both). |
 | `resizable()` | A change of duration, from either edge. Milestones are never resizable. |
-| `regroupable()` | A change of row (group). A row that is not on the chart is refused whatever this says. |
+| `regroupable()` | A change of row (a group, or with `rowBy()` a row). A row that is not on the chart is refused whatever this says. |
 | `minDuration()` / `maxDuration()` | A resize that makes the bar shorter or longer than that. The browser knows the bounds too and stops the handle there. |
 | `lockedBefore($moment)` | A start moved to before the moment, a start that was already before it, an end moved to before it, or any change to a bar that ended before it (its dates and its row: the past stays as it happened). A bar still running at the moment may change its end, and its row. A milestone on the moment itself is not past. The browser knows: a bar that ended before the moment is drawn locked, one that started before it has only its end handle. The message names the moment: a date for a midnight lock (`today()`), date and time otherwise (`now()`). |
-| `canMove()` | Whatever the closure says: `false` refuses with a generic message, a string refuses with that message. Its last two arguments are the new and the previous group key (null when ungrouped, or not grouped). |
+| `canMove()` | Whatever the closure says: `false` refuses with a generic message, a string refuses with that message. After the dates come the new and the previous group key (null when ungrouped, or not grouped), then with `rowBy()` the new and the previous row key. |
 | `canRegroup()` | The same, for a change of row only, with the record, the new and the previous group key. |
 | `preventLineOverlap()` | With `lineBy()`: a move or a resize that makes a piece overlap another piece of its line (pieces that touch are fine), and a new or edited piece whose form dates do (the modal stays open and says why). A whole line moving keeps its pieces apart, and a change of row alone changes no dates: neither is asked. The browser stops a drag at the neighbouring piece and shows a drag-to-create selection red while it overlaps one. |
 
-`preventLineOverlap()` checks the chart's own moves and forms. For your other forms (the resource's edit page, an import), ask the chart with the record holding the new values: `$gantt->overlapsOnLine($task)` is true when its dates overlap another piece of its line.
+| `preventRowOverlap()` | With `rowBy()`: a move, a resize or a change of row that makes a bar overlap another bar of the row it ends up in, in any group, and a new or edited bar whose form dates or row do. The browser stops a drag at the next bar of the row and shows a selection red while it overlaps one. A bar without a row is never checked. |
+
+`preventLineOverlap()` checks the chart's own moves and forms. For your other forms (the resource's edit page, an import), ask the chart with the record holding the new values: `$gantt->overlapsOnLine($task)` is true when its dates overlap another piece of its line, `$gantt->overlapsOnRow($job)` when they overlap another bar of its row.
 
 The dates a closure receives are the chart's half-open range: a whole-day record's end is the day after its last day ([Bars](bars.md#whole-days-and-moments)), as wall-clock moments in the app's timezone ([Time zones](#time-zones)), so `$start->isPast()` means what it says.
 
 ## Your own move logic
 
-`moveUsing()` replaces the default save. Throw `MoveRejected` to refuse the move: the bar goes back and the message is shown. After the dates it receives the new and the previous group key (`?string`), so a closure that writes the record itself writes the group too when they differ.
+`moveUsing()` replaces the default save. Throw `MoveRejected` to refuse the move: the bar goes back and the message is shown. After the dates it receives the new and the previous group key (`?string`), then with `rowBy()` the new and the previous row key, so a closure that writes the record itself writes the group and the row too when they differ.
 
 ```php
 ->moveUsing(function (Task $task, CarbonImmutable $start, CarbonImmutable $end) {

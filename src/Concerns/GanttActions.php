@@ -14,8 +14,8 @@ use Illuminate\Database\Eloquent\Model;
  * cacheGanttActions() while booting, for every trait whose name ends in "Actions".
  *
  * The browser mounts them with the bar (`ganttRecord`) or the spot that was
- * clicked (`ganttStart`, `ganttEnd`, `ganttGroup`, and `ganttLine` on a line's row
- * with lineBy()) as arguments; everything else is resolved here again, through the
+ * clicked (`ganttStart`, `ganttEnd`, `ganttGroup`, `ganttLine` on a line's row
+ * with lineBy(), `ganttRow` with rowBy()) as arguments; everything else is resolved here again, through the
  * chart's query and rules, whatever the browser sent.
  */
 trait GanttActions
@@ -40,7 +40,7 @@ trait GanttActions
             static::ganttChainHidden($action, fn () => $this->ganttActionRecord === null && (($found = $record()) === null || ! $gantt->offersAction($found, $action->getName())));
             $this->ganttRefreshAfter($action);
 
-            // An edit form that moves the record onto another piece of its line is not saved.
+            // An edit form that moves the record onto another piece of its line (or another bar of its row) is not saved.
             $mutate = static::ganttProperty($action, 'mutateDataUsing');
 
             $action->mutateDataUsing(function (array $data) use ($action, $mutate, $record) {
@@ -64,15 +64,17 @@ trait GanttActions
                 $action->model($gantt->getModel());
             }
 
-            // Hidden (so refused) unless the chart may create now, in that group, on that line.
+            // Hidden (so refused) unless the chart may create now, in that group, on that line, in that row.
             static::ganttChainHidden($action, fn () => ! $gantt->canCreateIn(static::ganttArgument($action, 'ganttGroup'))
-                || (($line = static::ganttArgument($action, 'ganttLine')) !== null && ! $gantt->canCreateOnLine($line)));
+                || (($line = static::ganttArgument($action, 'ganttLine')) !== null && ! $gantt->canCreateOnLine($line))
+                || (($row = static::ganttArgument($action, 'ganttRow')) !== null && ! $gantt->canCreateInRow($row, static::ganttArgument($action, 'ganttGroup'))));
 
             $prefill = fn () => $gantt->prefill(
                 static::ganttArgument($action, 'ganttStart'),
                 static::ganttArgument($action, 'ganttEnd'),
                 static::ganttArgument($action, 'ganttGroup'),
                 static::ganttArgument($action, 'ganttLine'),
+                static::ganttArgument($action, 'ganttRow'),
             );
 
             // The form opens with the clicked spot's dates and group…
@@ -141,22 +143,25 @@ trait GanttActions
     }
 
     /**
-     * With preventLineOverlap(), a form whose dates (or line) would overlap another
-     * piece of the line is not saved: the modal stays open with the user's input, and
-     * a notification says why. The form's values for the dates and the line are laid
-     * over the record being edited, or over a new one.
+     * With preventLineOverlap() or preventRowOverlap(), a form whose dates (or line, or
+     * row) would overlap another piece of the line or another bar of the row is not
+     * saved: the modal stays open with the user's input, and a notification says why.
+     * The form's values for the dates, the line and the row are laid over the record
+     * being edited, or over a new one.
      *
      * @param  array<string, mixed>  $data
      */
     protected function ganttGuardOverlap(Action $action, array $data, ?Model $record): void
     {
         $gantt = $this->getGantt();
+        $lines = $gantt->preventsLineOverlap();
+        $rows = $gantt->preventsRowOverlap();
 
-        if (! $gantt->preventsLineOverlap()) {
+        if (! $lines && ! $rows) {
             return;
         }
 
-        $attributes = array_filter([$gantt->getStartAttribute(), $gantt->getEndAttribute(), $gantt->getLineForeignKey()]);
+        $attributes = array_filter([$gantt->getStartAttribute(), $gantt->getEndAttribute(), $gantt->getLineForeignKey(), $gantt->getRowForeignKey()]);
         $values = array_intersect_key($data, array_flip($attributes));
 
         if ($values === []) {
@@ -166,8 +171,14 @@ trait GanttActions
         $model = $record ? clone $record : new ($gantt->getModel());
         $model->forceFill($values);
 
-        if ($gantt->overlapsOnLine($model)) {
-            Notification::make()->danger()->title(__('packstub-gantt::gantt.overlaps'))->send();
+        $message = match (true) {
+            $lines && $gantt->overlapsOnLine($model) => __('packstub-gantt::gantt.overlaps'),
+            $rows && $gantt->overlapsOnRow($model) => __('packstub-gantt::gantt.row_overlaps'),
+            default => null,
+        };
+
+        if ($message !== null) {
+            Notification::make()->danger()->title($message)->send();
 
             $action->halt();
         }

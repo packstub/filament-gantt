@@ -168,16 +168,16 @@
             <div class="ps-gantt-pad" :style="'height:' + slice.top + 'px'"></div>
 
             <template x-for="row in visibleRows" :key="row.key">
-                <div class="ps-gantt-row" :class="{ ['ps-gantt-row-' + row.type]: true, 'ps-gantt-row-target': target !== null && row.group.key === target }" :style="'height:' + row.height + 'px'">
+                <div class="ps-gantt-row" :class="{ ['ps-gantt-row-' + row.type]: true, 'ps-gantt-row-unassigned': row.type === 'row' && row.row === '', 'ps-gantt-row-target': (target !== null && row.group.key === target) || (targetRow !== null && row.key === targetRow) }" :style="'height:' + row.height + 'px'">
                     <div class="ps-gantt-label">
                         <template x-if="row.type === 'group'">
                             <button type="button" class="ps-gantt-fold" x-on:click="toggle(row.group.key)" :title="row.collapsed ? t.expand : t.collapse" :aria-expanded="! row.collapsed">
                                 <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" :class="{ 'ps-gantt-fold-closed': row.collapsed }"><path d="m6 8 4 4 4-4"/></svg>
                             </button>
                         </template>
-                        <span class="ps-gantt-dot" x-show="row.type !== 'bar' && row.group.color" :style="{ background: tone(row.group.color) }"></span>
-                        <span class="ps-gantt-label-text" :class="{ 'ps-gantt-label-group': row.type !== 'bar' }" x-text="row.label" :title="row.label"></span>
-                        <span class="ps-gantt-label-count" x-show="row.type !== 'bar'" x-text="row.group.count"></span>
+                        <span class="ps-gantt-dot" x-show="labelColor(row)" :style="{ background: tone(labelColor(row)) }"></span>
+                        <span class="ps-gantt-label-text" :class="{ 'ps-gantt-label-group': row.type === 'group' || row.type === 'lanes' }" x-text="row.label" :title="row.label"></span>
+                        <span class="ps-gantt-label-count" x-show="row.type === 'group' || row.type === 'lanes'" x-text="row.group.count"></span>
                     </div>
 
                     <div
