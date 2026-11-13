@@ -10,10 +10,11 @@ and the action mounts). Sibling of `plugins/filament-kanban`: same scaffold, sam
 composer test               # Pest suite
 composer test:filter <name>
 composer test:js            # browser side: node --test tests/js (layout(), drag, menu; plain Node, no packages)
+composer test:browser       # the chart in headless Chromium (tests/Browser); once: npm install && npx playwright install chromium
 composer lint               # Pint
 ```
 
-CI runs all three on Laravel 12/13 × Filament 4.*/5.* (floor `^4.13`), the JS suite on a pinned Node 22 (`actions/setup-node`),
+CI runs the first three on Laravel 12/13 × Filament 4.*/5.* (floor `^4.13`), the JS suite on a pinned Node 22 (`actions/setup-node`),
 and the Pest suite again on MySQL 8.4 and PostgreSQL 17 (the `databases` job): SQLite accepts SQL they refuse. Locally:
 `DB_CONNECTION=pgsql DB_DATABASE=… DB_USERNAME=… vendor/bin/pest` (the TestCase drops all tables first on a real server).
 
@@ -28,6 +29,16 @@ and the Pest suite again on MySQL 8.4 and PostgreSQL 17 (the `databases` job): S
   scale)` in `gantt.js` is pure and exported; `tests/js/` (node:test, `harness.mjs` fakes the few globals the component
   touches) covers it and the component's drag, menu and URL handling: add a case there for any change. After editing the
   assets in a consuming app, run `php artisan filament:assets` there (assets are copied, not linked).
+- `tests/Browser/` — Pest's browser plugin (Playwright, the only npm package: `package.json` is dev-only) against the
+  fixture panel, the app served from the test's own process (so SQLite in memory and the fixtures' statics reach it).
+  `chart(fn (Gantt $gantt) => …)` opens `Fixtures/ChartPage.php` (`/admin/chart`, shaped by the closure) on four fixed
+  weeks of March 2026 and returns `Browser/Chart.php`: `drag($task, days:, edge:, toRow:, at:, hold:, release:)` with a
+  real mouse, `keysOn()`, `clickBar()`, `clickRow()`, `bar()` / `drawnAt()` (the chart's own state), `settled()`.
+  The plugin has no bare mouse and its `waitForFunction()` returns at once, so `Chart` sends `mouseMove/Down/Up` to
+  Playwright's page channel itself (it reads the plugin's private page for that) and polls with `Amp\delay()`, never
+  `sleep()`: a sleeping test cannot answer the browser. Not in `phpunit.xml`, so `composer test` stays without a browser;
+  CI's `browser` job runs it on Filament 4 and 5. Assert what was saved in the database, and what the chart holds from
+  `bar()`; a new gesture (a kind of drag, a key, a click target) gets a case here besides its `tests/js` one.
 - `tests/Fixtures/TaskGantt.php` — a plain Livewire component (with Filament actions) holding a chart; `Task` has `date`
   casts, `Shift` has `datetime` casts; `AdminPanelProvider` + `TaskResource` for the resource page and widget tests.
 - `docs/` — the packstub.dev pages (synced by `docs-sync.yml`); `docs/images/` is taken by the demo's screenshot script.

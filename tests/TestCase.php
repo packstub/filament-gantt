@@ -62,6 +62,8 @@ abstract class TestCase extends Orchestra
             $table->foreignId('project_id')->nullable();
             $table->foreignId('assignee_id')->nullable();
             $table->foreignId('parent_id')->nullable();
+            // A second self-reference, for a chart with rowBy('parent') and lineBy() at once.
+            $table->foreignId('split_of_id')->nullable();
             $table->string('title');
             $table->string('status')->default('todo');
             $table->date('starts_on')->nullable();

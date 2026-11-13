@@ -16,3 +16,16 @@ updates:
       actions:
         patterns:
           - "*"
+
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    labels:
+      - "dependencies"
+    groups:
+      npm:
+        patterns:
+          - "*"

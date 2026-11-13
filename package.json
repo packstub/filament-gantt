@@ -1,0 +1,7 @@
+{
+    "private": true,
+    "description": "Dev only: Playwright for the browser tests in tests/Browser (composer test:browser). The chart itself has no build step.",
+    "devDependencies": {
+        "playwright": "^1.63.0"
+    }
+}
