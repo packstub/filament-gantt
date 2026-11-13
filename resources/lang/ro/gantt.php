@@ -52,6 +52,7 @@ return [
     'overlaps' => 'S-ar suprapune cu o altă parte a aceleiași linii.',
     'row_overlaps' => 'S-ar suprapune cu o altă bară de pe același rând.',
     'line_part' => ':label, de pe aceeași linie: :reason',
+    'child_part' => ':label, sub acest părinte: :reason',
     'offline' => 'Serverul nu a răspuns. Bara a revenit la locul ei.',
     'days' => ':count zi|:count zile|:count de zile',
     'hours' => ':count oră|:count ore|:count de ore',

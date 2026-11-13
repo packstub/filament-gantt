@@ -168,7 +168,7 @@ export function timePattern(pattern) {
  *   lineLayout            lineBy(): the bars of one line (bar.line) share a row, overlapping ones stacked
  *   lines                 Map of line key → { key, label, pieces } for the lines holding several pieces
  *   rowLayout             rowBy(): the bars of one row (bar.row) share it, overlapping ones stacked
- *   rows                  [{ key, label, color, group, listed }] the rows in order: listed ones (rows(); group null: in every group), then those met on the bars
+ *   rows                  [{ key, label, color, group, listed, actions }] the rows in order: listed ones (rows(); group null: in every group), then those met on the bars
  *   unassignedLabel       the name of the row holding the bars without a row
  *   unassignedRow         that row shows in every group, empty or not (default: only where a bar has no row)
  *   collapsed             { [group key]: bool } overriding the groups' own flag
@@ -180,7 +180,9 @@ export function timePattern(pattern) {
  * and each row bar is the source bar plus { s, e, x, w, lane, src }. A line's row is a
  * 'bar' row holding its pieces, `line` its key (every 'bar' row has one in the line
  * layout: creating there adds a piece). A row of rowBy() is a 'row' row, `row` its key and
- * `color` its dot; the bars without a row share the unassigned row, the group's last (`row` ''). An axis label that does not fit its cell is empty. A folded group's `span` is
+ * `color` its dot; the bars without a row share the unassigned row, the group's last (`row` ''). A parent task's
+ * own bar (`bar.parent`: its span) comes first in its row's bars, in no lane (`lanes` is the row's count: it is drawn
+ * behind the others over the whole height), and the row carries the parent's `actions`. An axis label that does not fit its cell is empty. A folded group's `span` is
  * { x, w, s, e, allDay, milestone }: the line from its first bar to its last, so the
  * row still shows where the group sits. Open groups, and groups with no bars, have none.
  */
@@ -295,7 +297,8 @@ export function layout(bars, window, scale) {
             groups.push(group)
             byKey.set(key, group)
         }
-        group.count++
+        // A parent's computed span (ParentSpan::FromChildren) is no record: never counted.
+        if (! bar.computed) group.count++
         placed.push({ ...bar, s, e, x: x(s), w: bar.milestone ? 0 : Math.max(x(e) - x(s), 4), lane: 0, src: bar })
     }
     if (groups.length === 0) {
@@ -383,7 +386,14 @@ export function layout(bars, window, scale) {
         for (const key of keys) {
             const bucket = key === '' ? loose : (buckets.get(key) || [])
             const meta = key === '' ? { label: window.unassignedLabel ?? '', color: null } : rowIndex.get(key)
-            const lanes = bucket.length ? pack(bucket) : 1
+            // Parent tasks as rows: the parent's own bar is its span, behind its children and in no lane.
+            const span = key === '' ? null : (bucket.find((b) => b.parent) ?? null)
+            const held = span ? bucket.filter((b) => b !== span) : bucket
+            const lanes = held.length ? pack(held) : 1
+            if (span) {
+                span.lane = 0
+                span.lanes = lanes
+            }
             out.push({
                 type: 'row',
                 // The group's key may hold a colon: its length keeps two rows apart.
@@ -393,10 +403,11 @@ export function layout(bars, window, scale) {
                 color: meta?.color ?? null,
                 height: lanes * rowHeight,
                 collapsed: false,
-                bars: bucket,
+                bars: span ? [span, ...held] : held,
                 span: null,
                 line: null,
                 row: key,
+                actions: Array.isArray(meta?.actions) ? meta.actions : null,
             })
         }
 
@@ -666,6 +677,11 @@ export default function packstubGantt(config) {
             return this.limitsFor(null)
         },
 
+        /** The bars that are records: a parent's computed span (ParentSpan::FromChildren) is not one. */
+        get barCount() {
+            return this.bars.reduce((n, bar) => n + (bar.computed ? 0 : 1), 0)
+        },
+
         get visibleRows() {
             return this.windowed ? this.view.rows.slice(this.slice.from, this.slice.to) : this.view.rows
         },
@@ -913,8 +929,9 @@ export default function packstubGantt(config) {
          * without the rule or without a row. Only the window's bars: the server checks the rest.
          */
         rowWalls(bar) {
-            if (! config.rowLayout || ! config.preventRowOverlap || ! bar.row) return null
-            return this.wallsOf(this.bars.filter((b) => String(b.row ?? '') === String(bar.row)), bar)
+            if (! config.rowLayout || ! config.preventRowOverlap || ! bar.row || bar.parent) return null
+            // A parent's span is never in the way of its children.
+            return this.wallsOf(this.bars.filter((b) => ! b.parent && String(b.row ?? '') === String(bar.row)), bar)
         },
 
         /**
@@ -925,7 +942,7 @@ export default function packstubGantt(config) {
         rowTaken(row, id, s, e) {
             if (! config.rowLayout || ! config.preventRowOverlap || ! row) return false
             return this.bars.some((b) => {
-                if (String(b.row ?? '') !== String(row) || (id !== null && String(b.id) === String(id))) return false
+                if (b.parent || String(b.row ?? '') !== String(row) || (id !== null && String(b.id) === String(id))) return false
                 const from = parse(b.start)
                 const until = b.milestone ? from : parse(b.end)
                 return from < e && s < until
@@ -977,7 +994,17 @@ export default function packstubGantt(config) {
             return (row?.bars || []).filter((b) => b !== bar && String(b.line) === String(bar.line)).map((b) => ({ id: b.id, s: b.s, e: b.e }))
         },
 
-        /** Shift the mates of a line in the air (a drag's or the keys') by d ms from where they were. */
+        /** The bars under a parent's span, on the chart: they follow when the span is dragged (moveChildrenWithParent()). */
+        childrenOf(bar) {
+            return this.view.rows.flatMap((row) => row.bars.filter((b) => ! b.parent && String(b.row ?? '') === String(bar.id)))
+        },
+
+        /** Whether a whole drag of this bar takes others along: a parent's span, with its children. */
+        carriesChildren(bar) {
+            return !! bar.parent && !! config.moveChildren
+        },
+
+        /** Shift the mates of a line (or the children of a parent) in the air (a drag's or the keys') by d ms from where they were. */
         shiftMates(state, d) {
             state.shift = d
             for (const mate of state.mates) {
@@ -1060,8 +1087,9 @@ export default function packstubGantt(config) {
         // An object, never a string: Alpine sets each property on its own, so a value
         // (a colour from user data) can never add declarations of its own.
         barStyle(bar) {
-            const top = 4 + bar.lane * config.rowHeight
-            const inner = config.rowHeight - 8
+            // A parent's span fills its row, whatever lanes its children take.
+            const top = bar.parent ? 2 : 4 + bar.lane * config.rowHeight
+            const inner = bar.parent ? (bar.lanes || 1) * config.rowHeight - 4 : config.rowHeight - 8
             const style = { 'inset-inline-start': bar.x + 'px', top: top + 'px', height: inner + 'px', '--ps-bar': this.tone(bar.color) }
 
             // Carried to another row (with its line): drawn over that row while the pointer is down.
@@ -1070,7 +1098,7 @@ export default function packstubGantt(config) {
             }
 
             // The diamond centres itself on the row's inner height, whatever row_height is.
-            if (bar.milestone) {
+            if (bar.milestone && ! bar.parent) {
                 style['--ps-gantt-row-inner'] = inner + 'px'
             } else {
                 style.width = bar.w + 'px'
@@ -1090,14 +1118,15 @@ export default function packstubGantt(config) {
          * line's row, only when it fits before the next piece of its lane.
          */
         labelOutside(bar, row = null) {
-            if (bar.milestone || this.compact || ! bar.label) return false
+            // A parent's span has its name on the row.
+            if (bar.milestone || this.compact || ! bar.label || bar.parent) return false
             if (this.textWidth(bar.label) + 18 <= bar.w) return false
             if (! row || row.bars.length < 2) return true
 
             const end = bar.x + bar.w
             let room = Infinity
             for (const other of row.bars) {
-                if (other !== bar && (other.lane || 0) === (bar.lane || 0) && other.x >= end) room = Math.min(room, other.x - end)
+                if (other !== bar && ! other.parent && (other.lane || 0) === (bar.lane || 0) && other.x >= end) room = Math.min(room, other.x - end)
             }
 
             return this.textWidth(bar.label) + 12 <= room
@@ -1155,7 +1184,7 @@ export default function packstubGantt(config) {
         },
 
         countText() {
-            const n = this.bars.length
+            const n = this.barCount
 
             if (this.total > n) {
                 return this.t.truncated.replace(':count', n).replace(':total', this.total)
@@ -1402,7 +1431,10 @@ export default function packstubGantt(config) {
             const together = !! line && this.carriesLine(bar)
             // A whole bar on a grouped chart (or one with rowBy()) may be carried to another row, even one whose dates are fixed.
             const rows = ! edge && (!! config.grouped || !! config.rowLayout) && (line ? this.lineRegroupable(line) : !! bar.regroupable)
-            const allowed = edge ? this.resizes(bar, edge) : ((together ? this.lineMovable(line) : bar.movable) || rows)
+            // A parent's span dragged whole takes its children along: every one on the chart has to be free to go.
+            const family = ! edge && this.carriesChildren(bar)
+            const kids = family ? this.childrenOf(bar) : []
+            const allowed = edge ? this.resizes(bar, edge) : ((together ? this.lineMovable(line) : family ? bar.movable && kids.every((b) => b.movable && ! b.src._pending) : bar.movable) || rows)
             const touch = event.pointerType === 'touch' || event.pointerType === 'pen'
 
             this.menu = null
@@ -1415,7 +1447,8 @@ export default function packstubGantt(config) {
                 blocked: false,
                 dir: this.rtl() ? -1 : 1, el: event.currentTarget,
                 line: line ? String(line.key) : null, together, lineMoves: !! line && this.lineMovable(line),
-                mates: line ? this.matesOf(bar) : [], shift: 0,
+                family,
+                mates: line ? this.matesOf(bar) : kids.map((b) => ({ id: b.id, s: b.s, e: b.e })), shift: 0,
                 // preventLineOverlap(): a piece moved or resized alone stops at the next piece of its line;
                 // preventRowOverlap(): a bar at the next bar of its row.
                 walls: config.preventLineOverlap && entry && ! together ? this.walls(entry, bar) : this.rowWalls(bar),
@@ -1518,7 +1551,7 @@ export default function packstubGantt(config) {
             }
 
             this.place(bar)
-            if (p.mates.length) this.shiftMates(p, carried ? bar.s - p.s : 0)
+            if (p.mates.length) this.shiftMates(p, carried || p.family ? bar.s - p.s : 0)
 
             // Its own row has walls; another row says so while the bar is over one of its bars.
             p.blocked = p.r !== p.r0 && this.rowTaken(p.r, bar.id, bar.s, bar.e)
@@ -1604,6 +1637,12 @@ export default function packstubGantt(config) {
                     return this.openMenu({ clientX: p.x0, clientY: p.y0, currentTarget: p.el }, p.bar)
                 }
 
+                // A parent's span lies over its row: a click on it is a click on the row, a new
+                // bar under the parent there. Where the chart does not create, it opens the parent.
+                if (p.bar.parent && this.createAction && ! this.readOnly) {
+                    return this.createUnder(p.bar, event, p.el)
+                }
+
                 return this.open(p.bar, event)
             }
 
@@ -1616,6 +1655,11 @@ export default function packstubGantt(config) {
                 this.rebuild()
                 this.notify(this.t.row_overlaps || this.t.failed, 'danger')
                 return this.say(this.t.row_overlaps || this.t.failed)
+            }
+
+            // A parent's span: the parent and its children, by the same amount.
+            if (p.family) {
+                return this.commitFamily(p.bar.id, p.bar.s - p.s)
             }
 
             // The line's first piece, or any piece carried to another group: the whole line.
@@ -1670,9 +1714,12 @@ export default function packstubGantt(config) {
             const entry = this.lineOf(bar)
             const line = this.lineDrags && ! edge ? entry : null
             const together = !! line && (vertical || this.carriesLine(bar))
+            // A parent's span moved whole takes its children along, as a drag does.
+            const family = ! vertical && ! edge && this.carriesChildren(bar)
+            const kids = family ? this.childrenOf(bar) : []
             const allowed = vertical
                 ? (config.rowLayout ? !! bar.regroupable : !! config.grouped && (line ? this.lineRegroupable(line) : !! bar.regroupable))
-                : edge ? this.resizes(bar, edge) : (together ? this.lineMovable(line) : bar.movable)
+                : edge ? this.resizes(bar, edge) : (together ? this.lineMovable(line) : family ? bar.movable && kids.every((b) => b.movable && ! b.src._pending) : bar.movable)
 
             if (! allowed) {
                 return this.say(this.t[vertical ? 'not_regroupable' : edge ? 'not_resizable' : 'not_movable'] || '')
@@ -1680,7 +1727,8 @@ export default function packstubGantt(config) {
 
             const key = together ? String(line.key) : null
             // Another bar, or the same bar going from its line to itself (or back): the keys so far are sent first.
-            if (this.keyboard && (this.keyboard.id !== bar.id || this.keyboard.line !== key)) {
+            // (A span going from itself with its children to one of its edges, or back, likewise.)
+            if (this.keyboard && (this.keyboard.id !== bar.id || this.keyboard.line !== key || this.keyboard.family !== family)) {
                 this.flushNudge()
                 if (bar.src._pending) return
             }
@@ -1688,7 +1736,8 @@ export default function packstubGantt(config) {
             this.keyboard ??= {
                 id: bar.id, s0: bar.s, e0: bar.e, s: bar.s, e: bar.e, g0: String(bar.group ?? ''), g: String(bar.group ?? ''), r0: String(bar.row ?? ''), r: String(bar.row ?? ''), timer: null,
                 line: key,
-                mates: key ? this.matesOf(bar) : [],
+                family,
+                mates: key ? this.matesOf(bar) : kids.map((b) => ({ id: b.id, s: b.s, e: b.e })),
                 // Where every piece was, for Escape and a refusal.
                 groups0: key ? new Map(this.bars.filter((b) => String(b.line) === key).map((b) => [b.id, b.group])) : null,
                 walls: config.preventLineOverlap && entry && ! together ? this.walls(entry, bar) : this.rowWalls(bar),
@@ -1796,6 +1845,10 @@ export default function packstubGantt(config) {
                 return this.commitLine(k.id, k.line, k.s - k.s0, k.g !== k.g0 ? k.g : null, k.groups0)
             }
 
+            if (k.family) {
+                return k.s === k.s0 ? this.rebuild() : this.commitFamily(k.id, k.s - k.s0)
+            }
+
             // The row bar, or the source bar when its row is not drawn (a group folded meanwhile).
             const src = this.bars.find((b) => b.id === k.id)
             const bar = this.rowBar(k.id) ?? (src && { ...src, src, s: k.s, e: k.e })
@@ -1842,6 +1895,7 @@ export default function packstubGantt(config) {
             const args = [bar.id, format(bar.s), bar.milestone ? null : format(bar.e)]
             if (relocate) args.push(group)
             if (row !== null) args.push(row)
+            let moved = false
 
             this.ui('wire').ganttMove(...args)
                 .then((result) => {
@@ -1850,10 +1904,68 @@ export default function packstubGantt(config) {
                     }
 
                     src._pending = false
+                    moved = true
                     this.replace(result.bar)
                     this.ui('dispatch')('gantt-bar-moved', { id: bar.id, bar: result.bar })
                     this.flash = bar.id
                     setTimeout(() => { if (this.flash === bar.id) this.flash = null }, 900)
+                })
+                .catch(() => undo(this.t.offline))
+                .finally(() => {
+                    this.pending--
+                    // ParentSpan::FromChildren: a child that moved changes its parent's span (both, when it
+                    // changed rows), which only the server computes. Quietly, once nothing is in the air.
+                    if (moved && config.parentSpan === 'children') this.refresh(true)
+                })
+        },
+
+        /**
+         * Send a move of a parent's span with its children (moveChildrenWithParent()): the
+         * span and every bar under it shift by `delta` ms in the browser at once; the
+         * server checks each (the children outside the window too) and answers with all of
+         * them, or refuses and every one goes back.
+         */
+        commitFamily(id, delta) {
+            const before = this.bars
+                .filter((src) => (src.parent ? String(src.id) === String(id) : String(src.row ?? '') === String(id)))
+                .map((src) => ({ src, start: src.start, end: src.end }))
+            const own = before.find((b) => b.src.parent)
+            if (! own || ! delta) return
+            const shift = (value) => format(parse(value) + delta)
+            const start = shift(own.start)
+
+            for (const b of before) {
+                b.src.start = shift(b.start)
+                b.src.end = shift(b.end)
+                b.src._pending = true
+            }
+            this.pending++
+            this.rebuild()
+
+            const undo = (message) => {
+                for (const b of before) {
+                    b.src.start = b.start
+                    b.src.end = b.end
+                    b.src._pending = false
+                }
+                this.rebuild()
+                this.notify(message, 'danger')
+                this.say(message)
+            }
+
+            this.ui('wire').ganttMoveParent(id, start)
+                .then((result) => {
+                    if (! result?.ok) {
+                        return undo(result?.message || this.t.failed)
+                    }
+
+                    for (const b of before) b.src._pending = false
+                    this.replaceAll(result.bars || [])
+                    for (const fresh of result.bars || []) {
+                        if (! fresh.computed) this.ui('dispatch')('gantt-bar-moved', { id: fresh.id, bar: fresh })
+                    }
+                    this.flash = id
+                    setTimeout(() => { if (this.flash === id) this.flash = null }, 900)
                 })
                 .catch(() => undo(this.t.offline))
                 .finally(() => this.pending--)
@@ -1956,7 +2068,9 @@ export default function packstubGantt(config) {
 
         recount() {
             const counts = {}
-            for (const bar of this.bars) counts[String(bar.group ?? '')] = (counts[String(bar.group ?? '')] || 0) + 1
+            for (const bar of this.bars) {
+                if (! bar.computed) counts[String(bar.group ?? '')] = (counts[String(bar.group ?? '')] || 0) + 1
+            }
             return this.groups.map((g) => ({ ...g, count: counts[g.key] || 0 }))
         },
 
@@ -2091,6 +2205,49 @@ export default function packstubGantt(config) {
             const start = this.spotAt(event.clientX, event.currentTarget)
 
             this.mountCreate(start, start + this.unitDays * DAY, row.group.key || null, this.lineAt(row), this.rowOf(row))
+        },
+
+        /**
+         * A click on a parent's span: a new bar under that parent, at the snap unit under
+         * the pointer (read from the span's own box), in the parent's group.
+         */
+        createUnder(bar, event, el) {
+            const rect = el?.getBoundingClientRect?.()
+            const px = rect ? Math.max(0, this.rtl() ? rect.right - event.clientX : event.clientX - rect.left) : 0
+            const days = Math.floor(((bar.s - this.view.start) / DAY + px / this.view.pxPerDay) / this.unitDays) * this.unitDays
+            const start = this.view.start + days * DAY
+
+            this.mountCreate(start, start + this.unitDays * DAY, String(bar.group ?? '') || null, null, String(bar.id))
+        },
+
+        /**
+         * A parent task's row stands for its record: what a click on its name and its menu
+         * act on ({ id, actions, label }, as a bar), or null for any other row.
+         */
+        rowRecord(row) {
+            return row?.type === 'row' && Array.isArray(row.actions) ? { id: String(row.row), actions: row.actions, label: row.label } : null
+        },
+
+        /** Whether a row's name does something: the parent it stands for has an action this user may run. */
+        rowActs(row) {
+            const record = this.rowRecord(row)
+            return !! record && (this.clicks(record) || this.actionsFor(record).length > 0)
+        },
+
+        /** A click (or Enter) on a parent's name: its barAction() when it offers it, else its menu. */
+        openRow(row, event) {
+            const record = this.rowRecord(row)
+            if (! record) return
+            if (this.clicks(record)) return this.runAction(this.barAction, record)
+            this.openMenu(event, record)
+        },
+
+        /** A right-click on a parent's name: its menu, when it has one (else the browser's own). */
+        rowMenu(row, event) {
+            const record = this.rowRecord(row)
+            if (! record || ! this.actionsFor(record).length) return
+            event.preventDefault?.()
+            this.openMenu(event, record)
         },
 
         /** The row a create on this row lands in (rowBy()): its key, '' on the unassigned row; nothing on a group's own row. */

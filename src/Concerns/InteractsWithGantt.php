@@ -242,8 +242,42 @@ trait InteractsWithGantt
     }
 
     /**
+     * Move a parent's span with its children (see Gantt::moveParent()): the parent of
+     * bar $id and every child shift so that the span starts at $start. Answered like
+     * ganttMoveLine(), with the parent's bar and every child's.
+     *
+     * @return array{ok: bool, bars?: list<array<string, mixed>>, message?: string}
+     */
+    #[Renderless]
+    public function ganttMoveParent(mixed $id, mixed $start): array
+    {
+        if (! is_string($id) || ! is_string($start)) {
+            return ['ok' => false, 'message' => __('packstub-gantt::gantt.failed')];
+        }
+
+        try {
+            $bars = $this->getGantt()->moveParent($id, $start);
+        } catch (MoveRejected $e) {
+            return ['ok' => false, 'message' => $e->getMessage()];
+        } catch (\Throwable $e) {
+            report($e);
+
+            return ['ok' => false, 'message' => __('packstub-gantt::gantt.failed')];
+        }
+
+        foreach ($bars as $bar) {
+            // A computed span is no record that moved.
+            if (empty($bar['computed'])) {
+                $this->ganttMoved($bar['id'], $bar);
+            }
+        }
+
+        return ['ok' => true, 'bars' => $bars];
+    }
+
+    /**
      * Hook after a successful move (log it, notify someone…); once per piece when a
-     * whole line moves.
+     * whole line moves, once per record when a parent moves with its children.
      *
      * @param  array<string, mixed>  $bar
      */
@@ -297,6 +331,9 @@ trait InteractsWithGantt
             // The row of the bars without a row: its name, and whether it shows in every group, empty or not.
             'unassignedLabel' => $gantt->hasRows() ? $gantt->getUnassignedRowLabel() : null,
             'unassignedRow' => $gantt->showsUnassignedRow(),
+            // Parent tasks as rows: what a parent draws behind its children ('own', 'children', 'none'), and whether dragging it takes them along.
+            'parentSpan' => $gantt->hasParentRows() ? $gantt->getParentSpan()->value : null,
+            'moveChildren' => $gantt->hasParentRows() && $gantt->movesChildrenWithParent(),
             'scale' => $gantt->getScale()->value,
             'unit' => $gantt->getUnit()->value,
             'minMinutes' => $gantt->getMinMinutes(),

@@ -176,7 +176,19 @@
                             </button>
                         </template>
                         <span class="ps-gantt-dot" x-show="labelColor(row)" :style="{ background: tone(labelColor(row)) }"></span>
-                        <span class="ps-gantt-label-text" :class="{ 'ps-gantt-label-group': row.type === 'group' || row.type === 'lanes' }" x-text="row.label" :title="row.label"></span>
+                        {{-- A parent task's row (rowBy() to the chart's own model) carries the parent's actions on its name. --}}
+                        <span
+                            class="ps-gantt-label-text"
+                            :class="{ 'ps-gantt-label-group': row.type === 'group' || row.type === 'lanes', 'ps-gantt-label-action': rowActs(row) }"
+                            x-text="row.label"
+                            :title="row.label"
+                            :role="rowActs(row) ? 'button' : null"
+                            :tabindex="rowActs(row) ? 0 : null"
+                            x-on:click="openRow(row, $event)"
+                            x-on:keydown.enter="rowActs(row) && ($event.preventDefault(), openRow(row, $event))"
+                            x-on:keydown.space="rowActs(row) && ($event.preventDefault(), openRow(row, $event))"
+                            x-on:contextmenu="rowMenu(row, $event)"
+                        ></span>
                         <span class="ps-gantt-label-count" x-show="row.type === 'group' || row.type === 'lanes'" x-text="row.group.count"></span>
                     </div>
 
@@ -208,7 +220,8 @@
                             <div
                                 class="ps-gantt-bar"
                                 :class="{
-                                    'ps-gantt-bar-milestone': bar.milestone,
+                                    'ps-gantt-bar-milestone': bar.milestone && ! bar.parent,
+                                    'ps-gantt-bar-span': !! bar.parent,
                                     'ps-gantt-bar-pending': bar.src._pending,
                                     'ps-gantt-bar-flash': flash === bar.id,
                                     'ps-gantt-bar-locked': ! bar.movable,
@@ -257,7 +270,7 @@
 
     {{-- the bar count, as a table's pagination summary; warns when the window holds more than max_bars --}}
     <div class="ps-gantt-footer">
-        <span class="ps-gantt-count" :class="{ 'ps-gantt-count-truncated': total > bars.length }" x-text="countText()" :title="total > bars.length ? t.truncated_hint : null"></span>
+        <span class="ps-gantt-count" :class="{ 'ps-gantt-count-truncated': total > barCount }" x-text="countText()" :title="total > barCount ? t.truncated_hint : null"></span>
     </div>
 
     <div class="ps-gantt-hint" x-show="hint" x-cloak x-text="hint"></div>
