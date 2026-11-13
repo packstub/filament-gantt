@@ -46,6 +46,7 @@
         "laravel/pint": "^1.27",
         "orchestra/testbench": "^10.0 || ^11.0",
         "pestphp/pest": "^4.0 || ^5.0",
+        "pestphp/pest-plugin-browser": "^4.0 || ^5.0",
         "pestphp/pest-plugin-livewire": "^4.0 || ^5.0"
     },
     "autoload": {
@@ -62,6 +63,7 @@
         "test": "pest",
         "test:filter": "pest --filter",
         "test:js": "node --test tests/js/*.test.mjs",
+        "test:browser": "pest tests/Browser",
         "lint": "vendor/bin/pint",
         "lint:test": "vendor/bin/pint --test"
     },

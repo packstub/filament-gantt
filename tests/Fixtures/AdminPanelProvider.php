@@ -26,7 +26,7 @@ class AdminPanelProvider extends PanelProvider
             ->id('admin')
             ->path('admin')
             ->login()
-            ->pages([Dashboard::class, PlanningPage::class])
+            ->pages([Dashboard::class, PlanningPage::class, ChartPage::class])
             ->resources([TaskResource::class])
             ->widgets([PlanningWidget::class])
             ->middleware([

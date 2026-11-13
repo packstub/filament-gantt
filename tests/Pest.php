@@ -1,14 +1,41 @@
 <?php
 
+use Illuminate\Support\Facades\Artisan;
 use Packstub\Gantt\Enums\Unit;
 use Packstub\Gantt\Gantt;
+use Packstub\Gantt\Tests\Browser\Chart;
+use Packstub\Gantt\Tests\Fixtures\ChartPage;
 use Packstub\Gantt\Tests\Fixtures\Project;
 use Packstub\Gantt\Tests\Fixtures\Shift;
 use Packstub\Gantt\Tests\Fixtures\Task;
 use Packstub\Gantt\Tests\Fixtures\User;
 use Packstub\Gantt\Tests\TestCase;
 
-pest()->extend(TestCase::class)->in('Feature');
+pest()->extend(TestCase::class)->in('Feature', 'Browser');
+
+/**
+ * The browser tests (tests/Browser, `composer test:browser`): Filament's and the chart's
+ * assets are served from the public directory, the signed-in user is the panel's, and
+ * the page a test opens is ChartPage, shaped by `define`.
+ */
+pest()->beforeEach(function () {
+    ChartPage::$define = null;
+    // Copied, never linked: once per run, so an edit to resources/dist is what the browser gets.
+    static $published = false;
+    $published = $published || Artisan::call('filament:assets') === 0;
+    $this->actingAs(user());
+})->in('Browser');
+
+/**
+ * Open the chart on four fixed weeks of the day scale (2026-03-02 to 2026-03-29, a Monday
+ * to a Sunday), whatever today is. `define` shapes the chart: `fn (Gantt $gantt) => $gantt->…`.
+ */
+function chart(?Closure $define = null, string $query = 'scale=day&from=2026-03-02&until=2026-03-29', string $path = '/admin/chart'): Chart
+{
+    ChartPage::$define = $define;
+
+    return new Chart(visit($path.($query === '' ? '' : '?'.$query)));
+}
 
 /** A task on whole days (`date` casts). @param  array<string, mixed>  $attributes */
 function task(string $title, ?string $starts = null, ?string $ends = null, array $attributes = []): Task
