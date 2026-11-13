@@ -10,6 +10,7 @@ use Filament\Actions\Action;
 use Filament\Facades\Filament;
 use Filament\Support\Contracts\HasLabel;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
@@ -88,6 +89,17 @@ class Gantt
     protected ?array $definedGroupsCache = null;
 
     protected bool $compact = false;
+
+    protected ?string $lineAttribute = null;
+
+    /** getLineForeignKey(), resolved once per instance: every bar asks. */
+    protected ?string $lineForeignKeyCache = null;
+
+    protected bool|Closure $preventLineOverlap = false;
+
+    protected ?bool $preventLineOverlapCache = null;
+
+    protected bool $movePiecesAlone = false;
 
     /** @var array{0: string, 1: string}|null */
     protected ?array $sort = null;
@@ -312,6 +324,51 @@ class Gantt
     public function compact(bool $condition = true): static
     {
         $this->compact = $condition;
+
+        return $this;
+    }
+
+    /**
+     * Several records on one line: a task split into pieces (work that stops and
+     * resumes later), a second period of the same work. `parent_id` is a nullable
+     * column holding the key of another record of the same table, or a BelongsTo
+     * relation to the same model. A record's line is its parent's key, or its own
+     * when it has none: one level deep, a parent has no parent. The records of a
+     * line share one row inside their group, overlapping ones stacked; each stays a
+     * bar of its own (its moves, rules, actions and events).
+     *
+     * Dragging the first piece of a line moves the whole line, as in Microsoft
+     * Project (see movePiecesAlone()); any other piece moves alone; a drag to another
+     * group carries the whole line. Creating on a line's row adds a piece to it, with
+     * the parent's key written to this attribute. The compact() layout ignores lines
+     * (its rows are groups); preventLineOverlap() applies to both.
+     */
+    public function lineBy(?string $attribute): static
+    {
+        $this->lineAttribute = $attribute;
+        $this->lineForeignKeyCache = null;
+
+        return $this;
+    }
+
+    /**
+     * Refuse a move, a resize or a new piece that would overlap another piece of the
+     * same line (default: they stack in lanes). Checked on the server when a bar moves
+     * and when the create and edit actions save, since the form can still change the
+     * dates; the browser stops a drag at the neighbouring piece.
+     */
+    public function preventLineOverlap(bool|Closure $condition = true): static
+    {
+        $this->preventLineOverlap = $condition;
+        $this->preventLineOverlapCache = null;
+
+        return $this;
+    }
+
+    /** Dragging a line's first piece moves that piece alone, like any other (default: the whole line). */
+    public function movePiecesAlone(bool $condition = true): static
+    {
+        $this->movePiecesAlone = $condition;
 
         return $this;
     }
@@ -727,6 +784,92 @@ class Gantt
         return $this->compact;
     }
 
+    public function getLineAttribute(): ?string
+    {
+        return $this->lineAttribute;
+    }
+
+    /** Whether records may share a line (see lineBy()). */
+    public function hasLines(): bool
+    {
+        return $this->lineAttribute !== null;
+    }
+
+    /** Whether the rows are lines: lineBy() outside the compact layout. */
+    public function showsLines(): bool
+    {
+        return $this->hasLines() && ! $this->compact;
+    }
+
+    /** Evaluated once per instance, like readOnly(). */
+    public function preventsLineOverlap(): bool
+    {
+        if (! $this->hasLines()) {
+            return false;
+        }
+
+        return $this->preventLineOverlapCache ??= (bool) ($this->preventLineOverlap instanceof Closure ? app()->call($this->preventLineOverlap) : $this->preventLineOverlap);
+    }
+
+    public function movesPiecesAlone(): bool
+    {
+        return $this->movePiecesAlone;
+    }
+
+    /**
+     * The attribute a piece's line is written to: the column, or the BelongsTo's foreign key.
+     *
+     * @internal
+     *
+     * @throws LogicException for a relation that is no BelongsTo to the same model
+     */
+    public function getLineForeignKey(): ?string
+    {
+        if ($this->lineAttribute === null) {
+            return null;
+        }
+
+        if ($this->lineForeignKeyCache !== null) {
+            return $this->lineForeignKeyCache;
+        }
+
+        $model = $this->newModel();
+
+        if (! $model->isRelation($this->lineAttribute)) {
+            return $this->lineForeignKeyCache = $this->lineAttribute;
+        }
+
+        $relation = $model->{$this->lineAttribute}();
+
+        if (! $relation instanceof BelongsTo || $relation instanceof MorphTo || $relation->getRelated()::class !== $model::class) {
+            throw new LogicException("The Gantt's lineBy() takes a column or a BelongsTo relation to the same model: [{$this->lineAttribute}] is neither. A line is keyed by its first record's own key.");
+        }
+
+        return $this->lineForeignKeyCache = $relation->getForeignKeyName();
+    }
+
+    /**
+     * The line a record is on: its parent's key, or its own when it has none.
+     *
+     * @internal
+     */
+    public function lineKey(Model $record): ?string
+    {
+        if ($this->lineAttribute === null) {
+            return null;
+        }
+
+        $parent = $record->getAttribute($this->getLineForeignKey());
+
+        if ($parent instanceof BackedEnum) {
+            $parent = $parent->value;
+        }
+
+        $key = $parent ?? $record->getKey();
+
+        return $key === null || $key === '' ? null : (string) $key;
+    }
+
     public function getScale(): Scale
     {
         $scale = $this->scale ?? Scale::fromName(config('filament-gantt.default_scale'));
@@ -922,6 +1065,43 @@ class Gantt
         return $this->knowsGroup($group);
     }
 
+    /**
+     * Whether a new piece may join a line (a line's key, as the browser sends it from
+     * the row that was clicked). Checked on the server whatever the browser sent: only
+     * a line on this chart (a record of the chart's query without a parent, or the
+     * parent of records in it), never a record that is itself a piece of another line.
+     */
+    public function canCreateOnLine(mixed $line): bool
+    {
+        if (! $this->canCreate() || ! $this->hasLines()) {
+            return false;
+        }
+
+        if (! is_string($line) && ! is_int($line)) {
+            return false;
+        }
+
+        $line = (string) $line;
+
+        if ($line === '' || ! $this->keyShaped($line)) {
+            return false;
+        }
+
+        $query = $this->baseQuery();
+        $parent = $query->qualifyColumn($this->getLineForeignKey());
+        $key = $query->getModel()->getQualifiedKeyName();
+
+        // One level deep: a piece of another line is no line of its own.
+        if ((clone $query)->where($key, $line)->whereNotNull($parent)->exists()) {
+            return false;
+        }
+
+        return $query->where(fn (Builder $q) => $q
+            ->where($parent, $line)
+            ->orWhere(fn (Builder $root) => $root->where($key, $line)->whereNull($parent)))
+            ->exists();
+    }
+
     /** @return list<string> */
     public function getRefreshOn(): array
     {
@@ -997,13 +1177,22 @@ class Gantt
 
         // An integer key never matches 'abc': asked anyway, PostgreSQL throws a QueryException
         // (a 500 from an action's hidden()), so a bar id of another shape is simply not found.
-        if (! is_int($id) && $this->newModel()->getKeyType() === 'int' && ! ctype_digit((string) $id)) {
+        if (! is_int($id) && ! $this->keyShaped((string) $id)) {
             return null;
         }
 
         return array_key_exists($key = (string) $id, $this->records)
             ? $this->records[$key]
             : $this->records[$key] = $this->baseQuery()->whereKey($key)->first();
+    }
+
+    /**
+     * Whether a string may be a key of the chart's model: an integer key never
+     * matches 'abc', and asked anyway, PostgreSQL throws a QueryException.
+     */
+    protected function keyShaped(string $value): bool
+    {
+        return $this->newModel()->getKeyType() !== 'int' || ctype_digit($value);
     }
 
     /**
@@ -1080,6 +1269,7 @@ class Gantt
             'window' => ['start' => $window['start']->toDateString(), 'end' => $window['end']->toDateString()],
             'groups' => $this->getGroups($bars),
             'bars' => $bars,
+            'lines' => $this->getLines($bars),
             // More than max_bars in the window: the first ones are drawn and the toolbar says so.
             'total' => $total,
         ];
@@ -1255,7 +1445,141 @@ class Gantt
             $bar['deps'] = $this->dependenciesOf($record);
         }
 
+        if ($this->hasLines()) {
+            $bar['line'] = $this->lineKey($record);
+        }
+
         return $bar;
+    }
+
+    /**
+     * The lines of the bars in a window that hold more than one piece, each with
+     * every piece it has (inside the window or not: a line moves as a whole, and the
+     * browser stops a drag at the next piece) and its label: its first record's, or,
+     * when the chart's query does not show that record, its earliest piece's. Read
+     * through baseQuery(), so a filter or the search never renames a line, and a
+     * record the user may not see never names one.
+     *
+     * @internal
+     *
+     * @param  list<array<string, mixed>>  $bars
+     * @return list<array{key: string, label: string, pieces: list<array<string, mixed>>}>
+     */
+    public function getLines(array $bars): array
+    {
+        if (! $this->hasLines()) {
+            return [];
+        }
+
+        $keys = array_values(array_filter(
+            array_unique(array_map(fn (array $bar) => (string) ($bar['line'] ?? ''), $bars)),
+            fn (string $key) => $key !== '' && $this->keyShaped($key),
+        ));
+
+        if ($keys === []) {
+            return [];
+        }
+
+        $query = $this->baseQuery();
+        $parent = $query->qualifyColumn($this->getLineForeignKey());
+        $key = $query->getModel()->getQualifiedKeyName();
+
+        $records = $query
+            ->where(fn (Builder $q) => $q
+                ->whereIn($parent, $keys)
+                ->orWhere(fn (Builder $root) => $root->whereIn($key, $keys)->whereNull($parent)))
+            ->orderBy($key)
+            ->limit(max(1, (int) config('filament-gantt.max_bars', 2000)))
+            ->get();
+
+        $wanted = array_flip($keys);
+        $lines = [];
+
+        foreach ($records as $record) {
+            $line = $this->lineKey($record);
+
+            if ($line !== null && isset($wanted[$line]) && ($piece = $this->pieceOf($record)) !== null) {
+                $lines[$line][] = [$record, $piece];
+            }
+        }
+
+        $out = [];
+
+        foreach ($keys as $line) {
+            if (count($lines[$line] ?? []) < 2) {
+                continue;
+            }
+
+            $pieces = $this->inLineOrder($lines[$line], $line);
+            $root = collect($pieces)->first(fn (array $piece) => $piece[1]['id'] === $line);
+
+            $out[] = [
+                'key' => $line,
+                'label' => $this->labelOf(($root ?? $pieces[0])[0]),
+                'pieces' => array_map(fn (array $piece) => $piece[1], $pieces),
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * What the browser needs of a piece of a line it may not draw: its dates, its row
+     * and whether it may move with its line (the lock as presentBar() draws it).
+     *
+     * @return array<string, mixed>|null null when the record has no start
+     */
+    protected function pieceOf(Model $record): ?array
+    {
+        $span = $this->span($record);
+
+        if ($span === null) {
+            return null;
+        }
+
+        [$start, $end, $milestone] = $span;
+        $lock = $this->getLockedBefore();
+
+        return [
+            'id' => (string) $record->getKey(),
+            'group' => $this->groupKey($record) ?? '',
+            'start' => $start->format('Y-m-d H:i'),
+            'end' => $end->format('Y-m-d H:i'),
+            'allDay' => $this->isDateOnly($record),
+            'milestone' => $milestone,
+            'movable' => $this->isMovable($record) && ! ($lock && $start < $lock),
+            'regroupable' => $this->isRegroupable($record) && ! ($lock && $this->endedBefore($start, $end, $lock)),
+        ];
+    }
+
+    /**
+     * Pieces in the order of the line: by start, the line's own record first among
+     * pieces starting together, then by key.
+     *
+     * @template T of array{0: Model, 1: array<string, mixed>}
+     *
+     * @param  list<T>  $pieces
+     * @return list<T>
+     */
+    protected function inLineOrder(array $pieces, string $line): array
+    {
+        usort($pieces, fn (array $a, array $b) => [$a[1]['start'], $a[1]['id'] !== $line] <=> [$b[1]['start'], $b[1]['id'] !== $line]);
+
+        return $pieces;
+    }
+
+    /** A record's label as its bar shows it (the bar() closure's, when it gives one). */
+    protected function labelOf(Model $record): string
+    {
+        $label = $this->label === null ? (string) $record->getKey() : static::text($this->read($this->label, $record));
+
+        $custom = $this->bar ? ($this->bar)($record) : null;
+
+        if ($custom instanceof Bar && isset($custom->toArray()['label'])) {
+            $label = static::text($custom->toArray()['label']);
+        }
+
+        return $label;
     }
 
     /**
@@ -1307,6 +1631,130 @@ class Gantt
         $record = $this->findRecord($id)
             ?? throw new MoveRejected(__('packstub-gantt::gantt.missing'));
 
+        $plan = $this->planMove($record, $start, $end, $group);
+
+        if ($plan === null) {
+            return $this->presentBar($record);
+        }
+
+        // One transaction from the save to the bar the browser gets back: when
+        // afterMove(), a listener or the bar's presentation fails, the save is undone
+        // too, so the browser putting the bar back matches the database. A MoveRejected
+        // thrown here refuses with its message; anything else (a database error, a bug
+        // in a closure) propagates for the caller to report: its message is not for
+        // the user (see InteractsWithGantt::ganttMove()).
+        return $record->getConnection()->transaction(fn () => $this->applyMove($plan));
+    }
+
+    /**
+     * Move a whole line (see lineBy()): every piece of the line of bar $id, inside the
+     * window or not, shifts by the amount that brings that bar to $start (whole days
+     * when any piece is date-only); with a group (a row's key, '' for the ungrouped
+     * row) every piece lands in that group too. Each piece is checked as a move of its
+     * own (movable, the lock, canMove(), canRegroup()…), all of them before anything is
+     * saved, so one refusal refuses the line; the pieces keep their places relative to
+     * each other, so preventLineOverlap() has nothing to say. One transaction for the
+     * line, a BarMoved per piece. Returns every piece's bar as it looks afterwards.
+     *
+     * @return list<array<string, mixed>>
+     *
+     * @throws MoveRejected
+     */
+    public function moveLine(string $id, string $start, ?string $group = null): array
+    {
+        $record = $this->findRecord($id)
+            ?? throw new MoveRejected(__('packstub-gantt::gantt.missing'));
+
+        // Lines move as lines only where the rows are lines (not in the compact layout).
+        if (! $this->showsLines()) {
+            throw new MoveRejected(__('packstub-gantt::gantt.failed'));
+        }
+
+        if ($this->isReadOnly()) {
+            throw new MoveRejected(__('packstub-gantt::gantt.read_only'));
+        }
+
+        [$previousStart] = $this->span($record)
+            ?? throw new MoveRejected(__('packstub-gantt::gantt.missing'));
+
+        $line = (string) $this->lineKey($record);
+        $pieces = $this->linePieces($line);
+        $key = (string) $record->getKey();
+
+        if (! $pieces->contains(fn (Model $piece) => (string) $piece->getKey() === $key)) {
+            throw new MoveRejected(__('packstub-gantt::gantt.missing'));
+        }
+
+        // As in the browser: a line moves along its days only from its first piece, and
+        // not at all with movePiecesAlone(); any piece carries it to another group.
+        if ($group === null || $group === ($this->groupKey($record) ?? '')) {
+            $first = $this->inLineOrder(
+                $pieces
+                    ->map(fn (Model $piece) => [$piece, ['id' => (string) $piece->getKey(), 'start' => ($this->span($piece)[0] ?? null)?->format('Y-m-d H:i')]])
+                    ->filter(fn (array $piece) => $piece[1]['start'] !== null)
+                    ->values()
+                    ->all(),
+                $line,
+            )[0][1]['id'] ?? null;
+
+            if ($this->movesPiecesAlone() || $first !== $key) {
+                throw new MoveRejected(__('packstub-gantt::gantt.failed'));
+            }
+        }
+
+        // Snapped relative to where the bar was, like a move; whole days as soon as one
+        // piece has no hours to move, so no piece lands between two days.
+        $unit = $pieces->contains(fn (Model $piece) => $this->isDateOnly($piece)) ? Unit::Day : $this->unit;
+        $delta = $this->minutes($previousStart, $unit->snapFrom($this->parse($start), $previousStart));
+
+        $plans = [];
+
+        foreach ($pieces as $piece) {
+            if (($span = $this->span($piece)) === null) {
+                continue;
+            }
+
+            [$from, $until, $milestone] = $span;
+
+            try {
+                $plan = $this->planMove($piece, $from->addMinutes($delta), $milestone ? null : $until->addMinutes($delta), $group, alongLine: true);
+            } catch (MoveRejected $e) {
+                // The bar that was dragged says why; another piece is named.
+                throw (string) $piece->getKey() === $key ? $e : new MoveRejected(__('packstub-gantt::gantt.line_part', ['label' => $this->labelOf($piece), 'reason' => $e->getMessage()]));
+            }
+
+            if ($plan !== null) {
+                $plans[] = $plan;
+            }
+        }
+
+        return $record->getConnection()->transaction(function () use ($plans, $pieces) {
+            $moved = [];
+
+            foreach ($plans as $plan) {
+                $moved[(string) $plan['record']->getKey()] = $this->applyMove($plan);
+            }
+
+            return $pieces
+                ->map(fn (Model $piece) => $moved[(string) $piece->getKey()] ?? $this->presentBar($piece))
+                ->filter()
+                ->values()
+                ->all();
+        });
+    }
+
+    /**
+     * Every rule of a move, checked without writing anything: what applyMove() is to
+     * do, or null when the bar would stay as it is. Dates as the browser sends them
+     * (strings) or already read; `$alongLine` when the piece moves with its whole line
+     * (see moveLine()).
+     *
+     * @return array<string, mixed>|null
+     *
+     * @throws MoveRejected
+     */
+    protected function planMove(Model $record, CarbonImmutable|string $start, CarbonImmutable|string|null $end, ?string $group, bool $alongLine = false): ?array
+    {
         if ($this->isReadOnly()) {
             throw new MoveRejected(__('packstub-gantt::gantt.read_only'));
         }
@@ -1323,10 +1771,10 @@ class Gantt
         // date-only record, whatever snapTo() says: it has no hours to move).
         $unit = $this->unitFor($record);
         $previousMinutes = $this->minutes($previousStart, $previousEnd);
-        $newStart = $unit->snapFrom($this->parse($start), $previousStart);
+        $newStart = $unit->snapFrom(is_string($start) ? $this->parse($start) : $start, $previousStart);
         $newEnd = $milestone
             ? $newStart
-            : ($end === null ? $newStart->addMinutes($previousMinutes) : $unit->snapFrom($this->parse($end), $previousEnd));
+            : ($end === null ? $newStart->addMinutes($previousMinutes) : $unit->snapFrom(is_string($end) ? $this->parse($end) : $end, $previousEnd));
 
         // The row the bar lands in: the one it is in, unless the browser named another
         // ('' is the ungrouped row). Only a row that is on the chart, never a related
@@ -1346,7 +1794,7 @@ class Gantt
         }
 
         if ($newStart->equalTo($previousStart) && $newEnd->equalTo($previousEnd) && ! $regroup) {
-            return $this->presentBar($record);
+            return null;
         }
 
         $minutes = $this->minutes($newStart, $newEnd);
@@ -1393,6 +1841,11 @@ class Gantt
             }
         }
 
+        // A piece moving with its whole line keeps its place among the others.
+        if (! $alongLine && ($startChanged || $endChanged) && $this->preventsLineOverlap() && $this->overlapsLine($record, $newStart, $newEnd)) {
+            throw new MoveRejected(__('packstub-gantt::gantt.overlaps'));
+        }
+
         // The closures and the event see the same wall-clock moments in the app's
         // timezone, the tag Eloquent gives a record's dates, so now() and isPast()
         // read naturally; the maths above and the save below keep the UTC-tagged ones.
@@ -1406,46 +1859,115 @@ class Gantt
             $this->verdict(($this->canMove)($record, $start, $end, $from, $until, $newGroup, $previousGroup));
         }
 
-        // One transaction from the save to the bar the browser gets back: when
-        // afterMove(), a listener or the bar's presentation fails, the save is undone
-        // too, so the browser putting the bar back matches the database. A MoveRejected
-        // thrown here refuses with its message; anything else (a database error, a bug
-        // in a closure) propagates for the caller to report: its message is not for
-        // the user (see InteractsWithGantt::ganttMove()).
-        return $record->getConnection()->transaction(function () use ($id, $record, $newStart, $newEnd, $milestone, $previousStart, $start, $end, $from, $until, $regroup, $newGroup, $previousGroup) {
-            if ($this->moveUsing) {
-                ($this->moveUsing)($record, $start, $end, $from, $until, $newGroup, $previousGroup);
-            } else {
-                $this->store($record, $newStart, $newEnd, $milestone, $previousStart, $regroup ? [$newGroup] : null);
+        return compact('record', 'newStart', 'newEnd', 'milestone', 'previousStart', 'start', 'end', 'from', 'until', 'regroup', 'newGroup', 'previousGroup');
+    }
+
+    /**
+     * Carry out a plan from planMove(): the save (or moveUsing()), BarMoved and
+     * afterMove(). Runs inside the caller's transaction. Returns the bar as it looks
+     * afterwards, read back through the chart's query, so what it adds (withCount,
+     * joins, eager loads) is still on it; a record the move took out of the query is
+     * presented as it is.
+     *
+     * @param  array<string, mixed>  $plan
+     * @return array<string, mixed>
+     */
+    protected function applyMove(array $plan): array
+    {
+        ['record' => $record, 'start' => $start, 'end' => $end, 'from' => $from, 'until' => $until, 'newGroup' => $newGroup, 'previousGroup' => $previousGroup] = $plan;
+
+        if ($this->moveUsing) {
+            ($this->moveUsing)($record, $start, $end, $from, $until, $newGroup, $previousGroup);
+        } else {
+            $this->store($record, $plan['newStart'], $plan['newEnd'], $plan['milestone'], $plan['previousStart'], $plan['regroup'] ? [$newGroup] : null);
+        }
+
+        BarMoved::dispatch($record, $from, $until, $start, $end, $this->key, $previousGroup, $newGroup);
+
+        if ($this->afterMove) {
+            ($this->afterMove)($record, $start, $end, $from, $until, $newGroup, $previousGroup);
+        }
+
+        unset($this->records[(string) $record->getKey()]);
+
+        $fresh = $this->baseQuery()->whereKey($record->getKey())->first() ?? $record->fresh() ?? $record;
+
+        return $this->presentBar($fresh) ?? throw new MoveRejected(__('packstub-gantt::gantt.missing'));
+    }
+
+    /**
+     * Whether a record's dates overlap another piece of its line: a saved record as it
+     * is, or a new or edited one with the form's values filled in (its line is read
+     * from it too). For an app's own forms when preventLineOverlap() is on.
+     */
+    public function overlapsOnLine(Model $record): bool
+    {
+        if (($span = $this->span($record)) === null) {
+            return false;
+        }
+
+        return $this->overlapsLine($record, $span[0], $span[1]);
+    }
+
+    /** Whether [start, end) overlaps another piece of the record's line (a milestone inside a piece does; edges that touch do not). */
+    protected function overlapsLine(Model $record, CarbonImmutable $start, CarbonImmutable $end): bool
+    {
+        $line = $this->lineKey($record);
+
+        if ($line === null) {
+            return false;
+        }
+
+        $self = $record->getKey() === null ? null : (string) $record->getKey();
+
+        foreach ($this->linePieces($line) as $piece) {
+            if ($self !== null && (string) $piece->getKey() === $self) {
+                continue;
             }
 
-            BarMoved::dispatch($record, $from, $until, $start, $end, $this->key, $previousGroup, $newGroup);
-
-            if ($this->afterMove) {
-                ($this->afterMove)($record, $start, $end, $from, $until, $newGroup, $previousGroup);
+            if (($span = $this->span($piece)) !== null && $span[0] < $end && $start < $span[1]) {
+                return true;
             }
+        }
 
-            unset($this->records[(string) $id]);
+        return false;
+    }
 
-            // Read back through the chart's query, so what it adds (withCount, joins,
-            // eager loads) is still on the bar; a record the move took out of the query
-            // is presented as it is.
-            $fresh = $this->baseQuery()->whereKey($record->getKey())->first() ?? $record->fresh() ?? $record;
+    /**
+     * Every piece of a line the chart's query shows, in key order.
+     *
+     * @return Collection<int, Model>
+     */
+    protected function linePieces(string $line): Collection
+    {
+        if (! $this->hasLines() || $line === '' || ! $this->keyShaped($line)) {
+            return new Collection;
+        }
 
-            return $this->presentBar($fresh) ?? throw new MoveRejected(__('packstub-gantt::gantt.missing'));
-        });
+        $query = $this->baseQuery();
+        $parent = $query->qualifyColumn($this->getLineForeignKey());
+        $key = $query->getModel()->getQualifiedKeyName();
+
+        return $query
+            ->where(fn (Builder $q) => $q
+                ->where($parent, $line)
+                ->orWhere(fn (Builder $root) => $root->where($key, $line)->whereNull($parent)))
+            ->orderBy($key)
+            ->get()
+            ->filter(fn (Model $piece) => $this->lineKey($piece) === $line)
+            ->values();
     }
 
     /**
      * Turn a chart range into the values a create form should show for the start
      * and end attributes (a date-only record's end day is the day before the
-     * chart's end).
+     * chart's end), and the group and line the row that was clicked stands for.
      *
      * @internal
      *
      * @return array<string, string>
      */
-    public function prefill(?string $start, ?string $end, ?string $group = null): array
+    public function prefill(?string $start, ?string $end, ?string $group = null, ?string $line = null): array
     {
         $data = [];
         $model = $this->newModel();
@@ -1471,6 +1993,11 @@ class Gantt
         // never lands in a foreign key.
         if ($group !== null && $group !== '' && ($attribute = $this->getGroupForeignKey()) && $this->canCreateIn($group)) {
             $data[$attribute] = $group;
+        }
+
+        // The line the same way (see canCreateOnLine()): a new piece of a line on the chart, or nothing.
+        if ($line !== null && $line !== '' && ($attribute = $this->getLineForeignKey()) && $this->canCreateOnLine($line)) {
+            $data[$attribute] = $line;
         }
 
         return $data;

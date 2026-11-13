@@ -25,6 +25,12 @@ class Task extends Model
         return $this->belongsTo(Project::class);
     }
 
+    /** The record whose line this one joins (lineBy('parent')). */
+    public function parent(): BelongsTo
+    {
+        return $this->belongsTo(static::class);
+    }
+
     /** The tasks this one waits for (a pivot table), for dependencies('predecessors'). */
     public function predecessors(): BelongsToMany
     {

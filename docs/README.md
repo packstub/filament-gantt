@@ -15,6 +15,7 @@ A Gantt chart and resource timeline for Filament v4 (4.13+) and v5. Any Eloquent
 - **[Drag to move, resize or reassign](moves.md)**: bars move at once, by an edge or to another row.
 - **[Rules on the server](moves.md)**: policies, durations and a locked past, always checked.
 - **[Groups and resource timelines](groups.md)**: rows by project, assignee, room or machine.
+- **[Split tasks](groups.md#several-bars-on-one-line)**: several bars on one line, moved together or piece by piece.
 - **[Milestones, progress and dependencies](bars.md)**: diamonds, fills and finish-to-start arrows.
 - **[Filament actions on bars](actions.md)**: click to edit, right-click for more, click or drag to create.
 - **[Hour to year, zoom and Fit](filters.md)**: five scales, wheel or pinch zoom, the whole plan in one screen.
@@ -29,7 +30,7 @@ A Gantt chart and resource timeline for Filament v4 (4.13+) and v5. Any Eloquent
 | --- | --- |
 | [Installation](installation.md) | Requirements, your first chart on a resource page, a chart in any Livewire component |
 | [Bars](bars.md) | Start and end attributes, whole days versus moments, label, colour, progress, milestones, the `Bar` shape |
-| [Groups](groups.md) | Grouping by a column or a relation, fixed group lists, the resource-timeline recipe (rooms × bookings) |
+| [Groups](groups.md) | Grouping by a column or a relation, fixed group lists, split tasks (several bars on one line), the resource-timeline recipe (rooms × bookings) |
 | [Moving and resizing](moves.md) | What a drag does, snapping, every rule, `moveUsing()`, `afterMove()`, the `BarMoved` event |
 | [Filters and the time window](filters.md) | Scales, the window and its bounds, the search box, select, multiple, Yes / No, toggle and date-range filters and where they are shown, refreshing and polling |
 | [Actions](actions.md) | Click and right-click actions on bars, creating on an empty spot |

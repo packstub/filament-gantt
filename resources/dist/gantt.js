@@ -165,14 +165,17 @@ export function timePattern(pattern) {
  *   groups                [{ key, label, color, collapsed, count }] in order (may be empty)
  *   grouped               whether group rows are drawn
  *   compact               one row per group, overlapping bars stacked in lanes
+ *   lineLayout            lineBy(): the bars of one line (bar.line) share a row, overlapping ones stacked
+ *   lines                 Map of line key → { key, label, pieces } for the lines holding several pieces
  *   collapsed             { [group key]: bool } overriding the groups' own flag
  * }
  * scale:  'hour' | 'day' | 'week' | 'month' | 'year'
  *
  * Returns { start, days, width, pxPerDay, rowHeight, columns, top, shades, todayX, rows } where
- * rows are { type: 'group' | 'bar' | 'lanes', key, group, label, height, collapsed, bars, span }
- * and each row bar is the source bar plus { s, e, x, w, lane, src }. An axis label
- * that does not fit its cell is empty. A folded group's `span` is
+ * rows are { type: 'group' | 'bar' | 'lanes', key, group, label, height, collapsed, bars, span, line }
+ * and each row bar is the source bar plus { s, e, x, w, lane, src }. A line's row is a
+ * 'bar' row holding its pieces, `line` its key (every 'bar' row has one in the line
+ * layout: creating there adds a piece). An axis label that does not fit its cell is empty. A folded group's `span` is
  * { x, w, s, e, allDay, milestone }: the line from its first bar to its last, so the
  * row still shows where the group sits. Open groups, and groups with no bars, have none.
  */
@@ -311,6 +314,37 @@ export function layout(bars, window, scale) {
         return { x: x0, w: Math.max(x(e) - x0, 2), s, e, allDay: bars.every((bar) => bar.allDay), milestone: s === e }
     }
 
+    // lineBy(): a group's bars by line, in the order of each line's first bar (the
+    // server's order), one row per line; a line's label is its own record's, sent with
+    // the lines that hold several pieces, else its bar's.
+    const lineRows = (own, group) => {
+        const buckets = new Map()
+        for (const bar of own) {
+            const line = bar.line === null || bar.line === undefined || bar.line === '' ? 'b:' + bar.id : String(bar.line)
+            if (! buckets.has(line)) buckets.set(line, [])
+            buckets.get(line).push(bar)
+        }
+
+        const out = []
+        for (const [line, bucket] of buckets) {
+            const entry = window.lines?.get?.(line) ?? null
+            const lanes = bucket.length > 1 ? pack(bucket, 0) : 1
+            out.push({
+                type: 'bar',
+                key: bucket.length > 1 || entry ? 'l:' + group.key + ':' + line : 'b:' + bucket[0].id,
+                group,
+                label: entry?.label ?? bucket[0].label ?? '',
+                height: lanes * rowHeight,
+                collapsed: false,
+                bars: bucket,
+                span: null,
+                line: line.startsWith('b:') ? null : line,
+            })
+        }
+
+        return out
+    }
+
     const rows = []
     for (const group of groups) {
         const own = placed.filter((b) => String(b.group ?? '') === group.key)
@@ -327,8 +361,12 @@ export function layout(bars, window, scale) {
         }
 
         if (! collapsed || ! window.grouped) {
-            for (const bar of own) {
-                rows.push({ type: 'bar', key: 'b:' + bar.id, group, label: bar.label ?? '', height: rowHeight, collapsed: false, bars: [bar] })
+            if (window.lineLayout) {
+                rows.push(...lineRows(own, group))
+            } else {
+                for (const bar of own) {
+                    rows.push({ type: 'bar', key: 'b:' + bar.id, group, label: bar.label ?? '', height: rowHeight, collapsed: false, bars: [bar] })
+                }
             }
         }
     }
@@ -346,22 +384,23 @@ export function layout(bars, window, scale) {
  */
 export function arrows(view, carried = null) {
     const rowHeight = view.rowHeight ?? 36
+    const inner = rowHeight - 8
     const at = new Map()
     let y = 0
     for (const row of view.rows) {
         for (const bar of row.bars) {
-            const inner = (row.type === 'lanes' ? rowHeight : row.height) - 8
-            at.set(String(bar.id), { bar, y: y + 4 + (bar.lane || 0) * rowHeight + inner / 2 })
+            at.set(String(bar.id), { bar, y: y + 4 + (bar.lane || 0) * rowHeight + inner / 2, bottom: y + row.height })
         }
         y += row.height
     }
+    const ids = carried ? new Set((carried.ids ?? [carried.id]).map(String)) : null
 
     const out = []
     for (const { bar, y: y2 } of at.values()) {
         for (const dep of bar.deps || []) {
             const from = at.get(String(dep))
             if (! from || from.bar === bar) continue
-            const shift = (b) => carried && String(b.id) === String(carried.id) ? carried.dy : 0
+            const shift = (b) => ids?.has(String(b.id)) ? carried.dy : 0
             const x1 = from.bar.x + from.bar.w
             const y1 = from.y + shift(from.bar)
             const x2 = bar.x
@@ -372,9 +411,12 @@ export function arrows(view, carried = null) {
             // in; the elbows stay inside the canvas (a bar at the window's edge).
             const away = Math.min(x1 + ARROW_GAP, view.width)
             const back = Math.max(x2 - ARROW_GAP, 0)
+            // Two pieces of one line (lineBy()) side by side: back through the gap under
+            // their row, never along the bars themselves.
+            const turn = y1 === yb ? from.bottom + shift(from.bar) - 2 : (y1 + yb) / 2
             const d = x2 - x1 >= ARROW_GAP * 2
                 ? `M${x1},${y1} H${away} V${yb} H${x2} ${tip}`
-                : `M${x1},${y1} H${away} V${(y1 + yb) / 2} H${back} V${yb} H${x2} ${tip}`
+                : `M${x1},${y1} H${away} V${turn} H${back} V${yb} H${x2} ${tip}`
             out.push({ key: `${dep}>${bar.id}`, d, late: bar.s < from.bar.e })
         }
     }
@@ -382,8 +424,12 @@ export function arrows(view, carried = null) {
     return out
 }
 
-/** Stack overlapping bars into lanes (greedy, by start); sets bar.lane and returns the lane count. */
-export function pack(bars) {
+/**
+ * Stack overlapping bars into lanes (greedy, by start); sets bar.lane and returns the
+ * lane count. `gap` is the room kept between two bars of a lane: a line's pieces
+ * (lineBy()) that touch end to start are one stretch of work, and share their lane.
+ */
+export function pack(bars, gap = 2) {
     const ends = []
 
     for (const bar of [...bars].sort((a, b) => a.x - b.x || a.w - b.w)) {
@@ -394,7 +440,7 @@ export function pack(bars) {
             lane = ends.length
             ends.push(0)
         }
-        ends[lane] = to + 2
+        ends[lane] = to + gap
         bar.lane = lane
     }
 
@@ -412,6 +458,8 @@ export default function packstubGantt(config) {
 
     return {
         bars: config.bars,
+        // lineBy(): the lines holding several pieces, each with all its pieces (in the window or not), by key.
+        lineIndex: new Map((config.lines || []).map((line) => [String(line.key), line])),
         total: config.total ?? config.bars.length,
         groups: config.groups,
         period: config.window,
@@ -574,7 +622,7 @@ export default function packstubGantt(config) {
         /** The dependency arrows, following a bar in the air (its x, or the row it is carried to). */
         get arrowPaths() {
             const p = this.pointer
-            return arrows(this.view, p && p.dy ? { id: p.bar.id, dy: p.dy } : null)
+            return arrows(this.view, p && p.dy ? { ids: [p.bar.id, ...(p.mates || []).map((m) => m.id)], dy: p.dy } : null)
         },
 
         /** Every arrow of one kind as a single path (the SVG holds two: on time, and late). */
@@ -608,6 +656,8 @@ export default function packstubGantt(config) {
                 groups: this.groups,
                 grouped: config.grouped,
                 compact: config.compact,
+                lineLayout: this.lineDrags,
+                lines: this.lineIndex,
                 collapsed: this.collapsed,
             }
         },
@@ -636,6 +686,9 @@ export default function packstubGantt(config) {
                     this.place(fresh)
                 }
             }
+            // The other pieces of a line in the air keep their shift too.
+            if (p?.mates?.length) this.shiftMates(p, p.shift || 0)
+            if (k?.mates?.length) this.shiftMates(k, k.s - k.s0)
 
             // Row windowing above a few hundred rows: only the rows in view are in the DOM.
             this.windowed = this.view.rows.length > 200
@@ -705,6 +758,141 @@ export default function packstubGantt(config) {
             return null
         },
 
+        /* ------------------------------------------------------------ lines (lineBy()) */
+
+        setLines(lines) {
+            this.lineIndex = new Map((lines || []).map((line) => [String(line.key), line]))
+        },
+
+        /** Whether drags work on lines: the rows are lines (lineBy() outside the compact layout). */
+        get lineDrags() {
+            return !! config.lineLayout && ! config.compact
+        },
+
+        /** A bar's line when it holds other pieces too, with all of them; null otherwise. */
+        lineOf(bar) {
+            if (bar?.line === null || bar?.line === undefined || bar.line === '') return null
+            return this.lineIndex.get(String(bar.line)) ?? null
+        },
+
+        /** The id of a line's first piece: the earliest, its own record first among those starting together. */
+        firstPiece(line) {
+            // The server's order (Gantt::inLineOrder()): by start, the line's own record, then the key
+            // (numbers as numbers, as the database orders an integer key).
+            const root = String(line.key)
+            let first = null
+            for (const piece of line.pieces) {
+                const c = { id: String(piece.id), s: parse(piece.start) }
+                if (first === null || c.s < first.s || (c.s === first.s && first.id !== root
+                    && (c.id === root || c.id.localeCompare(first.id, undefined, { numeric: true }) < 0))) first = c
+            }
+            return first?.id ?? null
+        },
+
+        /** Whether dragging this bar (not an edge) moves its whole line: it is the line's first piece, unless movePiecesAlone(). */
+        carriesLine(bar) {
+            const line = this.lineDrags ? this.lineOf(bar) : null
+            return !! line && ! config.movePiecesAlone && this.firstPiece(line) === String(bar.id)
+        },
+
+        lineMovable(line) {
+            return line.pieces.every((piece) => piece.movable)
+        },
+
+        lineRegroupable(line) {
+            return line.pieces.every((piece) => piece.regroupable)
+        },
+
+        /** What a line moves by, in ms: whole days as soon as one piece is whole days (as the server snaps it). */
+        lineUnit(key) {
+            return this.lineIndex.get(key)?.pieces.some((piece) => piece.allDay) ? DAY : this.unitDays * DAY
+        },
+
+        /**
+         * How far a piece may go before it meets another piece of its line, with
+         * preventLineOverlap(): { left, right } in ms, or null when it already overlaps
+         * one (data from outside the chart: the server decides).
+         */
+        walls(line, bar) {
+            let left = -Infinity
+            let right = Infinity
+            for (const piece of line.pieces) {
+                if (String(piece.id) === String(bar.id)) continue
+                const s = parse(piece.start)
+                const e = piece.milestone ? s : parse(piece.end)
+                if (e <= bar.s) left = Math.max(left, e)
+                else if (s >= bar.e) right = Math.min(right, s)
+                else return null
+            }
+            // In whole units from the bar's edges: a neighbour off the grid (9 Oct 12:00 at
+            // the day unit) stops the bar a whole unit short, never at a half the server
+            // would round (half up) into that neighbour and refuse.
+            const unit = this.unitFor(bar)
+            return {
+                left: left === -Infinity ? left : bar.s + Math.ceil((left - bar.s) / unit) * unit,
+                right: right === Infinity ? right : bar.e + Math.floor((right - bar.e) / unit) * unit,
+            }
+        },
+
+        /** The other pieces of the line on the dragged bar's row, where they were: they follow when the line moves. */
+        matesOf(bar) {
+            const row = this.view.rows.find((r) => r.bars.includes(bar))
+            return (row?.bars || []).filter((b) => b !== bar && String(b.line) === String(bar.line)).map((b) => ({ id: b.id, s: b.s, e: b.e }))
+        },
+
+        /** Shift the mates of a line in the air (a drag's or the keys') by d ms from where they were. */
+        shiftMates(state, d) {
+            state.shift = d
+            for (const mate of state.mates) {
+                const b = this.rowBar(mate.id)
+                if (! b) continue
+                b.s = mate.s + d
+                b.e = mate.e + d
+                this.place(b)
+            }
+        },
+
+        /** Whether a bar is drawn over another row while the pointer carries it (or its line) there. */
+        carried(bar) {
+            const p = this.pointer
+            return !! (p?.dy && (p.bar.id === bar.id || p.mates?.some((m) => m.id === bar.id)))
+        },
+
+        /**
+         * The dotted connectors between the pieces of a line, where its work stops and
+         * resumes; one starts after a label drawn outside its piece, never through it.
+         */
+        gaps(row) {
+            if (! row.line || row.bars.length < 2) return []
+            const sorted = [...row.bars].sort((a, b) => a.x - b.x)
+            const reach = (bar) => bar.x + bar.w + (this.labelOutside(bar, row) ? this.textWidth(bar.label) + 12 : 0)
+            const out = []
+            let end = reach(sorted[0])
+            for (const bar of sorted.slice(1)) {
+                if (bar.x > end) out.push({ key: 'gap:' + bar.id, x: end, w: bar.x - end })
+                end = Math.max(end, reach(bar))
+            }
+            return out
+        },
+
+        gapStyle(gap, row) {
+            const style = { 'inset-inline-start': gap.x + 'px', width: gap.w + 'px', top: config.rowHeight / 2 + 'px' }
+            const p = this.pointer
+            if (p?.dy && p.mates && row.bars.some((b) => b.id === p.bar.id)) style.transform = `translateY(${p.dy}px)`
+            return style
+        },
+
+        /** A moved bar's new dates and row on its line's piece (what the walls and the first piece are read from). */
+        syncPiece(bar) {
+            const piece = this.lineOf(bar)?.pieces.find((p) => String(p.id) === String(bar.id))
+            if (! piece) return
+            piece.start = bar.start
+            piece.end = bar.end
+            piece.group = bar.group
+            piece.movable = !! bar.movable
+            piece.regroupable = !! bar.regroupable
+        },
+
         /** Pixels from a row bar's dates. */
         place(bar) {
             bar.x = ((bar.s - this.view.start) / DAY) * this.view.pxPerDay
@@ -739,10 +927,9 @@ export default function packstubGantt(config) {
             const inner = config.rowHeight - 8
             const style = { 'inset-inline-start': bar.x + 'px', top: top + 'px', height: inner + 'px', '--ps-bar': this.tone(bar.color) }
 
-            // Carried to another row: drawn over that row while the pointer is down.
-            const p = this.pointer
-            if (p && p.dy && p.bar.id === bar.id) {
-                style.transform = `translateY(${p.dy}px)`
+            // Carried to another row (with its line): drawn over that row while the pointer is down.
+            if (this.carried(bar)) {
+                style.transform = `translateY(${this.pointer.dy}px)`
             }
 
             // The diamond centres itself on the row's inner height, whatever row_height is.
@@ -762,12 +949,21 @@ export default function packstubGantt(config) {
 
         /**
          * Whether a bar's label is drawn after it, because it does not fit inside. Not
-         * in the compact layout: the next bar of the lane may sit right there.
+         * in the compact layout: the next bar of the lane may sit right there. On a
+         * line's row, only when it fits before the next piece of its lane.
          */
-        labelOutside(bar) {
+        labelOutside(bar, row = null) {
             if (bar.milestone || this.compact || ! bar.label) return false
+            if (this.textWidth(bar.label) + 18 <= bar.w) return false
+            if (! row || row.bars.length < 2) return true
 
-            return this.textWidth(bar.label) + 18 > bar.w
+            const end = bar.x + bar.w
+            let room = Infinity
+            for (const other of row.bars) {
+                if (other !== bar && (other.lane || 0) === (bar.lane || 0) && other.x >= end) room = Math.min(room, other.x - end)
+            }
+
+            return this.textWidth(bar.label) + 12 <= room
         },
 
         textWidth(text) {
@@ -1058,11 +1254,18 @@ export default function packstubGantt(config) {
             // One pointer at a time: a second finger neither starts a drag nor ends the first.
             if (event.button !== 0 || bar.src._pending || this.pointer) return
             this.flushNudge()
+            // The keys just sent may have moved this bar (a nudged line takes all its pieces): wait for the answer.
+            if (bar.src._pending) return
             // A bar too narrow for its handles is moved, whatever part of it was grabbed.
             const edge = this.narrow(bar) ? null : (event.target.dataset?.edge || null)
+            // lineBy(): the first piece of a line carries the line, and a drag to another
+            // group carries it whichever piece was grabbed, so every piece must agree.
+            const entry = this.lineOf(bar)
+            const line = this.lineDrags && ! edge ? entry : null
+            const together = !! line && this.carriesLine(bar)
             // A whole bar on a grouped chart may be carried to another row, even one whose dates are fixed.
-            const rows = ! edge && !! bar.regroupable && !! config.grouped
-            const allowed = edge ? this.resizes(bar, edge) : (bar.movable || rows)
+            const rows = ! edge && !! config.grouped && (line ? this.lineRegroupable(line) : !! bar.regroupable)
+            const allowed = edge ? this.resizes(bar, edge) : ((together ? this.lineMovable(line) : bar.movable) || rows)
             const touch = event.pointerType === 'touch' || event.pointerType === 'pen'
 
             this.menu = null
@@ -1072,6 +1275,10 @@ export default function packstubGantt(config) {
                 s: bar.s, e: bar.e, sl0: this.ui('refs').scroll?.scrollLeft || 0,
                 rows, g0: String(bar.group ?? ''), g: String(bar.group ?? ''), dy: 0,
                 dir: this.rtl() ? -1 : 1, el: event.currentTarget,
+                line: line ? String(line.key) : null, together, lineMoves: !! line && this.lineMovable(line),
+                mates: line ? this.matesOf(bar) : [], shift: 0,
+                // preventLineOverlap(): a piece moved or resized alone stops at the next piece of its line.
+                walls: config.preventLineOverlap && entry && ! together ? this.walls(entry, bar) : null,
             }
             // From here on the reactive copy: it is what this.pointer returns (an
             // identity check against the plain object would never match), and a
@@ -1123,27 +1330,9 @@ export default function packstubGantt(config) {
             if (! p.allowed) return
 
             this.dragging = true
-            const scrolled = (this.ui('refs').scroll?.scrollLeft || 0) - p.sl0
-            const dx = (sx + scrolled) * p.dir
-            const unit = this.unitFor(p.bar)
-            const { min, max } = this.limitsFor(p.bar)
-            // A whole bar with fixed dates only changes rows; an edge moves whenever it was allowed.
-            const delta = p.edge || p.bar.movable ? Math.round(dx / this.view.pxPerDay * DAY / unit) * unit : 0
             const bar = p.bar
 
-            if (p.edge === 'start') {
-                bar.s = Math.max(Math.min(p.s + delta, p.e - min), p.e - max)
-                bar.e = p.e
-            } else if (p.edge === 'end') {
-                bar.s = p.s
-                bar.e = Math.min(Math.max(p.e + delta, p.s + min), p.s + max)
-            } else {
-                bar.s = p.s + delta
-                bar.e = p.e + delta
-            }
-
-            this.place(bar)
-
+            // The row first: over another group, a line's piece carries its whole line.
             if (p.rows) {
                 const at = this.rowAt(p.cy)
                 const own = this.view.rows.findIndex((row) => row.bars.includes(bar))
@@ -1152,6 +1341,31 @@ export default function packstubGantt(config) {
                 p.g = other ? this.target : p.g0
                 p.dy = other && own >= 0 ? this.offsets[at] - this.offsets[own] : 0
             }
+
+            const carried = !! p.line && (p.together || p.g !== p.g0)
+            const scrolled = (this.ui('refs').scroll?.scrollLeft || 0) - p.sl0
+            const dx = (sx + scrolled) * p.dir
+            const unit = carried ? this.lineUnit(p.line) : this.unitFor(bar)
+            const { min, max } = this.limitsFor(bar)
+            // A whole bar (or line) with fixed dates only changes rows; an edge moves whenever it was allowed.
+            const moves = p.edge ? true : carried ? p.lineMoves : bar.movable
+            let delta = moves ? Math.round(dx / this.view.pxPerDay * DAY / unit) * unit : 0
+            const walls = carried ? null : p.walls
+
+            if (p.edge === 'start') {
+                bar.s = Math.max(Math.min(p.s + delta, p.e - min), p.e - max, walls?.left ?? -Infinity)
+                bar.e = p.e
+            } else if (p.edge === 'end') {
+                bar.s = p.s
+                bar.e = Math.min(Math.max(p.e + delta, p.s + min), p.s + max, walls?.right ?? Infinity)
+            } else {
+                if (walls) delta = Math.min(Math.max(delta, walls.left - p.s), walls.right - p.e)
+                bar.s = p.s + delta
+                bar.e = p.e + delta
+            }
+
+            this.place(bar)
+            if (p.mates.length) this.shiftMates(p, carried ? bar.s - p.s : 0)
 
             this.hint = this.dates(bar) + (p.g !== p.g0 ? ' · ' + this.groupLabel(p.g) : '')
             this.autoScroll(p)
@@ -1223,7 +1437,7 @@ export default function packstubGantt(config) {
                 if (p.moved) {
                     // Dragged back to where it was pressed, its click looks like a plain one.
                     this.swallowClick = true
-                    this.mountCreate(p.s, p.e, p.group)
+                    this.mountCreate(p.s, p.e, p.group, p.line)
                 }
 
                 return
@@ -1239,6 +1453,11 @@ export default function packstubGantt(config) {
             }
 
             if (! p.allowed || (p.bar.s === p.s && p.bar.e === p.e && p.g === p.g0)) return
+
+            // The line's first piece, or any piece carried to another group: the whole line.
+            if (p.line && (p.together || p.g !== p.g0)) {
+                return this.commitLine(p.bar.id, p.line, p.bar.s - p.s, p.g !== p.g0 ? p.g : null)
+            }
 
             this.commit(p.bar, p.s, p.e, p.g !== p.g0 ? p.g : null, p.g0)
         },
@@ -1282,15 +1501,33 @@ export default function packstubGantt(config) {
             const vertical = event.key === 'ArrowUp' || event.key === 'ArrowDown'
             const edge = vertical ? null : event.shiftKey ? 'end' : event.altKey ? 'start' : null
             if (edge && bar.milestone) return
-            const allowed = vertical ? bar.regroupable && config.grouped : edge ? this.resizes(bar, edge) : bar.movable
+            // lineBy(): ↑/↓ carry the whole line, and so do ←/→ on its first piece (as a drag does).
+            const entry = this.lineOf(bar)
+            const line = this.lineDrags && ! edge ? entry : null
+            const together = !! line && (vertical || this.carriesLine(bar))
+            const allowed = vertical
+                ? !! config.grouped && (line ? this.lineRegroupable(line) : !! bar.regroupable)
+                : edge ? this.resizes(bar, edge) : (together ? this.lineMovable(line) : bar.movable)
 
             if (! allowed) {
                 return this.say(this.t[vertical ? 'not_regroupable' : edge ? 'not_resizable' : 'not_movable'] || '')
             }
 
-            if (this.keyboard && this.keyboard.id !== bar.id) this.flushNudge()
+            const key = together ? String(line.key) : null
+            // Another bar, or the same bar going from its line to itself (or back): the keys so far are sent first.
+            if (this.keyboard && (this.keyboard.id !== bar.id || this.keyboard.line !== key)) {
+                this.flushNudge()
+                if (bar.src._pending) return
+            }
             // The reactive copy, never the plain object just assigned (see down()).
-            this.keyboard ??= { id: bar.id, s0: bar.s, e0: bar.e, s: bar.s, e: bar.e, g0: String(bar.group ?? ''), g: String(bar.group ?? ''), timer: null }
+            this.keyboard ??= {
+                id: bar.id, s0: bar.s, e0: bar.e, s: bar.s, e: bar.e, g0: String(bar.group ?? ''), g: String(bar.group ?? ''), timer: null,
+                line: key,
+                mates: key ? this.matesOf(bar) : [],
+                // Where every piece was, for Escape and a refusal.
+                groups0: key ? new Map(this.bars.filter((b) => String(b.line) === key).map((b) => [b.id, b.group])) : null,
+                walls: config.preventLineOverlap && entry && ! together ? this.walls(entry, bar) : null,
+            }
             const k = this.keyboard
 
             if (vertical) {
@@ -1304,25 +1541,29 @@ export default function packstubGantt(config) {
                     this.collapsed[next] = false
                     this.persist()
                 }
-                this.regroup(bar.src, next)
+                if (k.line) this.regroupLine(k.line, next, bar.id)
+                else this.regroup(bar.src, next)
             } else {
                 const forward = (event.key === 'ArrowRight') !== this.rtl()
-                const unit = this.unitFor(bar)
+                const unit = k.line ? this.lineUnit(k.line) : this.unitFor(bar)
                 const { min, max } = this.limitsFor(bar)
                 const d = forward ? unit : -unit
+                const walls = k.walls
 
                 if (edge === 'end') {
-                    k.e = Math.min(Math.max(k.e + d, k.s + min), k.s + max)
+                    k.e = Math.min(Math.max(k.e + d, k.s + min), k.s + max, walls?.right ?? Infinity)
                 } else if (edge === 'start') {
-                    k.s = Math.max(Math.min(k.s + d, k.e - min), k.e - max)
+                    k.s = Math.max(Math.min(k.s + d, k.e - min), k.e - max, walls?.left ?? -Infinity)
                 } else {
-                    k.s += d
-                    k.e += d
+                    const step = walls ? Math.min(Math.max(d, walls.left - k.s), walls.right - k.e) : d
+                    k.s += step
+                    k.e += step
                 }
 
                 bar.s = k.s
                 bar.e = k.e
                 this.place(bar)
+                if (k.mates.length) this.shiftMates(k, k.s - k.s0)
             }
 
             this.hint = this.dates(this.rowBar(k.id) || bar) + (k.g !== k.g0 ? ' · ' + this.groupLabel(k.g) : '')
@@ -1347,6 +1588,22 @@ export default function packstubGantt(config) {
             }
         },
 
+        /**
+         * Put every piece of a line in a group in the browser (the keys' ↑/↓), or back
+         * where each was (a Map of id → group); the focused bar keeps the focus.
+         */
+        regroupLine(key, group, id) {
+            const focused = typeof document !== 'undefined' && document.activeElement?.dataset?.id === id
+            for (const src of this.bars) {
+                if (String(src.line) === key) src.group = group instanceof Map ? (group.get(src.id) ?? src.group) : group
+            }
+            this.groups = this.recount()
+            this.rebuild()
+            if (focused) {
+                this.$nextTick(() => this.ui('root').querySelector?.(`.ps-gantt-bar[data-id="${id}"]`)?.focus())
+            }
+        },
+
         /** Send the keyboard move in progress, if it changed anything. */
         flushNudge() {
             const k = this.keyboard
@@ -1354,6 +1611,11 @@ export default function packstubGantt(config) {
             clearTimeout(k.timer)
             this.keyboard = null
             this.hint = null
+
+            if (k.line) {
+                if (k.s === k.s0 && k.g === k.g0) return this.regroupLine(k.line, k.groups0, k.id)
+                return this.commitLine(k.id, k.line, k.s - k.s0, k.g !== k.g0 ? k.g : null, k.groups0)
+            }
 
             // The row bar, or the source bar when its row is not drawn (a group folded meanwhile).
             const src = this.bars.find((b) => b.id === k.id)
@@ -1415,6 +1677,92 @@ export default function packstubGantt(config) {
             const at = this.bars.findIndex((b) => b.id === fresh.id)
             if (at >= 0) this.bars[at] = fresh
             else this.bars.push(fresh)
+            this.syncPiece(fresh)
+            this.groups = this.recount()
+            this.rebuild()
+        },
+
+        /**
+         * Send a move of a whole line (lineBy()): every piece shifts by `delta` ms and,
+         * with a group, lands in that group, in the browser at once; the server checks
+         * every piece and answers with all of them, or refuses and every piece goes back.
+         * `groups0` (id → group) is where the pieces were before the keys moved them.
+         */
+        commitLine(id, key, delta, group = null, groups0 = null) {
+            const line = this.lineIndex.get(key)
+            const before = this.bars
+                .filter((src) => String(src.line) === key)
+                .map((src) => ({ src, start: src.start, end: src.end, group: groups0?.get(src.id) ?? src.group }))
+            const pieces = (line?.pieces || []).map((piece) => ({ piece, start: piece.start, end: piece.end, group: piece.group }))
+            const own = before.find((b) => b.src.id === id)
+            if (! own) return
+            const shift = (value) => format(parse(value) + delta)
+            const start = shift(own.start)
+
+            for (const b of before) {
+                b.src.start = shift(b.start)
+                b.src.end = shift(b.end)
+                b.src.group = group ?? b.group
+                b.src._pending = true
+            }
+            for (const p of pieces) {
+                p.piece.start = shift(p.start)
+                p.piece.end = shift(p.end)
+                if (group !== null) p.piece.group = group
+            }
+            this.pending++
+            this.groups = this.recount()
+            this.rebuild()
+
+            const undo = (message) => {
+                for (const b of before) {
+                    b.src.start = b.start
+                    b.src.end = b.end
+                    b.src.group = b.group
+                    b.src._pending = false
+                }
+                for (const p of pieces) {
+                    p.piece.start = p.start
+                    p.piece.end = p.end
+                    p.piece.group = p.group
+                }
+                this.groups = this.recount()
+                this.rebuild()
+                this.notify(message, 'danger')
+                this.say(message)
+            }
+
+            const args = [id, start]
+            if (group !== null) args.push(group)
+
+            this.ui('wire').ganttMoveLine(...args)
+                .then((result) => {
+                    if (! result?.ok) {
+                        return undo(result?.message || this.t.failed)
+                    }
+
+                    for (const b of before) b.src._pending = false
+                    this.replaceAll(result.bars || [])
+                    for (const fresh of result.bars || []) this.ui('dispatch')('gantt-bar-moved', { id: fresh.id, bar: fresh })
+                    this.flash = id
+                    setTimeout(() => { if (this.flash === id) this.flash = null }, 900)
+                })
+                .catch(() => undo(this.t.offline))
+                .finally(() => this.pending--)
+        },
+
+        /** The server's bars after a line moved: each replaces its own, a piece that came into the window joins, the line's pieces follow. */
+        replaceAll(bars) {
+            const from = parse(this.period.start)
+            const until = parse(this.period.end) + DAY
+            for (const bar of bars) {
+                const { _pending, ...fresh } = bar
+                const at = this.bars.findIndex((b) => b.id === fresh.id)
+                const s = parse(fresh.start)
+                if (at >= 0) this.bars[at] = fresh
+                else if (s < until && (fresh.milestone ? s >= from : parse(fresh.end) > from)) this.bars.push(fresh)
+                this.syncPiece(fresh)
+            }
             this.groups = this.recount()
             this.rebuild()
         },
@@ -1519,6 +1867,7 @@ export default function packstubGantt(config) {
                 clearTimeout(k.timer)
                 this.keyboard = null
                 this.hint = null
+                if (k.line) return this.regroupLine(k.line, k.groups0, k.id)
                 const src = this.bars.find((b) => b.id === k.id)
                 if (src && k.g !== k.g0) return this.regroup(src, k.g0)
                 return this.rebuild()
@@ -1554,15 +1903,23 @@ export default function packstubGantt(config) {
 
             const start = this.spotAt(event.clientX, event.currentTarget)
 
-            this.mountCreate(start, start + this.unitDays * DAY, row.group.key || null)
+            this.mountCreate(start, start + this.unitDays * DAY, row.group.key || null, this.lineAt(row))
         },
 
-        mountCreate(start, end, group) {
-            this.ui('wire').mountAction(this.createAction.name, {
+        /** The line a create on this row adds a piece to: a line's row (lineBy()), never a group's own row. */
+        lineAt(row) {
+            return row.type === 'bar' && row.line !== null && row.line !== undefined ? String(row.line) : null
+        },
+
+        mountCreate(start, end, group, line = null) {
+            const args = {
                 ganttStart: format(start),
                 ganttEnd: format(end),
                 ganttGroup: group,
-            })
+            }
+            if (line !== null) args.ganttLine = line
+
+            this.ui('wire').mountAction(this.createAction.name, args)
         },
 
         /** The start of the snap unit under a point on screen, kept on the canvas. Read from the canvas's own box, so scrolling is counted. */
@@ -1587,7 +1944,7 @@ export default function packstubGantt(config) {
             this.menu = null
             this.pointer = {
                 select: true, id: event.pointerId, el: event.currentTarget, key: row.key,
-                group: row.group.key || null,
+                group: row.group.key || null, line: this.lineAt(row), overlaps: false,
                 from, s: from, e: from + this.unitDays * DAY,
                 allowed: true, moved: false, touch: false, press: null, rows: false, dy: 0,
                 x0: event.clientX, y0: event.clientY, cx: event.clientX, cy: event.clientY,
@@ -1606,8 +1963,23 @@ export default function packstubGantt(config) {
             p.s = Math.min(p.from, at)
             p.e = Math.max(p.from, at) + this.unitDays * DAY
 
+            p.overlaps = this.selectionOverlaps(p)
             this.hint = this.dates({ s: p.s, e: p.e, allDay: this.unitDays >= 1 }) + (p.group ? ' · ' + this.groupLabel(p.group) : '')
             this.autoScroll(p)
+        },
+
+        /**
+         * With preventLineOverlap(), whether the period being selected on a line's row
+         * overlaps a piece of that line: the band says so before the form opens (the
+         * server still decides when it saves).
+         */
+        selectionOverlaps(p) {
+            if (! config.preventLineOverlap || p.line === null) return false
+            const line = this.lineIndex.get(p.line)
+            const pieces = line
+                ? line.pieces.map((piece) => ({ s: parse(piece.start), e: piece.milestone ? parse(piece.start) : parse(piece.end) }))
+                : (this.view.rows.find((row) => row.key === p.key)?.bars || [])
+            return pieces.some((piece) => piece.s < p.e && p.s < piece.e)
         },
 
         selectionStyle() {
@@ -1760,6 +2132,7 @@ export default function packstubGantt(config) {
             this.syncWindow()
             this.groups = result.groups
             this.bars = result.bars
+            this.setLines(result.lines)
             this.total = result.total ?? result.bars.length
             for (const group of this.groups) {
                 if (! (group.key in this.collapsed)) this.collapsed[group.key] = !! group.collapsed

@@ -22,6 +22,7 @@ A Gantt chart and resource timeline for Filament: any Eloquent query with a star
 - **[Drag to move, resize or reassign](#moving-and-resizing)**: bars move at once, by an edge or to another row.
 - **[Rules on the server](#moving-and-resizing)**: policies, durations and a locked past, always checked.
 - **[Groups and resource timelines](#groups-and-resource-timelines)**: rows by project, assignee, room or machine.
+- **[Split tasks](https://packstub.dev/docs/filament-gantt/groups#several-bars-on-one-line)**: several bars on one line, moved together or piece by piece.
 - **[Milestones, progress and dependencies](#defining-bars)**: diamonds, fills and finish-to-start arrows.
 - **[Filament actions on bars](#actions)**: click to edit, right-click for more, click or drag to create.
 - **[Hour to year, zoom and Fit](#the-time-window)**: five scales, wheel or pinch zoom, the whole plan in one screen.

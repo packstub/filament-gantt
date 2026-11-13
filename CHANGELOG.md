@@ -4,6 +4,12 @@ All notable changes to `packstub/filament-gantt` are documented in this file.
 
 ## Unreleased
 
+Run `php artisan filament:assets` after updating.
+
+- Split tasks: `lineBy('parent_id')` puts several records on one line, joined where the work stops and resumes
+- Dragging a line's first piece moves the whole line, any other piece moves alone, and a drag to another group carries the line (`movePiecesAlone()` to turn the first off)
+- Creating on a line's row adds a piece to that line; `preventLineOverlap()` keeps the pieces of a line apart
+
 ## 1.0.0-beta.2 - 2026-11-09
 
 Run `php artisan filament:assets` after updating.

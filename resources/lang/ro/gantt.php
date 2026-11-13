@@ -48,6 +48,8 @@ return [
     'too_long' => 'O bară nu poate fi mai lungă de :duration.',
     'locked' => 'Nimic nu poate fi programat înainte de :date.',
     'failed' => 'Modificarea nu a reușit.',
+    'overlaps' => 'S-ar suprapune cu o altă parte a aceleiași linii.',
+    'line_part' => ':label, de pe aceeași linie: :reason',
     'offline' => 'Serverul nu a răspuns. Bara a revenit la locul ei.',
     'days' => ':count zi|:count zile|:count de zile',
     'hours' => ':count oră|:count ore|:count de ore',

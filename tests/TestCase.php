@@ -61,6 +61,7 @@ abstract class TestCase extends Orchestra
             $table->id();
             $table->foreignId('project_id')->nullable();
             $table->foreignId('assignee_id')->nullable();
+            $table->foreignId('parent_id')->nullable();
             $table->string('title');
             $table->string('status')->default('todo');
             $table->date('starts_on')->nullable();
@@ -77,6 +78,7 @@ abstract class TestCase extends Orchestra
         Schema::create('shifts', function (Blueprint $table): void {
             $table->id();
             $table->string('room')->nullable();
+            $table->foreignId('parent_id')->nullable();
             $table->string('title');
             $table->dateTime('starts_at')->nullable();
             $table->dateTime('ends_at')->nullable();

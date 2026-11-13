@@ -47,6 +47,8 @@ return [
     'too_long' => 'Ein Balken kann nicht länger als :duration sein.',
     'locked' => 'Vor dem :date kann nichts geplant werden.',
     'failed' => 'Die Änderung hat nicht geklappt.',
+    'overlaps' => 'Das würde sich mit einem anderen Teil derselben Zeile überschneiden.',
+    'line_part' => ':label in derselben Zeile: :reason',
     'offline' => 'Server nicht erreichbar. Der Balken ist wieder an seinem Platz.',
     'days' => '{1} :count Tag|[2,*] :count Tage',
     'hours' => '{1} :count Stunde|[2,*] :count Stunden',

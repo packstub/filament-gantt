@@ -69,6 +69,16 @@ and the Pest suite again on MySQL 8.4 and PostgreSQL 17 (the `databases` job): S
   visibility with `$ganttActionRecord` set), within `Bar::actions()`, which `offersAction()` enforces on mount.
 - `move()` runs the save, `BarMoved`, `afterMove()` and the returned bar (read back through `baseQuery()`) in one
   transaction: the browser's rollback and the database agree. Date-only records snap by `Unit::Day` (`unitFor()`).
+  Every rule lives in `planMove()` (checks, writes nothing) and the save in `applyMove()`; `moveLine()` plans every
+  piece of a line before it applies any, so one refusal refuses the line. A new rule goes in `planMove()`.
+- Lines (`lineBy()`, issue #38): a record's line is `parent ?? own key`, one level deep; `presentBar()` adds `line`,
+  `getState()` adds `lines` (only lines with 2+ pieces, every piece through `baseQuery()`, in or out of the window,
+  as a list, never a keyed object: numeric keys would make a JSON array). In the browser `layout()` buckets a group's
+  bars by line (`lineLayout`, not in compact) and `pack(bucket, 0)` (touching pieces share a lane). The first piece
+  (earliest, the line's own record first among equals) carries the line, any piece carried to another group carries
+  it (`commitLine()` → `ganttMoveLine`), others move alone; `walls()` clamps with `preventLineOverlap`. The server
+  checks overlap in `planMove()` (not along a line, not for a row change alone) and in the create/edit actions'
+  `mutateDataUsing` (`ganttGuardOverlap()`: notification + `halt()`). `canCreateOnLine()` is the line's `canCreateIn()`.
 - Colours end up in a style attribute: `Bar::safeColor()` (PHP) and `tone()` (JS) keep colour shapes only, and the
   Blade binds `barStyle()`/`cell()` as objects, never concatenated strings.
 - `init()` sets `this.fit` (the height fitter on window resize): a method of that name is overwritten after init, so
