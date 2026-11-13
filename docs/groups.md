@@ -206,6 +206,8 @@ use Packstub\Gantt\Enums\ParentSpan;
 | `parentSpan(ParentSpan::FromChildren)` | From the earliest child's start to the latest child's end. Computed from every child the chart's query shows (a filter never shrinks it), nothing is stored, so a parent without dates has a span too. It has no edges to resize. | |
 | `parentSpan(ParentSpan::None)` | No span: a titled row, whatever dates the parent has. | |
 | `moveChildrenWithParent()` | Dragging the span moves the parent and every child by the same amount, in one save. Off, the span moves alone; a computed span then stays where its children are. | on |
+| `keepInsideParent()` | With the parent's own dates: a child cannot be moved, resized, created or edited to outside its parent's dates, nor carried to a parent whose dates do not hold it, and a parent cannot be shrunk, or moved alone, past one of its children. A parent without dates holds anything. Takes a bool or a closure. | off |
+| `writeSpanToParent()` | After a child is moved, created, edited or deleted from the chart, its parent's start and end are written from its children, earliest start to latest end (both parents, when the child changed rows). A move writes them in its own transaction. A parent left without dated children keeps the dates it had. | off |
 
 | You do | What happens |
 | --- | --- |
@@ -216,3 +218,5 @@ use Packstub\Gantt\Enums\ParentSpan;
 | Click the parent's name | The parent's click action ([Actions](actions.md)); a right-click on the name or on the span opens its menu. A parent covered by its children stays reachable that way. |
 
 A child still moves on its own, to another parent too. With `preventRowOverlap()` the span never counts: only the children of a row keep apart.
+
+The two rules answer two ways of working. With `keepInsideParent()` the parent is the plan and its children fit inside it: the browser stops a drag at the parent's dates, and the server refuses whatever gets past it, a form included (the modal stays open with a notification). With `writeSpanToParent()` the children are the plan and the parent follows: its columns always say what its children span, which is what `ParentSpan::FromChildren` draws without storing anything. For a save of your own, `Gantt::outsideParent($record)` gives the reason a record does not fit, or null.

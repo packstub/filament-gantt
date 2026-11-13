@@ -327,3 +327,111 @@ test('a row that is no parent has nothing on its name', () => {
     c.openRow(c.view.rows[1], {})
     assert.deepEqual(c.wire.mounted, [])
 })
+
+/* ------------------------------------------------------------------ keepInsideParent() */
+
+/** Launch 5–20 Oct with Design 7–9 and Later 15–18 on one lane. */
+function insideChart(over = {}) {
+    return parentChart({
+        keepInsideParent: true,
+        bars: [
+            bar({ id: '10', row: '10', parent: true, start: '2026-10-05', end: '2026-10-21', regroupable: false }),
+            bar({ id: '11', row: '10', label: 'Design', start: '2026-10-07', end: '2026-10-10', regroupable: true }),
+            bar({ id: '12', row: '10', label: 'Later', start: '2026-10-15', end: '2026-10-19', regroupable: true }),
+            bar({ id: '21', row: '20', label: 'Sketch', start: '2026-12-01', end: '2026-12-03', regroupable: true }),
+        ],
+        ...over,
+    })
+}
+
+test('a child stops at its parent\'s dates with keepInsideParent(), moved or resized', () => {
+    const c = insideChart()
+
+    let p = press(c, rowBar(c, '11'), { y: 20 })
+    p.move(-48 * 6)
+    assert.equal(c.dates(rowBar(c, '11')), 'Oct 5, 2026 – Oct 7, 2026')
+    p.up(-48 * 6)
+    assert.deepEqual(c.wire.moves.at(-1), ['11', '2026-10-05 00:00', '2026-10-08 00:00'])
+
+    p = press(c, rowBar(c, '12'), { edge: 'end', y: 20 })
+    p.move(48 * 9)
+    assert.equal(c.dates(rowBar(c, '12')), 'Oct 15, 2026 – Oct 20, 2026')
+    p.up(48 * 9)
+    assert.deepEqual(c.wire.moves.at(-1), ['12', '2026-10-15 00:00', '2026-10-21 00:00'])
+
+    // a parent without a span on the chart holds anything here: the server decides
+    assert.equal(c.parentWalls(rowBar(c, '21')), null)
+    assert.equal(insideChart({ keepInsideParent: false }).parentWalls(rowBar(c, '11')), null)
+})
+
+test('the parent\'s dates and the next bar of the row are both walls, the nearer one stops the bar', () => {
+    const c = insideChart({ preventRowOverlap: true })
+
+    assert.deepEqual(c.wallsFor(rowBar(c, '11'), c.rowWalls(rowBar(c, '11'))), { left: Date.UTC(2026, 9, 5), right: Date.UTC(2026, 9, 15) })
+    assert.deepEqual(c.wallsFor(rowBar(c, '12'), c.rowWalls(rowBar(c, '12'))), { left: Date.UTC(2026, 9, 10), right: Date.UTC(2026, 9, 21) })
+})
+
+test('a parent resized or moved alone keeps holding its children; with them it goes anywhere', () => {
+    const c = insideChart()
+
+    let p = press(c, rowBar(c, '10'), { edge: 'start' })
+    p.move(48 * 6)
+    assert.equal(c.dates(rowBar(c, '10')), 'Oct 7, 2026 – Oct 20, 2026')
+    p.up(48 * 6)
+    assert.deepEqual(c.wire.moves.at(-1), ['10', '2026-10-07 00:00', '2026-10-21 00:00'])
+
+    const end = insideChart()
+    p = press(end, rowBar(end, '10'), { edge: 'end' })
+    p.move(-48 * 9)
+    assert.equal(end.dates(rowBar(end, '10')), 'Oct 5, 2026 – Oct 18, 2026')
+    end.cancel()
+
+    const whole = insideChart()
+    p = press(whole, rowBar(whole, '10'))
+    p.move(48 * 20)
+    p.up(48 * 20)
+    assert.deepEqual(whole.wire.parents, [['10', '2026-10-25 00:00']])
+
+    // alone, it only has the room its children leave it
+    const alone = insideChart({ moveChildren: false })
+    p = press(alone, rowBar(alone, '10'))
+    p.move(48 * 20)
+    assert.equal(alone.dates(rowBar(alone, '10')), 'Oct 7, 2026 – Oct 22, 2026')
+    p.move(-48 * 20)
+    assert.equal(alone.dates(rowBar(alone, '10')), 'Oct 3, 2026 – Oct 18, 2026')
+    alone.cancel()
+})
+
+test('the keys stop at the same places', () => fakeTimers(() => {
+    const c = insideChart()
+
+    key(c, rowBar(c, '11'), 'ArrowLeft')
+    key(c, rowBar(c, '11'), 'ArrowLeft')
+    key(c, rowBar(c, '11'), 'ArrowLeft')
+    assert.equal(c.dates(rowBar(c, '11')), 'Oct 5, 2026 – Oct 7, 2026')
+    c.onEscape()
+
+    key(c, rowBar(c, '10'), 'ArrowRight', { altKey: true })
+    key(c, rowBar(c, '10'), 'ArrowRight', { altKey: true })
+    key(c, rowBar(c, '10'), 'ArrowRight', { altKey: true })
+    assert.equal(c.dates(rowBar(c, '10')), 'Oct 7, 2026 – Oct 20, 2026')
+}))
+
+test('with writeSpanToParent() a child\'s move reloads the chart for its parent\'s new dates, a parent\'s own does not', async () => {
+    const c = parentChart({ writeSpanToParent: true })
+    const calls = answering(c, 'ganttMove')
+
+    let p = press(c, rowBar(c, '21'))
+    p.move(48)
+    p.up(48)
+    calls[0].resolve({ ok: true, bar: bar({ id: '21', row: '20', start: '2026-10-13 00:00', end: '2026-10-15 00:00' }) })
+    await tick()
+    assert.equal(c.wire.refreshes.length, 1)
+
+    p = press(c, rowBar(c, '10'), { edge: 'end' })
+    p.move(48)
+    p.up(48)
+    calls[1].resolve({ ok: true, bar: bar({ id: '10', row: '10', parent: true, start: '2026-10-05 00:00', end: '2026-10-22 00:00' }) })
+    await tick()
+    assert.equal(c.wire.refreshes.length, 1)
+})

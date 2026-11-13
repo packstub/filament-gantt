@@ -12,11 +12,17 @@ class ParentGantt extends TaskGantt
 
     public static bool $together = true;
 
+    public static bool $inside = false;
+
+    public static bool $write = false;
+
     public function gantt(Gantt $gantt): Gantt
     {
         return parent::gantt($gantt)
             ->rowBy('parent')
             ->parentSpan(static::$span)
-            ->moveChildrenWithParent(static::$together);
+            ->moveChildrenWithParent(static::$together)
+            ->keepInsideParent(fn () => static::$inside)
+            ->writeSpanToParent(static::$write);
     }
 }

@@ -949,6 +949,45 @@ export default function packstubGantt(config) {
             })
         },
 
+        /**
+         * keepInsideParent(): the dates of its parent a child has to stay within, as
+         * walls ({ left, right } in ms): only while the parent's span is on the chart and
+         * holds the bar now; null otherwise (the server decides).
+         */
+        parentWalls(bar) {
+            if (! config.keepInsideParent || bar.parent || ! bar.row) return null
+            const parent = this.bars.find((b) => b.parent && String(b.id) === String(bar.row))
+            if (! parent) return null
+            const left = parse(parent.start)
+            const right = parent.milestone ? left : parse(parent.end)
+            return bar.s >= left && bar.e <= right ? { left, right } : null
+        },
+
+        /** A bar's walls: the next piece of its line or bar of its row (`base`), and its parent's dates, the nearer of each. */
+        wallsFor(bar, base) {
+            const inside = this.parentWalls(bar)
+            if (! inside) return base
+            return { left: Math.max(base?.left ?? -Infinity, inside.left), right: Math.min(base?.right ?? Infinity, inside.right) }
+        },
+
+        /**
+         * keepInsideParent(): what a parent's span has to keep holding when it is resized
+         * or moved alone: its children on the chart, first start to last end ({ s, e } in
+         * ms); null without any, or when one is outside already (the server decides).
+         */
+        childHold(bar) {
+            if (! config.keepInsideParent || ! bar.parent) return null
+            let s = Infinity
+            let e = -Infinity
+            for (const b of this.bars) {
+                if (b.parent || String(b.row ?? '') !== String(bar.id)) continue
+                const from = parse(b.start)
+                s = Math.min(s, from)
+                e = Math.max(e, b.milestone ? from : parse(b.end))
+            }
+            return s !== Infinity && bar.s <= s && bar.e >= e ? { s, e } : null
+        },
+
         /** A row's name (rowBy()), for the hints; the unassigned row's for no row. */
         rowLabel(key) {
             if (! key) return config.unassignedLabel ?? this.t.unassigned ?? ''
@@ -1451,7 +1490,9 @@ export default function packstubGantt(config) {
                 mates: line ? this.matesOf(bar) : kids.map((b) => ({ id: b.id, s: b.s, e: b.e })), shift: 0,
                 // preventLineOverlap(): a piece moved or resized alone stops at the next piece of its line;
                 // preventRowOverlap(): a bar at the next bar of its row.
-                walls: config.preventLineOverlap && entry && ! together ? this.walls(entry, bar) : this.rowWalls(bar),
+                // keepInsideParent(): a child inside its parent's dates, a parent (alone) around its children.
+                walls: this.wallsFor(bar, config.preventLineOverlap && entry && ! together ? this.walls(entry, bar) : this.rowWalls(bar)),
+                hold: family ? null : this.childHold(bar),
             }
             // From here on the reactive copy: it is what this.pointer returns (an
             // identity check against the plain object would never match), and a
@@ -1540,12 +1581,15 @@ export default function packstubGantt(config) {
 
             if (p.edge === 'start') {
                 bar.s = Math.max(Math.min(p.s + delta, p.e - min), p.e - max, walls?.left ?? -Infinity)
+                if (p.hold) bar.s = Math.min(bar.s, p.hold.s)
                 bar.e = p.e
             } else if (p.edge === 'end') {
                 bar.s = p.s
                 bar.e = Math.min(Math.max(p.e + delta, p.s + min), p.s + max, walls?.right ?? Infinity)
+                if (p.hold) bar.e = Math.max(bar.e, p.hold.e)
             } else {
                 if (walls) delta = Math.min(Math.max(delta, walls.left - p.s), walls.right - p.e)
+                if (p.hold) delta = Math.min(Math.max(delta, p.hold.e - p.e), p.hold.s - p.s)
                 bar.s = p.s + delta
                 bar.e = p.e + delta
             }
@@ -1740,7 +1784,8 @@ export default function packstubGantt(config) {
                 mates: key ? this.matesOf(bar) : kids.map((b) => ({ id: b.id, s: b.s, e: b.e })),
                 // Where every piece was, for Escape and a refusal.
                 groups0: key ? new Map(this.bars.filter((b) => String(b.line) === key).map((b) => [b.id, b.group])) : null,
-                walls: config.preventLineOverlap && entry && ! together ? this.walls(entry, bar) : this.rowWalls(bar),
+                walls: this.wallsFor(bar, config.preventLineOverlap && entry && ! together ? this.walls(entry, bar) : this.rowWalls(bar)),
+                hold: family ? null : this.childHold(bar),
             }
             const k = this.keyboard
 
@@ -1779,10 +1824,13 @@ export default function packstubGantt(config) {
 
                 if (edge === 'end') {
                     k.e = Math.min(Math.max(k.e + d, k.s + min), k.s + max, walls?.right ?? Infinity)
+                    if (k.hold) k.e = Math.max(k.e, k.hold.e)
                 } else if (edge === 'start') {
                     k.s = Math.max(Math.min(k.s + d, k.e - min), k.e - max, walls?.left ?? -Infinity)
+                    if (k.hold) k.s = Math.min(k.s, k.hold.s)
                 } else {
-                    const step = walls ? Math.min(Math.max(d, walls.left - k.s), walls.right - k.e) : d
+                    let step = walls ? Math.min(Math.max(d, walls.left - k.s), walls.right - k.e) : d
+                    if (k.hold) step = Math.min(Math.max(step, k.hold.e - k.e), k.hold.s - k.s)
                     k.s += step
                     k.e += step
                 }
@@ -1913,9 +1961,10 @@ export default function packstubGantt(config) {
                 .catch(() => undo(this.t.offline))
                 .finally(() => {
                     this.pending--
-                    // ParentSpan::FromChildren: a child that moved changes its parent's span (both, when it
-                    // changed rows), which only the server computes. Quietly, once nothing is in the air.
-                    if (moved && config.parentSpan === 'children') this.refresh(true)
+                    // ParentSpan::FromChildren, or writeSpanToParent(): a child that moved changes its
+                    // parent's span (both, when it changed rows), which only the server knows. Quietly,
+                    // once nothing is in the air.
+                    if (moved && ! src.parent && (config.parentSpan === 'children' || config.writeSpanToParent)) this.refresh(true)
                 })
         },
 

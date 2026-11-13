@@ -122,6 +122,10 @@ class Gantt
 
     protected bool $moveChildrenWithParent = true;
 
+    protected bool|Closure $keepInsideParent = false;
+
+    protected bool $writeSpanToParent = false;
+
     /** @var array<string, Model> the parents without a parent of their own met while the rows were read, by key */
     protected array $parentModels = [];
 
@@ -481,6 +485,34 @@ class Gantt
     public function moveChildrenWithParent(bool $condition = true): static
     {
         $this->moveChildrenWithParent = $condition;
+
+        return $this;
+    }
+
+    /**
+     * Keep the children inside their parent's own dates (ParentSpan::Own): a child
+     * cannot be moved, resized, created or edited to before its parent starts or after
+     * it ends, nor carried to a parent whose dates do not hold it, and a parent cannot
+     * be shrunk or moved alone past one of its children. The browser stops the drag;
+     * the server refuses in move() and in the create and edit actions. A parent
+     * without dates holds anything, and moving a parent with its children is always fine.
+     */
+    public function keepInsideParent(bool|Closure $condition = true): static
+    {
+        $this->keepInsideParent = $condition;
+
+        return $this;
+    }
+
+    /**
+     * Write a parent's start and end from its children, earliest start to latest end,
+     * whenever a child is moved, created, edited or deleted from the chart, in the
+     * same transaction as a move: the parent's own columns then always say what its
+     * children span. A parent left without dated children keeps the dates it had.
+     */
+    public function writeSpanToParent(bool $condition = true): static
+    {
+        $this->writeSpanToParent = $condition;
 
         return $this;
     }
@@ -1095,6 +1127,19 @@ class Gantt
     public function movesChildrenWithParent(): bool
     {
         return $this->moveChildrenWithParent;
+    }
+
+    /** Whether the children stay inside their parent's dates (see keepInsideParent()): only where the parent draws its own. */
+    public function keepsInsideParent(): bool
+    {
+        return $this->hasParentRows()
+            && $this->parentSpan === ParentSpan::Own
+            && (bool) ($this->keepInsideParent instanceof Closure ? app()->call($this->keepInsideParent) : $this->keepInsideParent);
+    }
+
+    public function writesSpanToParent(): bool
+    {
+        return $this->writeSpanToParent && $this->hasParentRows();
     }
 
     /**
@@ -2662,6 +2707,11 @@ class Gantt
             }
         }
 
+        // keepInsideParent(): a child inside its parent's dates, a parent around its children.
+        if (! $together && ($startChanged || $endChanged || $rowChange) && $this->keepsInsideParent() && ($reason = $this->leavesParent($record, $newRow, $newStart, $newEnd)) !== null) {
+            throw new MoveRejected($reason);
+        }
+
         // A piece moving with its whole line keeps its place among the others.
         if (! $together && ($startChanged || $endChanged) && $this->preventsLineOverlap() && $this->overlapsLine($record, $newStart, $newEnd)) {
             throw new MoveRejected(__('packstub-gantt::gantt.overlaps'));
@@ -2686,7 +2736,7 @@ class Gantt
             $this->verdict(($this->canMove)($record, $start, $end, $from, $until, $newGroup, $previousGroup, $newRow, $previousRow));
         }
 
-        return compact('record', 'newStart', 'newEnd', 'milestone', 'previousStart', 'start', 'end', 'from', 'until', 'regroup', 'newGroup', 'previousGroup', 'rowChange', 'newRow', 'previousRow');
+        return compact('record', 'newStart', 'newEnd', 'milestone', 'previousStart', 'start', 'end', 'from', 'until', 'regroup', 'newGroup', 'previousGroup', 'rowChange', 'newRow', 'previousRow', 'together');
     }
 
     /**
@@ -2716,6 +2766,12 @@ class Gantt
         }
 
         unset($this->records[(string) $record->getKey()]);
+
+        // writeSpanToParent(): the parent it left and the one it is under now. Moving
+        // with its parent, the parent moved by the same amount already.
+        if (! $plan['together']) {
+            $this->writeParentSpans($previousRow, $newRow);
+        }
 
         $fresh = $this->baseQuery()->whereKey($record->getKey())->first() ?? $record->fresh() ?? $record;
 
@@ -2758,6 +2814,81 @@ class Gantt
         }
 
         return false;
+    }
+
+    /**
+     * Why a record's dates do not fit keepInsideParent(), or null when they do: a
+     * saved record as it is, or a new or edited one with the form's values filled in
+     * (its parent is read from it too). For the create and edit actions, and an app's own forms.
+     */
+    public function outsideParent(Model $record): ?string
+    {
+        if (! $this->keepsInsideParent() || ($span = $this->span($record)) === null) {
+            return null;
+        }
+
+        return $this->leavesParent($record, $this->rowKey($record), $span[0], $span[1]);
+    }
+
+    /**
+     * keepInsideParent(): the reason [start, end) does not fit, or null. Under a parent
+     * (`$row`), it has to lie within the parent's own dates, when the chart's query
+     * shows that parent and it has dates; a parent itself has to hold every child.
+     */
+    protected function leavesParent(Model $record, ?string $row, CarbonImmutable $start, CarbonImmutable $end): ?string
+    {
+        if ($row !== null) {
+            $parent = $this->findRecord($row);
+            $span = $parent === null || ! $this->isParentRecord($parent) ? null : $this->span($parent);
+
+            return $span !== null && ($start < $span[0] || $end > $span[1]) ? __('packstub-gantt::gantt.outside_parent') : null;
+        }
+
+        if (! $record->exists) {
+            return null;
+        }
+
+        $children = $this->childSpans([$record->getKey()])[(string) $record->getKey()] ?? null;
+
+        return $children !== null && ($start > $children[0] || $end < $children[1]) ? __('packstub-gantt::gantt.children_outside') : null;
+    }
+
+    /**
+     * writeSpanToParent(): write each parent's start and end from its children (see
+     * childSpans()). Parents the chart's query does not show, and those without dated
+     * children, are left as they are. For the chart's actions, and an app's own saves.
+     *
+     * @internal
+     */
+    public function writeParentSpans(?string ...$parents): void
+    {
+        if (! $this->writesSpanToParent()) {
+            return;
+        }
+
+        $keys = array_values(array_unique(array_filter($parents, fn (?string $key) => $key !== null && $key !== '' && $this->keyShaped($key))));
+
+        if ($keys === []) {
+            return;
+        }
+
+        $spans = $this->childSpans($keys);
+
+        foreach ($this->baseQuery()->whereKey(array_keys($spans))->get() as $parent) {
+            [$start, $end] = $spans[(string) $parent->getKey()];
+            $dateOnly = $this->isDateOnly($parent) || ($parent->getAttribute($this->startAttribute) === null && $this->isDateOnly($this->newModel()));
+            $format = fn (CarbonImmutable $moment) => $dateOnly ? $moment->toDateString() : $moment->format('Y-m-d H:i:s');
+
+            // A date-only end is written as its last day; a lone milestone child ends where it starts.
+            $parent->setAttribute($this->startAttribute, $format($start));
+            $parent->setAttribute($this->endAttribute, $format($dateOnly && $end > $start ? $end->subDay() : $end));
+
+            if ($parent->isDirty()) {
+                $parent->save();
+            }
+
+            unset($this->records[(string) $parent->getKey()]);
+        }
     }
 
     /**

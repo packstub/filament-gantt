@@ -52,6 +52,8 @@ return [
     'row_overlaps' => 'Das würde sich mit einem anderen Balken in derselben Reihe überschneiden.',
     'line_part' => ':label in derselben Zeile: :reason',
     'child_part' => ':label unter diesem übergeordneten Balken: :reason',
+    'outside_parent' => 'Das würde die Daten des übergeordneten Balkens verlassen.',
+    'children_outside' => 'Ein Balken darunter läge dann außerhalb dieser Daten.',
     'offline' => 'Server nicht erreichbar. Der Balken ist wieder an seinem Platz.',
     'days' => '{1} :count Tag|[2,*] :count Tage',
     'hours' => '{1} :count Stunde|[2,*] :count Stunden',

@@ -54,6 +54,8 @@ return [
     'row_overlaps' => 'Это наложится на другую полосу в том же ряду.',
     'line_part' => ':label (та же строка): :reason',
     'child_part' => ':label (под этим родителем): :reason',
+    'outside_parent' => 'Это выйдет за даты родителя.',
+    'children_outside' => 'Полоса под этим родителем окажется вне его дат.',
     'offline' => 'Сервер недоступен. Полоса вернулась на место.',
     'days' => ':count день|:count дня|:count дней',
     'hours' => ':count час|:count часа|:count часов',

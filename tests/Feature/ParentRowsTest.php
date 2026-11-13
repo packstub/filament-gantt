@@ -25,6 +25,8 @@ beforeEach(function () {
     TaskGantt::$bar = null;
     ParentGantt::$span = ParentSpan::Own;
     ParentGantt::$together = true;
+    ParentGantt::$inside = false;
+    ParentGantt::$write = false;
 });
 
 afterEach(fn () => CarbonImmutable::setTestNow());
@@ -534,4 +536,181 @@ it('takes a span\'s move through Livewire, and tells the hook about every record
         ->and(array_column(TaskGantt::$moved, 0))->toBe([$launch->id, $design->id])
         ->and(Livewire::test(ParentGantt::class)->instance()->ganttMoveParent(['x'], '2026-10-07'))->toBe(['ok' => false, 'message' => 'The change did not go through.'])
         ->and(Livewire::test(ParentGantt::class)->instance()->ganttMoveParent((string) $design->id, '2026-10-07')['ok'])->toBeFalse();
+});
+
+/* ------------------------------------------------------------------ keepInsideParent() */
+
+const OUTSIDE_PARENT = 'This would leave the dates of its parent.';
+const CHILDREN_OUTSIDE = 'A bar under this parent would be left outside its dates.';
+
+it('keeps a child inside its parent\'s dates with keepInsideParent(): moved, resized or carried to another parent', function () {
+    $launch = task('Launch', '2026-10-05', '2026-10-20');
+    $short = task('Short', '2026-10-05', '2026-10-06');
+    $ideas = task('Ideas');
+    $design = child($launch, 'Design', '2026-10-05', '2026-10-07');
+
+    $gantt = fn () => parentsGantt()->keepInsideParent();
+
+    expect(parentRefusal(fn () => $gantt()->move((string) $design->id, '2026-10-04')))->toBe(OUTSIDE_PARENT)
+        ->and(parentRefusal(fn () => $gantt()->move((string) $design->id, '2026-10-19')))->toBe(OUTSIDE_PARENT)
+        ->and(parentRefusal(fn () => $gantt()->move((string) $design->id, '2026-10-05', '2026-10-22')))->toBe(OUTSIDE_PARENT)
+        // Short ends before Design does
+        ->and(parentRefusal(fn () => $gantt()->move((string) $design->id, '2026-10-05', null, row: (string) $short->id)))->toBe(OUTSIDE_PARENT)
+        // up to the parent's last day is inside
+        ->and($gantt()->move((string) $design->id, '2026-10-18')['end'])->toBe('2026-10-21 00:00')
+        // a parent without dates holds anything
+        ->and($gantt()->move((string) $design->id, '2026-12-01', null, row: (string) $ideas->id)['row'])->toBe((string) $ideas->id)
+        // and without the setting nothing is kept
+        ->and(parentsGantt()->move((string) $design->id, '2026-10-01', null, row: (string) $launch->id)['start'])->toBe('2026-10-01 00:00');
+});
+
+it('never shrinks or moves a parent alone past one of its children, and moves them together freely', function () {
+    $launch = task('Launch', '2026-10-05', '2026-10-20');
+    $design = child($launch, 'Design', '2026-10-07', '2026-10-09');
+    child($launch, 'Later', '2026-10-15', '2026-10-18');
+
+    $gantt = fn () => parentsGantt()->keepInsideParent();
+
+    expect(parentRefusal(fn () => $gantt()->move((string) $launch->id, '2026-10-08', '2026-10-21')))->toBe(CHILDREN_OUTSIDE)
+        ->and(parentRefusal(fn () => $gantt()->move((string) $launch->id, '2026-10-05', '2026-10-18')))->toBe(CHILDREN_OUTSIDE)
+        // moved alone, by a day too many
+        ->and(parentRefusal(fn () => $gantt()->move((string) $launch->id, '2026-10-08')))->toBe(CHILDREN_OUTSIDE)
+        // around its children is fine
+        ->and($gantt()->move((string) $launch->id, '2026-10-07', '2026-10-19'))->toMatchArray(['start' => '2026-10-07 00:00', 'end' => '2026-10-19 00:00']);
+
+    $gantt()->moveParent((string) $launch->id, '2026-11-02');
+
+    expect($design->fresh()->starts_on->toDateString())->toBe('2026-11-02')
+        ->and($launch->fresh()->starts_on->toDateString())->toBe('2026-11-02');
+});
+
+it('keeps children inside only where the parent draws its own dates, and tells the browser', function () {
+    $launch = task('Launch', '2026-10-05', '2026-10-20');
+    $design = child($launch, 'Design', '2026-10-05', '2026-10-07');
+    $outside = new Task(['title' => 'New', 'parent_id' => $launch->id, 'starts_on' => '2026-10-19', 'ends_on' => '2026-10-22']);
+    $inside = new Task(['title' => 'New', 'parent_id' => $launch->id, 'starts_on' => '2026-10-19', 'ends_on' => '2026-10-20']);
+
+    expect(parentsGantt()->keepInsideParent()->keepsInsideParent())->toBeTrue()
+        ->and(parentsGantt()->keepInsideParent(fn () => false)->keepsInsideParent())->toBeFalse()
+        ->and(parentsGantt()->keepInsideParent()->parentSpan(ParentSpan::FromChildren)->keepsInsideParent())->toBeFalse()
+        ->and(gantt()->keepInsideParent()->keepsInsideParent())->toBeFalse()
+        ->and(parentsGantt()->keepInsideParent()->parentSpan(ParentSpan::None)->move((string) $design->id, '2026-10-01')['start'])->toBe('2026-10-01 00:00')
+        // for an app's own forms
+        ->and(parentsGantt()->keepInsideParent()->outsideParent($outside))->toBe(OUTSIDE_PARENT)
+        ->and(parentsGantt()->keepInsideParent()->outsideParent($inside))->toBeNull()
+        ->and(parentsGantt()->outsideParent($outside))->toBeNull();
+
+    ParentGantt::$inside = true;
+    ParentGantt::$write = true;
+
+    expect(Livewire::test(ParentGantt::class)->instance()->getGanttConfig())->toMatchArray(['keepInsideParent' => true, 'writeSpanToParent' => true])
+        ->and(Livewire::test(TaskGantt::class)->instance()->getGanttConfig())->toMatchArray(['keepInsideParent' => false, 'writeSpanToParent' => false]);
+});
+
+it('keeps the create and edit forms open while a child would leave its parent\'s dates, or a parent its children', function () {
+    ParentGantt::$inside = true;
+    $launch = task('Launch', '2026-10-05', '2026-10-20');
+    $design = child($launch, 'Design', '2026-10-07', '2026-10-09');
+
+    Livewire::test(ParentGantt::class)
+        ->mountAction('create', ['ganttStart' => '2026-10-19 00:00', 'ganttEnd' => '2026-10-23 00:00', 'ganttRow' => (string) $launch->id])
+        ->set('mountedActions.0.data.title', 'Too long')
+        ->callMountedAction()
+        ->assertNotified(OUTSIDE_PARENT)
+        ->set('mountedActions.0.data.ends_on', '2026-10-20')
+        ->callMountedAction()
+        ->assertHasNoErrors();
+
+    Livewire::test(ParentGantt::class)
+        ->mountAction('edit', ['ganttRecord' => (string) $design->id])
+        ->set('mountedActions.0.data.starts_on', '2026-10-01')
+        ->callMountedAction()
+        ->assertNotified(OUTSIDE_PARENT);
+
+    Livewire::test(ParentGantt::class)
+        ->mountAction('edit', ['ganttRecord' => (string) $launch->id])
+        ->set('mountedActions.0.data.starts_on', '2026-10-08')
+        ->callMountedAction()
+        ->assertNotified(CHILDREN_OUTSIDE);
+
+    expect(Task::where('title', 'Too long')->sole()->ends_on->toDateString())->toBe('2026-10-20')
+        ->and($design->fresh()->starts_on->toDateString())->toBe('2026-10-07')
+        ->and($launch->fresh()->starts_on->toDateString())->toBe('2026-10-05');
+});
+
+/* ------------------------------------------------------------------ writeSpanToParent() */
+
+it('writes a parent\'s dates from its children when a child moves, with the move', function () {
+    $launch = task('Launch', '2026-10-01', '2026-10-30');
+    $ideas = task('Ideas');
+    $design = child($launch, 'Design', '2026-10-05', '2026-10-07');
+    $build = child($launch, 'Build', '2026-10-08', '2026-10-12');
+
+    $gantt = fn () => parentsGantt()->writeSpanToParent();
+    $dates = fn (Task $task) => [$task->fresh()->starts_on?->toDateString(), $task->fresh()->ends_on?->toDateString()];
+
+    $gantt()->move((string) $build->id, '2026-10-10');
+    expect($dates($launch))->toBe(['2026-10-05', '2026-10-14']);
+
+    // carried to another parent: both are written, the one without dates gets its first
+    $gantt()->move((string) $build->id, '2026-10-20', null, row: (string) $ideas->id);
+    expect($dates($launch))->toBe(['2026-10-05', '2026-10-07'])
+        ->and($dates($ideas))->toBe(['2026-10-20', '2026-10-24']);
+
+    // a parent left without children keeps the dates it had
+    $gantt()->move((string) $build->id, '2026-10-20', null, row: (string) $launch->id);
+    expect($dates($ideas))->toBe(['2026-10-20', '2026-10-24'])
+        ->and($dates($launch))->toBe(['2026-10-05', '2026-10-24'])
+        // and nothing is written without the setting
+        ->and(parentsGantt()->move((string) $design->id, '2026-09-01')['start'])->toBe('2026-09-01 00:00')
+        ->and($dates($launch))->toBe(['2026-10-05', '2026-10-24']);
+});
+
+it('undoes the parent\'s dates with the move when afterMove() fails', function () {
+    $launch = task('Launch', '2026-10-01', '2026-10-30');
+    $design = child($launch, 'Design', '2026-10-05', '2026-10-07');
+
+    $gantt = parentsGantt()->writeSpanToParent()->afterMove(fn () => throw new MoveRejected('No.'));
+
+    expect(parentRefusal(fn () => $gantt->move((string) $design->id, '2026-10-10')))->toBe('No.')
+        ->and($launch->fresh()->starts_on->toDateString())->toBe('2026-10-01')
+        ->and($design->fresh()->starts_on->toDateString())->toBe('2026-10-05');
+});
+
+it('writes datetimes as they are, and a lone milestone child as a point', function () {
+    $night = shift('Night');
+    $first = shift('First', '2026-10-14 09:00', '2026-10-14 11:00', ['parent_id' => $night->id]);
+    shift('Second', '2026-10-14 13:30', '2026-10-14 15:00', ['parent_id' => $night->id]);
+
+    shifts()->groupBy(null)->rowBy('parent')->writeSpanToParent()->move((string) $first->id, '2026-10-14 08:00');
+
+    expect($night->fresh()->starts_at->format('Y-m-d H:i'))->toBe('2026-10-14 08:00')
+        ->and($night->fresh()->ends_at->format('Y-m-d H:i'))->toBe('2026-10-14 15:00');
+});
+
+it('writes the parent\'s dates after the chart\'s create, edit and delete actions', function () {
+    ParentGantt::$write = true;
+    $launch = task('Launch', '2026-10-01', '2026-10-30');
+    $design = child($launch, 'Design', '2026-10-05', '2026-10-07');
+    $dates = fn () => [$launch->fresh()->starts_on->toDateString(), $launch->fresh()->ends_on->toDateString()];
+
+    Livewire::test(ParentGantt::class)
+        ->mountAction('create', ['ganttStart' => '2026-10-12 00:00', 'ganttEnd' => '2026-10-15 00:00', 'ganttRow' => (string) $launch->id])
+        ->set('mountedActions.0.data.title', 'Build')
+        ->callMountedAction()
+        ->assertHasNoErrors();
+
+    expect($dates())->toBe(['2026-10-05', '2026-10-14']);
+
+    Livewire::test(ParentGantt::class)
+        ->mountAction('edit', ['ganttRecord' => (string) $design->id])
+        ->set('mountedActions.0.data.starts_on', '2026-10-03')
+        ->callMountedAction()
+        ->assertHasNoErrors();
+
+    expect($dates())->toBe(['2026-10-03', '2026-10-14']);
+
+    Livewire::test(ParentGantt::class)->callAction('delete', arguments: ['ganttRecord' => (string) $design->id]);
+
+    expect($dates())->toBe(['2026-10-12', '2026-10-14']);
 });
