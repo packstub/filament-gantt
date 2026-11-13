@@ -144,8 +144,9 @@ trait GanttActions
 
     /**
      * With preventLineOverlap() or preventRowOverlap(), a form whose dates (or line, or
-     * row) would overlap another piece of the line or another bar of the row is not
-     * saved: the modal stays open with the user's input, and a notification says why.
+     * row) would overlap another piece of the line or another bar of the row, and with
+     * keepInsideParent() one whose dates leave its parent's (or a parent's that leave a
+     * child out), is not saved: the modal stays open with the user's input, and a notification says why.
      * The form's values for the dates, the line and the row are laid over the record
      * being edited, or over a new one.
      *
@@ -156,8 +157,9 @@ trait GanttActions
         $gantt = $this->getGantt();
         $lines = $gantt->preventsLineOverlap();
         $rows = $gantt->preventsRowOverlap();
+        $inside = $gantt->keepsInsideParent();
 
-        if (! $lines && ! $rows) {
+        if (! $lines && ! $rows && ! $inside) {
             return;
         }
 
@@ -174,6 +176,8 @@ trait GanttActions
         $message = match (true) {
             $lines && $gantt->overlapsOnLine($model) => __('packstub-gantt::gantt.overlaps'),
             $rows && $gantt->overlapsOnRow($model) => __('packstub-gantt::gantt.row_overlaps'),
+            // keepInsideParent(): a child inside its parent's dates, a parent around its children.
+            $inside => $gantt->outsideParent($model),
             default => null,
         };
 
@@ -184,13 +188,32 @@ trait GanttActions
         }
     }
 
-    /** Once the action has run, the browser reloads the chart (keeping its window and filters). */
+    /**
+     * Once the action has run, the browser reloads the chart (keeping its window and
+     * filters). With writeSpanToParent(), the parent the record was under before the
+     * action and the one it is under after it get their dates from their children.
+     */
     protected function ganttRefreshAfter(Action $action): void
     {
+        $before = static::ganttProperty($action, 'before');
         $after = static::ganttProperty($action, 'after');
+        $parent = null;
 
-        $action->after(function () use ($action, $after) {
+        $action->before(function () use ($action, $before, &$parent) {
+            $record = $this->getGantt()->writesSpanToParent() ? $action->getRecord() : null;
+            $parent = $record instanceof Model ? $this->getGantt()->rowKey($record) : null;
+
+            return $before ? $action->evaluate($before) : null;
+        });
+
+        $action->after(function () use ($action, $after, &$parent) {
             $result = $after ? $action->evaluate($after) : null;
+            $gantt = $this->getGantt();
+
+            if ($gantt->writesSpanToParent()) {
+                $record = $action->getRecord();
+                $gantt->writeParentSpans($parent, $record instanceof Model ? $gantt->rowKey($record) : null);
+            }
 
             $this->dispatch('packstub-gantt-refresh');
 

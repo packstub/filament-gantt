@@ -95,6 +95,12 @@ and the Pest suite again on MySQL 8.4 and PostgreSQL 17 (the `databases` job): S
   the children as `mates` (`p.family` / `k.family`) and ends in `commitFamily()`; `rowWalls()` / `rowTaken()` skip
   `bar.parent`; a click on the span is `createUnder()` when the chart creates; a row's `actions` (the parent's) are
   on its name (`rowRecord()`, `openRow()`, `rowMenu()`); after a child's move in `children` mode, `refresh(true)`.
+- Parent rules (issue #41 step 4): `keepInsideParent()` (only with Own: `keepsInsideParent()`) is `leavesParent()` in
+  `planMove()` (skipped for `together`) and `outsideParent()` in the actions' `ganttGuardOverlap()`; in the browser
+  `wallsFor()` adds `parentWalls()` to a child's walls and `childHold()` (`p.hold` / `k.hold`) stops a parent's edge
+  or lone move at its children. `writeSpanToParent()`: `applyMove()` calls `writeParentSpans(previousRow, newRow)`
+  inside the move's transaction (not for `together`), the actions' `before`/`after` hooks (`ganttRefreshAfter()`)
+  do the same around create, edit and delete; the browser reloads after a child's move (`refresh(true)`).
 - Rows (`rowBy()`, issue #41 step 1): a column or a `BelongsTo`;
   `hasRows()` throws with `compact()` or `lineBy()`. `presentBar()` adds `row` ('' for none), `getState()` adds `rows`
   (`rows()` first with `listed: true`, then those met on bars with `listed: false`). In `layout()` a group holds its

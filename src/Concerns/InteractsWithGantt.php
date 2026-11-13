@@ -334,6 +334,9 @@ trait InteractsWithGantt
             // Parent tasks as rows: what a parent draws behind its children ('own', 'children', 'none'), and whether dragging it takes them along.
             'parentSpan' => $gantt->hasParentRows() ? $gantt->getParentSpan()->value : null,
             'moveChildren' => $gantt->hasParentRows() && $gantt->movesChildrenWithParent(),
+            // keepInsideParent(): a drag stops at the parent's dates; writeSpanToParent(): a child's move changes its parent's span.
+            'keepInsideParent' => $gantt->keepsInsideParent(),
+            'writeSpanToParent' => $gantt->writesSpanToParent(),
             'scale' => $gantt->getScale()->value,
             'unit' => $gantt->getUnit()->value,
             'minMinutes' => $gantt->getMinMinutes(),
