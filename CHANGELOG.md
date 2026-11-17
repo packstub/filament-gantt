@@ -4,6 +4,8 @@ All notable changes to `packstub/filament-gantt` are documented in this file.
 
 ## Unreleased
 
+- `composer.json`'s homepage points at the package's page on packstub.dev
+
 ## 1.0.0-beta.3 - 2026-11-13
 
 Run `php artisan filament:assets` after updating. Rows that hold several bars, parent tasks and split tasks: the chart now draws schedules as well as task lists.
