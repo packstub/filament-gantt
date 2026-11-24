@@ -112,6 +112,24 @@ test('pack(): touching bars share a lane, overlapping ones do not', () => {
     const packed = [{ x: 0, w: 10 }, { x: 12, w: 10 }, { x: 5, w: 10 }, { x: 40, w: 0, milestone: true }]
     assert.equal(pack(packed), 2)
     assert.deepEqual(packed.map((b) => b.lane), [0, 0, 1, 0])
+
+    // end to start, no room between them: still one lane
+    const touching = [{ x: 0, w: 10 }, { x: 10, w: 10 }, { x: 20, w: 5 }]
+    assert.equal(pack(touching), 1)
+    assert.deepEqual(touching.map((b) => b.lane), [0, 0, 0])
+})
+
+test('compact: back-to-back shifts stay on one lane at every scale', () => {
+    const shifts = [
+        { id: '1', group: '1', label: 'Early', start: '2026-10-05 06:00', end: '2026-10-05 14:00', color: null, milestone: false },
+        { id: '2', group: '1', label: 'Late', start: '2026-10-05 14:00', end: '2026-10-05 22:00', color: null, milestone: false },
+        { id: '3', group: '1', label: 'Night', start: '2026-10-05 22:00', end: '2026-10-06 06:00', color: null, milestone: false },
+    ]
+    for (const scale of ['hour', 'day', 'week', 'month']) {
+        const v = layout(shifts.map((b) => ({ ...b })), { ...window, compact: true }, scale)
+        assert.equal(v.rows[0].height, 36, scale)
+        assert.deepEqual(v.rows[0].bars.map((b) => b.lane), [0, 0, 0], scale)
+    }
 })
 
 test('edge windows: today outside, a single day, a leap February', () => {

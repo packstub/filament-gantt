@@ -338,7 +338,7 @@ export function layout(bars, window, scale) {
         const out = []
         for (const [line, bucket] of buckets) {
             const entry = window.lines?.get?.(line) ?? null
-            const lanes = bucket.length > 1 ? pack(bucket, 0) : 1
+            const lanes = bucket.length > 1 ? pack(bucket) : 1
             out.push({
                 type: 'bar',
                 key: bucket.length > 1 || entry ? 'l:' + group.key + ':' + line : 'b:' + bucket[0].id,
@@ -381,7 +381,7 @@ export function layout(bars, window, scale) {
 
         const items = []
         for (const unit of units) {
-            if (unit.length > 1 && pack(unit, 0) === 1) {
+            if (unit.length > 1 && pack(unit) === 1) {
                 const from = Math.min(...unit.map((b) => b.x))
                 items.push({ x: from, w: Math.max(...unit.map((b) => b.x + b.w)) - from, milestone: false, unit })
             } else {
@@ -536,10 +536,11 @@ export function arrows(view, carried = null) {
 
 /**
  * Stack overlapping bars into lanes (greedy, by start); sets bar.lane and returns the
- * lane count. `gap` is the room kept between two bars of a lane: a line's pieces
- * (lineBy()) that touch end to start are one stretch of work, and share their lane.
+ * lane count. Ranges are half-open, so bars that touch end to start (back-to-back
+ * shifts, a line's pieces) do not overlap and share their lane: each bar's solid start
+ * edge marks where the next one begins.
  */
-export function pack(bars, gap = 2) {
+export function pack(bars) {
     const ends = []
 
     for (const bar of [...bars].sort((a, b) => a.x - b.x || a.w - b.w)) {
@@ -550,7 +551,7 @@ export function pack(bars, gap = 2) {
             lane = ends.length
             ends.push(0)
         }
-        ends[lane] = to + gap
+        ends[lane] = to
         bar.lane = lane
     }
 

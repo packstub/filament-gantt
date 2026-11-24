@@ -5,6 +5,7 @@ All notable changes to `packstub/filament-gantt` are documented in this file.
 ## Unreleased
 
 - `composer.json`'s homepage points at the package's page on packstub.dev
+- Fixed: back-to-back bars (a shift ending when the next one starts) share a lane in the compact layout and on rows, instead of stacking as if they overlapped
 
 ## 1.0.0-beta.3 - 2026-11-13
 
