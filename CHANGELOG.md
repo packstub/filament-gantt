@@ -4,8 +4,12 @@ All notable changes to `packstub/filament-gantt` are documented in this file.
 
 ## Unreleased
 
-- `composer.json`'s homepage points at the package's page on packstub.dev
+## 1.0.0 - 2026-11-24
+
+The first stable release of Filament Gantt: everything from the three betas (`1.0.0-beta.1` to `1.0.0-beta.3`), with an API that stays as it is for every 1.x release. Run `php artisan filament:assets` after updating; nothing else changes coming from `1.0.0-beta.3`.
+
 - Fixed: back-to-back bars (a shift ending when the next one starts) share a lane in the compact layout and on rows, instead of stacking as if they overlapped
+- `composer.json`'s homepage points at the package's page on packstub.dev
 
 ## 1.0.0-beta.3 - 2026-11-13
 
