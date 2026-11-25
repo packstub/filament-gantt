@@ -4,7 +4,7 @@ All notable changes to `packstub/filament-gantt` are documented in this file.
 
 ## Unreleased
 
-## 1.0.0 - 2026-11-24
+## 1.0.0 - 2026-11-25
 
 The first stable release of Filament Gantt: everything from the three betas (`1.0.0-beta.1` to `1.0.0-beta.3`), with an API that stays as it is for every 1.x release. Run `php artisan filament:assets` after updating; nothing else changes coming from `1.0.0-beta.3`.
 
