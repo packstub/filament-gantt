@@ -42,7 +42,7 @@ it('names in the README and the docs only publish tags that publish something', 
 it('ships the same strings in every language, with plural forms for the count', function () {
     $en = require __DIR__.'/../../resources/lang/en/gantt.php';
 
-    foreach (['ro', 'ru', 'de'] as $locale) {
+    foreach (['ro', 'ru', 'de', 'fr'] as $locale) {
         $strings = require __DIR__."/../../resources/lang/{$locale}/gantt.php";
 
         expect(array_keys($strings))->toBe(array_keys($en), $locale)
